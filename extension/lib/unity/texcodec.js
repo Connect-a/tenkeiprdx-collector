@@ -1,6 +1,5 @@
 'use strict';
-// Unity Texture2D / 埋め込み画像のフォーマットデコード層（純関数・DOMのcanvas以外に依存なし）。
-// crunch.js(CRN後のDXT展開)・mesh.js(モデルテクスチャ)・visual.js(ギャラリー)が共有。
+// Unity Texture2D / 埋め込み画像のフォーマットデコード層。
 (function () {
   const flipEncodedImageBytesY = async (bytes, mime) => {
     try {
@@ -134,12 +133,9 @@
       for (let bx = 0; bx < bw; bx++, o += 16) {
         const a0 = src[o];
         const a1 = src[o + 1];
-        const alphaBits = BigInt(src[o + 2]) |
-          (BigInt(src[o + 3]) << 8n) |
-          (BigInt(src[o + 4]) << 16n) |
-          (BigInt(src[o + 5]) << 24n) |
-          (BigInt(src[o + 6]) << 32n) |
-          (BigInt(src[o + 7]) << 40n);
+        // 48bitのalphaインデックスを24bit×2に分割(BigInt回避＝最内ループ高速化)。lo=pixel0-7 / hi=pixel8-15。
+        const alphaLo = src[o + 2] | (src[o + 3] << 8) | (src[o + 4] << 16);
+        const alphaHi = src[o + 5] | (src[o + 6] << 8) | (src[o + 7] << 16);
 
         const alpha = new Uint8Array(8);
         alpha[0] = a0;
@@ -173,7 +169,7 @@
             if (x >= width || y >= height) continue;
 
             const p = py * 4 + px;
-            const ai = Number((alphaBits >> BigInt(p * 3)) & 7n);
+            const ai = p < 8 ? ((alphaLo >> (p * 3)) & 7) : ((alphaHi >> ((p - 8) * 3)) & 7);
             const ci = (code >> (p * 2)) & 0x3;
 
             let r = 0, g = 0, b = 0;

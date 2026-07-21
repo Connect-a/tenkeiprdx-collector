@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "天啓パラドクス コレクター",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "天啓パラドクスの非公式リソースダウンロード＆プレイヤーです。",
   "permissions": ["debugger", "storage", "unlimitedStorage", "tabs", "alarms"],
   "host_permissions": [

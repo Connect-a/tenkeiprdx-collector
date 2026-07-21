@@ -31,7 +31,7 @@
   initUnityModule();
 
   function toRGBA(width, height, format, dxtBytes) {
-    const T = globalThis.TP_TEXCODEC; // DXT展開はtexcodecに集約（format: 0=DXT1 / 2=DXT5）
+    const T = globalThis.TP_TEXCODEC; // format: 0=DXT1 / 2=DXT5
     if (format === 0) return T.decodeDXT1(dxtBytes, width, height);
     if (format === 2) return T.decodeDxt5Rgba(dxtBytes, width, height);
     throw new Error('unsupported dxt format: ' + format);
@@ -49,38 +49,12 @@
     return m;
   }
 
-  function detectUnityCrunchSymbol(m) {
-    if (!m) return null;
-    const keys = Object.keys(m);
-    for (const k of keys) {
-      if (typeof m[k] !== 'function') continue;
-      if (/unpack.*unity.*crunch|unity.*crunch.*unpack|unpackunitycrunch/i.test(k)) return k;
-    }
-    return null;
-  }
-
   function capabilities() {
     const m = runtimeModule();
     const um = unityModule;
     const unityViaModule = !!(um && typeof um._tp_unity_get_info === 'function' && typeof um._tp_unity_unpack_level0 === 'function');
-    if (!m) {
-      return {
-        ready: false,
-        classic: false,
-        unityCrunched: unityViaModule,
-        unitySymbol: null,
-        unityRuntimeLoaded: unityViaModule,
-      };
-    }
-    const classic = typeof m._crn_get_width === 'function' && typeof m._crn_decompress === 'function';
-    const unitySymbol = detectUnityCrunchSymbol(m);
-    return {
-      ready: true,
-      classic,
-      unityCrunched: !!unitySymbol || unityViaModule,
-      unitySymbol: unitySymbol || (unityViaModule ? 'tp_unity_unpack_level0' : null),
-      unityRuntimeLoaded: unityViaModule,
-    };
+    const classic = !!(m && typeof m._crn_get_width === 'function' && typeof m._crn_decompress === 'function');
+    return { classic, unityCrunched: unityViaModule, unityRuntimeLoaded: unityViaModule };
   }
 
   function unityMod() {
@@ -205,7 +179,8 @@
   }
 
   globalThis.TP_CRUNCH = {
-    ready: () => !!classicCrnModule(),
+    hasClassic: () => !!classicCrnModule(),
+    canDecodeCrunched: () => (!!classicCrnModule() || supportsUnityCrunched()),
     capabilities,
     supportsUnityCrunched,
     probe,

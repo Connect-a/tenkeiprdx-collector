@@ -1,7 +1,6 @@
 'use strict';
 (function () {
   // Avatar(classID 90) skeleton + Mecanim generic AnimationClip(classID 74) decoder.
-  // Pure (no THREE dependency): returns plain skeleton info + resampled track data.
 
   function parseAvatar(av) {
     const A = av.m_Avatar || {};
@@ -12,12 +11,11 @@
     const tosArr = av.m_TOS || [];
     const tos = new Map(tosArr.map((p) => [Number(p[0]) >>> 0, p[1]]));
     const hashToIndex = new Map(); ids.forEach((h, i) => hashToIndex.set(h, i));
-    // default pose local TRS per node (usually identity for these avatars)
     const dp = A.m_DefaultPose && A.m_DefaultPose.data && A.m_DefaultPose.data.m_X;
-    const defPose = Array.isArray(dp) ? dp.map((x) => xf(x)) : null;
+    const defPose = Array.isArray(dp) ? dp.map((x) => readTransform(x)) : null;
     return { count: ids.length, hashes: ids, parents: nodes.map((n) => n.parent), tos, hashToIndex, defPose, name: av.m_Name };
   }
-  function xf(x) {
+  function readTransform(x) {
     return {
       t: [num(x.t && x.t.x), num(x.t && x.t.y), num(x.t && x.t.z)],
       q: [num(x.q && x.q.x), num(x.q && x.q.y), num(x.q && x.q.z), x.q && x.q.w != null ? Number(x.q.w) : 1],
@@ -26,7 +24,6 @@
   }
   const num = (v) => (v == null ? 0 : Number(v));
 
-  // curve count consumed by one generic binding (Transform attributes)
   function curveSize(b) {
     if (Number(b.typeID) === 4) {
       switch (Number(b.attribute)) {
@@ -48,7 +45,7 @@
     const bindOff = gb.map((b) => { const s = off; const sz = curveSize(b); off += sz; return { start: s, size: sz, attr: Number(b.attribute), path: Number(b.path) >>> 0, typeID: Number(b.typeID) }; });
     const totalCurves = off;
 
-    // --- StreamedClip: uint[] -> frames of {time, keys[{index, coeff[4]}]} ---
+    // StreamedClip: uint[] -> frames of {time, keys[{index, coeff[4]}]}
     const sc = cd.m_StreamedClip || {};
     const streamCount = Number(sc.curveCount || 0);
     const perCurveKeys = Array.from({ length: totalCurves }, () => []);
@@ -71,7 +68,6 @@
       }
     }
 
-    // --- DenseClip ---
     const dc = cd.m_DenseClip || {};
     const denseCount = Number(dc.m_CurveCount || 0);
     const denseFrames = Number(dc.m_FrameCount || 0);
@@ -79,7 +75,6 @@
     const denseBegin = Number(dc.m_BeginTime || 0);
     const denseArr = dc.m_SampleArray || [];
 
-    // --- ConstantClip ---
     const constArr = (cd.m_ConstantClip && cd.m_ConstantClip.data) || [];
 
     const startTime = Number(mc.m_StartTime || 0);
@@ -113,19 +108,17 @@
 
     const duration = Math.max(0, stopTime - startTime);
 
-    // Build resampled per-bone tracks. type: 0=pos,1=rot(quat),2=scale
+    const byPath = new Map();
+    for (const b of bindOff) {
+      if (b.typeID !== 4) continue;
+      let e = byPath.get(b.path); if (!e) { e = { path: b.path }; byPath.set(b.path, e); }
+      if (b.attr === 1) e.pos = b.start; else if (b.attr === 2) e.rot = b.start; else if (b.attr === 3) e.scale = b.start;
+    }
     const buildTracks = (fps) => {
       const rate = fps || sampleRate || 30;
       const frames = Math.max(2, Math.round(duration * rate) + 1);
       const times = new Float32Array(frames);
       for (let i = 0; i < frames; i++) times[i] = (i / (frames - 1)) * duration;
-      // group bindings by path
-      const byPath = new Map();
-      for (const b of bindOff) {
-        if (b.typeID !== 4) continue;
-        let e = byPath.get(b.path); if (!e) { e = { path: b.path }; byPath.set(b.path, e); }
-        if (b.attr === 1) e.pos = b.start; else if (b.attr === 2) e.rot = b.start; else if (b.attr === 3) e.scale = b.start;
-      }
       const tracks = [];
       for (const e of byPath.values()) {
         if (e.pos != null) {
@@ -156,7 +149,33 @@
       return { name, duration, tracks };
     };
 
-    return { name, duration, startTime, stopTime, sampleRate, buildTracks };
+    // ★アニメイベント(m_Events)で顔表情を駆動する(実機FBXController準拠)。クリップ自身が時系列で
+    //   顔を切替える＝「アクションに表情が付属」の実体。ブレンドシェイプ(目/眉)と口オフセットを拾う。
+    //   data文字列: ブレンドシェイプ="<Action>-<blendShape名>-<weight0..100>-<blend秒>"、
+    //   口="<Action>-<口index>"。Action名・blendShape名にハイフンは無い(名前のドットは可)。
+    const rawEv = clipObj.m_Events || [];
+    const events = [];
+    for (const e of rawEv) {
+      const fn = e.functionName != null ? e.functionName : e.m_FunctionName;
+      const data = e.data != null ? e.data : (e.stringParameter != null ? e.stringParameter : e.m_Data);
+      const time = Number(e.time != null ? e.time : e.m_Time) || 0;
+      if (!fn) continue;
+      if (fn === 'FBX_EVENT_ChangeBlendShapeState') {
+        const p = String(data || '').split('-');
+        if (p.length >= 4) events.push({ time, kind: 'blend', target: p[1], weight: Number(p[2]) / 100, dur: Number(p[3]) || 0 });
+      } else if (fn === 'FBX_EVENT_ChangeMouthOffset') {
+        const p = String(data || '').split('-');
+        if (p.length >= 2) { const idx = parseInt(p[p.length - 1], 10); if (isFinite(idx)) events.push({ time, kind: 'mouth', index: idx }); }
+      } else if (fn === 'FBX_EVENT_ShowAttachmentEvent' || fn === 'FBX_EVENT_HideAttachmentEvent') {
+        const p = String(data || '').split('-'); const idx = parseInt(p[p.length - 1], 10);
+        events.push({ time, kind: 'attach', show: fn === 'FBX_EVENT_ShowAttachmentEvent', index: isFinite(idx) ? idx : 0 });
+      } else if (fn === 'FBX_EVENT_ShowWeaponEvent' || fn === 'FBX_EVENT_HideWeaponEvent') {
+        events.push({ time, kind: 'weapon', show: fn === 'FBX_EVENT_ShowWeaponEvent' });
+      }
+    }
+    events.sort((a, b) => a.time - b.time);
+
+    return { name, duration, startTime, stopTime, sampleRate, buildTracks, events };
   }
 
   globalThis.TP_ANIM = { parseAvatar, decodeClipObj };

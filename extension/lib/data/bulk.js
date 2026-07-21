@@ -1,14 +1,14 @@
 'use strict';
-// 一括DLランナー（ページ文脈・状態は chrome.storage.local.bulkState に永続＝再読込でresume）。
-// 2パイプライン並列：A=ストーリー収集(getDetails+scene.bin取得+R2収集・認証API・5s間隔)／B=資産DL(公開CDN・AがそのキャラのAを終えたら順次downloadEntry)。
+
 (function () {
   const COLLECTION = globalThis.TP_COLLECTION;
+  const ACQUIRE = globalThis.TP_ACQUIRE;
   const FS = globalThis.TP_FS;
   const KEY = 'bulkState';
   const FAIL_LIMIT = 5;
-  const B_CONC = 1;
+  const DOWNLOAD_CONCURRENCY = 1;
   const GD_INTERVAL_SEC = 3;
-  const LOG_FLUSH = 10; // 収集ログは10件たまるごとに送る（数百話を最後に一括送信しない）
+  const LOG_FLUSH = 10;
   const DL_INTERVAL_SEC = 300;
 
   const isActive = (phase) => phase === 'running';
@@ -79,13 +79,13 @@
 
   const enqueueB = (id) => { _readyQueue.push(String(id)); wakeAll(); };
 
-  async function pipelineA() {
+  async function storyMetaPipeline() {
     let lastAt = 0;
     for (const it of _state.items) {
       if (_stopReq || !isActiveState() || _state.tokenError) break;
       if (it.gd !== 'pending') continue;
       let plan = null;
-      try { plan = await COLLECTION.planApiEpisodes(it.id); } catch (e) { console.debug('[tp] bulk: planApiEpisodes failed', it.id, e); }
+      try { plan = await ACQUIRE.planApiEpisodes(it.id); } catch (e) { console.debug('[tp] bulk: planApiEpisodes failed', it.id, e); }
       if (!plan) { it.gd = 'done'; enqueueB(it.id); flush(); continue; }
       const eps = plan.episodes || [];
       it.gdNeed = eps.length;
@@ -95,14 +95,14 @@
 
       const charLog = [];
       for (const ep of eps) {
-        if (_stopReq || !isActiveState()) { _aDone = true; if (charLog.length) { try { await COLLECTION.postLog(charLog, it.id); } catch (e) {} } return; }
+        if (_stopReq || !isActiveState()) { _aDone = true; if (charLog.length) { try { await ACQUIRE.postLog(charLog, it.id); } catch (e) {} } return; }
         const wait = lastAt + (_state.gdIntervalSec || 5) * 1000 - Date.now();
         if (wait > 0) { _state.gdStatus = `ストーリーメタ 待機中… ${it.name}`; flush(); await sleepCancelable(wait); }
-        if (_stopReq || !isActiveState()) { _aDone = true; if (charLog.length) { try { await COLLECTION.postLog(charLog, it.id); } catch (e) {} } return; }
+        if (_stopReq || !isActiveState()) { _aDone = true; if (charLog.length) { try { await ACQUIRE.postLog(charLog, it.id); } catch (e) {} } return; }
         lastAt = Date.now();
         _state.gdStatus = `ストーリーメタ 取得中 ${it.name} #${ep.id}`; flush();
         let res = null, threw = null;
-        try { res = await COLLECTION.apiFetchStory(plan.dir, plan.apiType, ep.id, ep.sceneBinIds, ep.subType); }
+        try { res = await ACQUIRE.apiFetchStory(plan.dir, plan.apiType, ep.id, ep.subType); }
         catch (e) { threw = e; }
         if (threw && threw.auth) {
           _state.tokenError = true; _state.lastError = 'トークン切れ（ストーリーメタ取得を停止）';
@@ -112,12 +112,12 @@
         }
         if (res && res.ok) {
           it.gdGot = (it.gdGot || 0) + 1; _state.gd.done++;
-          if (res.log && res.log.length) charLog.push(...res.log);
-          if (charLog.length >= LOG_FLUSH) { try { await COLLECTION.postLog(charLog.splice(0), it.id); } catch (e) {} }
+          if (res.log && res.log.length) { it.gdFetched = (it.gdFetched || 0) + res.log.length; charLog.push(...res.log); }
+          if (charLog.length >= LOG_FLUSH) { try { await ACQUIRE.postLog(charLog.splice(0), it.id); } catch (e) {} }
         } else { it.gdFail = (it.gdFail || 0) + 1; _state.gd.failed++; }
         flush();
       }
-      if (charLog.length) { try { await COLLECTION.postLog(charLog, it.id); } catch (e) {} }
+      if (charLog.length) { try { await ACQUIRE.postLog(charLog, it.id); } catch (e) {} }
       it.gd = it.gdFail ? (it.gdGot ? 'partial' : (eps.length ? 'failed' : 'done')) : 'done';
       if (it.gdFail && !it.gdGot && eps.length) pushFailure(it.name, `ストーリーメタ ${it.gdFail}件失敗`, true);
       enqueueB(it.id);
@@ -130,7 +130,7 @@
     wakeAll();
   }
 
-  async function pipelineBWorker() {
+  async function assetDownloadWorker() {
     for (;;) {
       if (_stopReq || !isActiveState()) return;
       if (!_readyQueue.length) { if (_aDone) return; await sleepCancelable(250); continue; }
@@ -141,7 +141,7 @@
       it.status = 'dl'; flush();
       let result = null, threw = null;
       const progress = makeProgress(it.name);
-      try { result = await COLLECTION.downloadEntry(it.id, progress); }
+      try { result = await ACQUIRE.downloadCharacterAssets(it.id, progress); }
       catch (e) { threw = e; }
       if (_stopReq || !isActiveState()) { _bInFlight--; return; }
       if (threw) {
@@ -156,8 +156,11 @@
         it.assetCats = cp.assetCategories || 0; it.cast = cp.castResolved || 0;
         it.missing = (result && result.missing) ? result.missing.length : 0;
         it.fails = (result && result.fails) ? result.fails.length : 0;
-        it.at = Date.now(); it.status = 'done'; _state.consecutiveFailures = 0;
-        if (it.fails || it.missing) pushFailure(it.name, `一部失敗（通信失敗${it.fails} / CDN欠番${it.missing}）`, true);
+        it.missingVoices = (result && result.missingVoices) ? result.missingVoices.length : (cp.missingVoices || 0);
+        it.downloaded = (result && result.downloaded) || 0;
+        const didWork = it.downloaded > 0 || it.gdFetched > 0 || it.fails || it.missing || it.missingVoices;
+        it.at = Date.now(); it.status = didWork ? 'done' : 'skipped'; _state.consecutiveFailures = 0;
+        if (it.fails || it.missing || it.missingVoices) pushFailure(it.name, `一部失敗（通信失敗${it.fails} / CDN欠番${it.missing} / voice未取得${it.missingVoices}）`, true);
       }
       _bInFlight--;
       flush();
@@ -167,7 +170,7 @@
         flush(true); _stopReq = true; wakeAll(); return;
       }
       const moreComing = _readyQueue.length > 0 || !_aDone;
-      if (it.status === 'done' && moreComing && !_stopReq && isActiveState()) {
+      if (it.status === 'done' && it.downloaded > 0 && moreComing && !_stopReq && isActiveState()) {
         _state.nextDlAt = Date.now() + (_state.dlIntervalSec || DL_INTERVAL_SEC) * 1000;
         _state.currentStatus = ''; flush();
         await waitUntil(_state.nextDlAt);
@@ -187,7 +190,7 @@
     recomputeGd();
     flush(true);
     try {
-      await Promise.all([pipelineA()].concat(Array.from({ length: B_CONC }, () => pipelineBWorker())));
+      await Promise.all([storyMetaPipeline()].concat(Array.from({ length: DOWNLOAD_CONCURRENCY }, () => assetDownloadWorker())));
     } finally { _running = false; }
     if (_stopReq || !_state) return;
     if (isActive(_state.phase)) {
@@ -204,7 +207,7 @@
     if (!items || !items.length) return { ok: false, reason: 'empty' };
     const overwrite = !!opts.overwrite;
     let have = new Set();
-    if (!overwrite) { try { have = new Set((await COLLECTION.scanFolder()).map((x) => String(x.charId))); } catch (e) {} }
+    if (!overwrite) { try { have = new Set((await COLLECTION.scanFolder()).filter((x) => x.total > 0 && x.covered >= x.total && !x.unresolved).map((x) => String(x.charId))); } catch (e) {} }
     _state = {
       phase: 'running', gdIntervalSec: opts.gdIntervalSec || GD_INTERVAL_SEC, dlIntervalSec: opts.dlIntervalSec || DL_INTERVAL_SEC, overwrite,
       tokenError: false, lastError: '', currentStatus: '', gdStatus: '', nextDlAt: 0,
@@ -236,7 +239,6 @@
 
   async function getState() { return _state || (await loadState()); }
 
-  // 停止/完了済みの履歴を破棄（実行中は無視）。
   async function clear() {
     if (_state && isActive(_state.phase)) return { ok: false, reason: 'active' };
     _state = null; _stopReq = false;

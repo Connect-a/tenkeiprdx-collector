@@ -5,6 +5,17 @@ const GAME_RE = /:\/\/play\.games\.dmm\.(co\.jp|com)\/game\/tenkeiprdx/i;
 
 const attached = { tabs: new Set(), childTargets: new Set() };
 
+function jwtExp(bearer) {
+  try {
+    const t = String(bearer || '').replace(/^Bearer\s+/i, '');
+    const p = t.split('.'); if (p.length < 2) return 0;
+    let b = p[1].replace(/-/g, '+').replace(/_/g, '/'); while (b.length % 4) b += '=';
+    const j = JSON.parse(atob(b));
+    return typeof j.exp === 'number' ? j.exp : 0;
+  } catch (e) { return 0; }
+}
+const tokenExpired = (a) => !!(a && a.exp && Math.floor(Date.now() / 1000) >= a.exp);
+
 const getIntent = async () => !!(await chrome.storage.local.get('capturing')).capturing;
 const setIntent = (v) => chrome.storage.local.set({ capturing: !!v });
 
@@ -13,7 +24,7 @@ async function updateLive() {
   const intent = await getIntent();
   const st = await chrome.storage.local.get(['apiAuth', 'apiAuthBad']);
   const tok = st.apiAuth && st.apiAuth.authorization;
-  const hasToken = !!(tok && tok !== st.apiAuthBad);
+  const hasToken = !!(tok && tok !== st.apiAuthBad && !tokenExpired(st.apiAuth));
   await chrome.storage.local.set({ captureLive: live });
   chrome.action.setBadgeText({ text: live ? 'ON' : (intent ? '…' : '') });
   chrome.action.setBadgeBackgroundColor({ color: live ? (hasToken ? '#2e9e5b' : '#c98a2b') : '#7a7590' });
@@ -71,10 +82,15 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
   if (!auth || !/^Bearer /.test(auth)) return;
   const pick = (n) => req.headers[n] || req.headers[n.toLowerCase()] || '';
   const st = await chrome.storage.local.get(['apiAuth', 'apiAuthBad']);
-  if (st.apiAuth && st.apiAuth.authorization === auth) { if (st.apiAuthBad === auth) { await chrome.storage.local.remove('apiAuthBad'); updateLive(); } return; }
+  if (st.apiAuth && st.apiAuth.authorization === auth) {
+    if (st.apiAuth.exp == null) { await chrome.storage.local.set({ apiAuth: Object.assign({}, st.apiAuth, { exp: jwtExp(auth) }) }); }
+    if (st.apiAuthBad === auth) { await chrome.storage.local.remove('apiAuthBad'); }
+    updateLive();
+    return;
+  }
   await chrome.storage.local.set({ apiAuth: {
     authorization: auth, 'X-Platform': pick('X-Platform'), 'X-Device': pick('X-Device'), 'X-Rating': pick('X-Rating'),
-    'x-client-version': pick('x-client-version'), 'x-masterdata-version': pick('x-masterdata-version'), ts: Date.now(),
+    'x-client-version': pick('x-client-version'), 'x-masterdata-version': pick('x-masterdata-version'), ts: Date.now(), exp: jwtExp(auth),
   } });
   await chrome.storage.local.remove('apiAuthBad');
   updateLive();

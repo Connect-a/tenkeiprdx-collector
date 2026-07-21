@@ -1,7 +1,7 @@
 'use strict';
 (function () {
   const MP = globalThis.MessagePack;
-  const latin1 = new TextDecoder('iso-8859-1');
+  const latin1 = globalThis.TP_UTIL.latin1;
 
   function lz4DecodeBlock(src, destLen) {
     const dst = new Uint8Array(destLen);
@@ -156,23 +156,57 @@
     return out;
   }
 
-  function decodeSceneBin(binBytes) {
-    let lengths = null;
-    const oec = new MP.ExtensionCodec();
-    for (let ty = 0; ty < 128; ty++) oec.register({ type: ty, encode: () => null, decode: (d) => { lengths = []; for (const v of MP.decodeMulti(d)) lengths.push(Number(v)); return 'lz4hdr'; } });
-    const outer = MP.decode(binBytes, { extensionCodec: oec, useBigInt64: true });
-    const blocks = outer.filter((e) => e instanceof Uint8Array).map((b) => b);
-    const parts = blocks.map((blk, i) => lz4DecodeBlock(blk, lengths[i]));
-    let total = 0; for (const p of parts) total += p.length;
-    const full = new Uint8Array(total); let o = 0; for (const p of parts) { full.set(p, o); o += p.length; }
-    const ec2 = new MP.ExtensionCodec();
-    for (let ty = 0; ty < 128; ty++) ec2.register({ type: ty, encode: () => null, decode: (d) => 'ext' + ty });
-    const vals = [];
-    try { for (const v of MP.decodeMulti(full, { extensionCodec: ec2, useBigInt64: true })) vals.push(v); } catch (e) { console.debug('[tp] decodeSceneBin: inner decodeMulti failed', e); }
-    return vals;
+  function extractAudioResource(bundleBytes) {
+    const { data, nodes } = parseUnityFS(bundleBytes);
+    const resNode = nodes.find((n) => n.path.endsWith('.resource'));
+    if (!resNode) return [];
+    const res = data.subarray(resNode.off, resNode.off + resNode.sz);
+    const starts = [];
+    for (let i = 0; i + 8 <= res.length; i++) { if (res[i + 4] === 0x66 && res[i + 5] === 0x74 && res[i + 6] === 0x79 && res[i + 7] === 0x70) starts.push(i); }
+    const clips = [];
+    for (let i = 0; i < starts.length; i++) clips.push(res.subarray(starts[i], i + 1 < starts.length ? starts[i + 1] : res.length));
+    return clips;
   }
 
-  const num = (x) => (typeof x === 'bigint' ? Number(x) : x);
+  // inner ext codecはextTagだけで決まり状態を持たない＝モジュールレベルで2種キャッシュ(scene毎の128登録×2を回避)。
+  let innerCodecTagged = null, innerCodecPlain = null;
+  function innerCodec(extTag) {
+    if (extTag) { if (!innerCodecTagged) { innerCodecTagged = new MP.ExtensionCodec(); for (let t = 0; t < 128; t++) { const ty = t; innerCodecTagged.register({ type: t, encode: () => null, decode: () => 'ext' + ty }); } } return innerCodecTagged; }
+    if (!innerCodecPlain) { innerCodecPlain = new MP.ExtensionCodec(); for (let t = 0; t < 128; t++) innerCodecPlain.register({ type: t, encode: () => null, decode: () => null }); }
+    return innerCodecPlain;
+  }
+
+  // MessagePack-CSharpのunion: ext98/99=LZ4ブロック圧縮。
+  function decodeCSharpLz4(bytes, opts) {
+    opts = opts || {};
+    const multiRoot = !!opts.multiRoot, extTag = !!opts.extTag;
+    let lengths = null;
+    const outer = new MP.ExtensionCodec();
+    for (let t = 0; t < 128; t++) outer.register({ type: t, encode: () => null, decode: (d) => { lengths = []; for (const v of MP.decodeMulti(d)) lengths.push(Number(v)); return null; } });
+    const inner = innerCodec(extTag);
+    const vals = [];
+    const emit = (blocks) => {
+      if (!(blocks.length && lengths && lengths.length)) return false;
+      const parts = blocks.map((b, i) => lz4DecodeBlock(b, lengths[i]));
+      let tot = 0; for (const p of parts) tot += p.length;
+      const full = new Uint8Array(tot); let o = 0; for (const p of parts) { full.set(p, o); o += p.length; }
+      try { for (const v of MP.decodeMulti(full, { extensionCodec: inner, useBigInt64: true })) vals.push(v); } catch (e) { console.debug('[tp] decodeCSharpLz4: inner decodeMulti failed', e); }
+      return true;
+    };
+    if (multiRoot) {
+      for (const root of MP.decodeMulti(bytes, { extensionCodec: outer, useBigInt64: true })) {
+        if (!Array.isArray(root)) { vals.push(root); continue; }
+        if (!emit(root.filter((e) => e instanceof Uint8Array))) vals.push(root);
+      }
+    } else {
+      const root = MP.decode(bytes, { extensionCodec: outer, useBigInt64: true });
+      emit(Array.isArray(root) ? root.filter((e) => e instanceof Uint8Array) : []);
+    }
+    return vals;
+  }
+  const decodeSceneBin = (binBytes) => decodeCSharpLz4(binBytes, { multiRoot: false, extTag: true });
+
+  const num = globalThis.TP_UTIL.num;
   function sceneToTimeline(decoded, sceneId) {
     const scene = decoded[0];
     const cmds = scene && scene[4];
@@ -211,5 +245,5 @@
     return n ? String(n) : null;
   }
 
-  globalThis.TP_DECODE = { lz4DecodeBlock, parseUnityFS, extractTextAssets, extractVoiceClips, decodeSceneBin, sceneToTimeline, sceneNext };
+  globalThis.TP_DECODE = { parseUnityFS, extractTextAssets, extractVoiceClips, extractAudioResource, decodeCSharpLz4, decodeSceneBin, sceneToTimeline, sceneNext };
 })();

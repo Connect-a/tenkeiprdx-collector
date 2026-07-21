@@ -8,7 +8,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
       - name: Package (zip + 7z)
@@ -17,7 +17,7 @@ jobs:
           zip -r tenkeiprdx-collector-${{ github.ref_name }}.zip README.md extension
           7z a tenkeiprdx-collector-${{ github.ref_name }}.7z README.md extension
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           files: |

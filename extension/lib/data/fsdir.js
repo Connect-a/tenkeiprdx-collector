@@ -10,7 +10,7 @@
     if (!supported) { const e = new Error('File System Access API 非対応'); e.fsUnsupported = true; throw e; }
     let picked;
     try { picked = await self.showDirectoryPicker({ mode: 'readwrite' }); }
-    catch (e) { if (e && e.name === 'AbortError') return null; throw e; } // AbortError＝ユーザーキャンセル→null／他（API無効等）は投げる
+    catch (e) { if (e && e.name === 'AbortError') return null; throw e; }
     _handle = picked; await IDB.set(KEY, picked); return picked;
   }
   async function permission(request) {
@@ -75,5 +75,26 @@
     for await (const [dn, entry] of h.entries()) { if (entry.kind !== 'directory') continue; const cid = parseCharId(dn); if (cid) out.push({ charId: cid, dirName: dn, handle: entry }); }
     return out;
   }
-  globalThis.TP_FS = { supported, load, pick, permission, ensure, dirName, getCharDir, getDir, writeUnder, readUnder, listUnder, exists, listCharDirs };
+  async function readBundleUnder(charHandle, rel) {
+    if (!rel || typeof rel !== 'string') return null;
+    let dir, sub;
+    if (rel.startsWith('_共有リソース/')) { dir = await getDir('_共有リソース', false); sub = rel.replace(/^_共有リソース\//, ''); }
+    else { dir = charHandle; sub = rel; }
+    if (!dir) return null;
+    const f = await readUnder(dir, sub);
+    return f ? new Uint8Array(await f.arrayBuffer()) : null;
+  }
+  async function walkBundles(dirHandle, prefix, out, depth) {
+    out = out || []; prefix = prefix || ''; depth = depth || 0;
+    if (!dirHandle || depth > 6) return out;
+    try {
+      for await (const [name, entry] of dirHandle.entries()) {
+        const rel = prefix ? prefix + '/' + name : name;
+        if (entry.kind === 'file') { if (/\.bundle$/i.test(name)) out.push(rel); }
+        else if (entry.kind === 'directory') await walkBundles(entry, rel, out, depth + 1);
+      }
+    } catch (e) {}
+    return out;
+  }
+  globalThis.TP_FS = { supported, load, pick, permission, ensure, dirName, getCharDir, getDir, writeUnder, readUnder, listUnder, exists, listCharDirs, readBundleUnder, walkBundles };
 })();

@@ -11,8 +11,29 @@
     <h1 id="homeTitle" title="キャラ一覧へ">天啓パラドクス コレクター</h1>
     <span id="appVersion" class="appver"></span>
     <a id="updateBadge" class="updbadge" href="#" target="_blank" rel="noopener" style="display:none" title="新しいバージョンがあります">⬆ 更新あり</a>
+    <span class="hdspacer"></span>
+    <div id="homeBgmWidget" class="hbwidget" style="display:none">
+      <button id="hbIcon" class="hbchip" title="ホームBGM">
+        <span class="hbchip-note">♪</span>
+        <span class="hbchip-title" id="hbChipTitle"></span>
+      </button>
+      <div id="hbMenu" class="hbmenu" style="display:none">
+        <div class="hbmenu-title" id="hbMenuTitle">未選択</div>
+        <div class="hbmenu-row hbmodes">
+          <button class="hbmode" id="hbModeRepeat" data-mode="repeat">🔂 1曲</button>
+          <button class="hbmode" id="hbModeSeq" data-mode="sequence">🔁 順番</button>
+          <button class="hbmode" id="hbModeShuffle" data-mode="shuffle">🔀 シャッフル</button>
+        </div>
+        <div class="hbmenu-row">
+          <button class="hbctrl" id="hbMenuToggle">▶ 再生</button>
+          <button class="hbctrl" id="hbMenuClear">■ 解除</button>
+        </div>
+      </div>
+    </div>
     <a id="ghIssue" class="hdlink" href="#" target="_blank" rel="noopener" style="display:none">障害報告（GitHub）<span class="ext">↗</span></a>
   </header>
+
+  <audio id="homeBgmPlayer" loop style="display:none"></audio>
 
   <div class="layout">
     <aside class="sidebar">
@@ -97,19 +118,20 @@
         <div class="rosterhead">
           <input id="rosterSearch" placeholder="名前で検索…">
           <div class="rosterfilter" id="rosterType">
-            <button class="rf active" data-rt="character">キャラ</button>
-            <button class="rf" data-rt="main">メイン</button>
-            <button class="rf" data-rt="event">イベント</button>
-            <button class="rf" data-rt="special">特別</button>
+            <button class="rf active" data-roster-type="character">キャラ</button>
+            <button class="rf" data-roster-type="main">メイン</button>
+            <button class="rf" data-roster-type="event">イベント</button>
+            <button class="rf" data-roster-type="special">特別</button>
+            <button class="rf" data-roster-type="home">ホーム</button>
           </div>
           <div class="rosterfilter" id="rosterOwn">
-            <button class="rf active" data-r="all">すべて</button>
-            <button class="rf" data-r="owned">所持</button>
-            <button class="rf" data-r="unowned">未所持</button>
+            <button class="rf active" data-roster-own="all">すべて</button>
+            <button class="rf" data-roster-own="owned">所持</button>
+            <button class="rf" data-roster-own="unowned">未所持</button>
           </div>
           <select id="rosterGroup" class="rgsel"><option value="">グループすべて</option></select>
           <select id="rosterRank" class="rgsel"><option value="">ランクすべて</option></select>
-          <span class="rosterCount" id="rosterCount"></span>
+          <span class="rostercount" id="rostercount"></span>
           <button class="btn sm bulkbtn" id="bulkOpen">一括ダウンロード（キャラ）</button>
           <button class="btn sm" id="sharedDl" title="物語の共通素材（背景/BGM/SE/フォント/演出）を _共有リソース/ へDL">共有リソースDL</button>
         </div>
@@ -136,6 +158,8 @@
         <div id="playwrap">
           <div class="audiotop">
             <button class="btn xs" id="saveDecodedPack">デコード結果を保存（画像+ボイス）</button>
+            <label><input type="checkbox" id="show3d" checked> 3Dモデル表示</label>
+            <label><input type="checkbox" id="showSpine" checked> Spine表示</label>
             <label><input type="checkbox" id="audioUi"> Audioコントロール表示</label>
             <audio id="audio" style="display:none"></audio>
           </div>
@@ -160,28 +184,23 @@
             </div>
           </section>
           <section id="story" class="panel">
-            <div class="v1note">※ ストーリーの演出付き描画（立ち絵の芝居・背景切替・イメージ表示）は Ver1 で実装予定です。現在はテキスト＋ボイスを再生します（立ち絵/背景/アイコンの静止表示は「イメージ」タブ）。</div>
+            <div id="sharedNotice" class="sharednotice" style="display:none"></div>
+            <div class="epsearchbar"><input id="lineSearch" placeholder="このキャラの発言テキストを検索…"><span class="note" id="lineSearchNote"></span></div>
+            <div class="linehits" id="lineHits" style="display:none"></div>
             <div class="eplist" id="eplist"></div>
-            <div class="stage" id="stage" style="display:none">
-              <div class="bg" id="bg"><span id="bgName">背景</span></div>
-              <div class="textbox">
-                <div class="speaker" id="speaker"></div>
-                <div class="text" id="text"></div>
-                <div class="meta" id="meta"></div>
-              </div>
-            </div>
+            <div class="stage" id="stage" style="display:none"></div>
+            <div class="stagewarn">※ストーリー再生UIには不具合が残っています：描画ずれ／オート再生が途中で早く終わることがあります。</div>
             <div class="controls" id="controls" style="display:none">
               <button class="btn" id="prev">◀ 戻る</button>
               <button class="btn" id="next">次へ ▶</button>
-              <label><input type="checkbox" id="auto"> オート</label>
               <label><input type="checkbox" id="voiceOn" checked> ボイス</label>
               <span class="progress" id="prog"></span>
+              <span class="note">送り/オート/スキップ/ログ/設定はステージ内のボタンで操作できます（実ゲーム準拠）。</span>
             </div>
           </section>
           <section id="voice" class="panel">
             <div class="voicegrid" id="voicegrid"></div>
             <p class="note" id="voiceNote"></p>
-            <div class="illustvoice" id="illustvoice"></div>
           </section>
         </div>
       </div>
@@ -206,7 +225,6 @@
           <div class="segbtn" id="bulkUnlock">
             <button class="sg active" data-v="only">全解放のみ</button>
             <button class="sg" data-v="priority">全解放を優先</button>
-            <button class="sg" data-v="all">所持すべて</button>
           </div>
         </div>
 
@@ -214,7 +232,7 @@
           <span class="optlbl">未所持キャラ</span>
           <div class="segbtn" id="bulkUnowned">
             <button class="sg active" data-v="0">含めない</button>
-            <button class="sg" data-v="1">立ち絵・ボイス・3Dも取得</button>
+            <button class="sg" data-v="1">含める</button>
           </div>
         </div>
 
@@ -263,27 +281,41 @@
   <script src="config.js"></script>
   <script src="vendor/msgpack.min.js"></script>
   <!-- data: 取得・保存・索引 -->
+  <script src="lib/data/util.js"></script>
   <script src="lib/data/idb.js"></script>
   <script src="lib/data/fsdir.js"></script>
   <script src="lib/data/decode.js"></script>
   <!-- render: テクスチャ/CRN/3D/Spine描画 -->
-  <script src="lib/render/texcodec.js"></script>
+  <script src="lib/unity/texcodec.js"></script>
   <script src="vendor/crn-O2.js"></script>
   <script src="vendor/unitycrn.js"></script>
-  <script src="lib/render/crunch.js"></script>
+  <script src="lib/unity/crunch.js"></script>
   <script src="lib/data/build-indexes.js"></script>
+  <script src="lib/data/net.js"></script>
   <script src="lib/data/collection.js"></script>
+  <script src="lib/data/acquire.js"></script>
   <script src="lib/data/bulk.js"></script>
   <script src="lib/render/imgzoom.js"></script>
+  <script src="lib/story/spine-web.js"></script>
   <script src="lib/render/visual.js"></script>
   <script src="vendor/three.min.js"></script>
-  <script src="lib/render/unity-sf.js"></script>
-  <script src="lib/render/anim.js"></script>
-  <script src="lib/render/mesh.js"></script>
+  <script src="lib/unity/unity-sf.js"></script>
+  <script src="lib/unity/anim.js"></script>
+  <script src="lib/unity/mesh.js"></script>
+  <script src="lib/render/model3d-lib.js"></script>
   <script src="lib/render/model3d.js"></script>
+  <script src="lib/render/particles.js"></script>
+  <script src="lib/render/aura.js"></script>
+  <script src="lib/data/char-assets.js"></script>
+  <!-- story: 実ゲーム忠実の演出再生(ステージGL/シナリオUI/HUD/エンジン) -->
+  <script src="lib/story/scenario-ui.js"></script>
+  <script src="lib/story/stage-gl.js"></script>
+  <script src="lib/story/story-engine.js"></script>
+  <script src="lib/story/scenario-hud.js"></script>
   <!-- player: ビューアUIパネル -->
   <script src="lib/player/audio-panel.js"></script>
   <script src="lib/player/image-panel.js"></script>
+  <script src="lib/player/story-panel.js"></script>
   <script src="lib/player/letter.js"></script>
   <script src="player.js"></script>
 </body>

@@ -1,6 +1,5 @@
 'use strict';
 // 画像の全画面ズーム/パン オーバーレイと、ギャラリー用の画像カード生成。
-// クリックで全画面／ホイール=カーソル基準ズーム／ドラッグ=パン／ダブルクリック=等倍。
 (function () {
   const shortPath = (p) => {
     if (!p) return '';
@@ -8,8 +7,6 @@
     return s.length > 80 ? `...${s.slice(-80)}` : s;
   };
 
-  // クリックで全画面表示するオーバーレイ（1枚を使い回し）。
-  // ホイール＝カーソル基準ズーム／ドラッグ＝パン／ダブルクリック＝等倍リセット／背景クリック・Escで閉じる。
   let _zoomOverlay = null, _zoomImg = null;
   let _zoomScale = 1, _zoomTx = 0, _zoomTy = 0;
   const ZOOM_MIN = 1, ZOOM_MAX = 12;
@@ -26,21 +23,19 @@
     ov.appendChild(img);
     ov.appendChild(cap);
     const close = () => { ov.classList.remove('show'); img.removeAttribute('src'); resetZoom(); };
-    // 背景クリックのみ閉じる（画像上クリックでは閉じない＝パン/ズーム操作のため）
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ov.classList.contains('show')) close(); });
 
-    // ホイールズーム（カーソル位置を固定点に）
     ov.addEventListener('wheel', (e) => {
       e.preventDefault();
       const prev = _zoomScale;
-      const factor = Math.exp(-e.deltaY * 0.0015); // 上スクロールで拡大
+      const factor = Math.exp(-e.deltaY * 0.0015);
       const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev * factor));
       const f = next / prev;
       if (f === 1) return;
       const rect = img.getBoundingClientRect();
-      const cc = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; // 現在の中心
-      const center0 = { x: cc.x - _zoomTx, y: cc.y - _zoomTy };                        // 等倍時の中心
+      const cc = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const center0 = { x: cc.x - _zoomTx, y: cc.y - _zoomTy };
       const cmx = e.clientX - center0.x, cmy = e.clientY - center0.y;
       _zoomTx = cmx - (cmx - _zoomTx) * f;
       _zoomTy = cmy - (cmy - _zoomTy) * f;
@@ -49,7 +44,6 @@
       applyZoom();
     }, { passive: false });
 
-    // ドラッグでパン
     let dragging = false, sx = 0, sy = 0;
     img.addEventListener('pointerdown', (e) => { dragging = true; sx = e.clientX; sy = e.clientY; img.setPointerCapture(e.pointerId); e.preventDefault(); });
     img.addEventListener('pointermove', (e) => { if (!dragging) return; _zoomTx += e.clientX - sx; _zoomTy += e.clientY - sy; sx = e.clientX; sy = e.clientY; applyZoom(); });
