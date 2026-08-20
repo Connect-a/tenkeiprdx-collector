@@ -1,0 +1,166 @@
+.homegrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.homecard {
+  position: relative;
+  background: #1d1b26;
+  border: 1px solid #2a2836;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+
+.homecard:hover {
+  background: #262234;
+  border-color: #4a4270;
+}
+
+.homecard.un {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.homecard.un:hover {
+  background: #1d1b26;
+  border-color: #2a2836;
+}
+
+.homemodal {
+  max-width: min(1200px, 94vw);
+  width: 94vw;
+}
+
+.itemgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+}
+
+.itemcard {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: #1d1b26;
+  border: 1px solid #2a2836;
+  border-radius: 8px;
+  padding: 9px 11px;
+  cursor: pointer;
+}
+
+.itemcard:hover {
+  border-color: #4a4468;
+}
+
+.itemcard.un {
+  opacity: 0.6;
+}
+
+.itemmodal {
+  max-width: 420px;
+}
+
+.itemzoombody {
+  text-align: center;
+}
+
+.itemzoombox {
+  min-height: 256px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.itemzoom {
+  width: 256px;
+  height: 256px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.monstericons {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+
+.monstericon {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  display: block;
+}
+
+.itemzoomnav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.itemzoomtext {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.itemiconbox {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: 6px;
+  background: #16141f;
+}
+
+.itemicon {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  display: block;
+}
+
+.itembody {
+  min-width: 0;
+}
+
+.itemname {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.itemvariant {
+  display: inline-block;
+  font-size: 10.5px;
+  color: #cbb8ff;
+  background: #2a2540;
+  border: 1px solid #3d3560;
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-top: 3px;
+}
+
+.itemdesc {
+  font-size: 11.5px;
+  color: #b0aac4;
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+.itemid {
+  font-size: 10.5px;
+  color: #6b6580;
+  margin-top: 3px;
+}
+
+.statvideo {
+  max-width: 100%;
+  border-radius: 6px;
+  background: #000;
+}

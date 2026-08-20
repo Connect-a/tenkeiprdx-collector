@@ -1,322 +1,369 @@
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>天啓パラドクス コレクター</title>
-  <link rel="stylesheet" href="player.css">
-</head>
-<body>
-  <header>
-    <h1 id="homeTitle" title="キャラ一覧へ">天啓パラドクス コレクター</h1>
-    <span id="appVersion" class="appver"></span>
-    <a id="updateBadge" class="updbadge" href="#" target="_blank" rel="noopener" style="display:none" title="新しいバージョンがあります">⬆ 更新あり</a>
-    <span class="hdspacer"></span>
-    <div id="homeBgmWidget" class="hbwidget" style="display:none">
-      <button id="hbIcon" class="hbchip" title="ホームBGM">
-        <span class="hbchip-note">♪</span>
-        <span class="hbchip-title" id="hbChipTitle"></span>
-      </button>
-      <div id="hbMenu" class="hbmenu" style="display:none">
-        <div class="hbmenu-title" id="hbMenuTitle">未選択</div>
-        <div class="hbmenu-row hbmodes">
-          <button class="hbmode" id="hbModeRepeat" data-mode="repeat">🔂 1曲</button>
-          <button class="hbmode" id="hbModeSeq" data-mode="sequence">🔁 順番</button>
-          <button class="hbmode" id="hbModeShuffle" data-mode="shuffle">🔀 シャッフル</button>
-        </div>
-        <div class="hbmenu-row">
-          <button class="hbctrl" id="hbMenuToggle">▶ 再生</button>
-          <button class="hbctrl" id="hbMenuClear">■ 解除</button>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>天啓パラドクス コレクター</title>
+    <link rel="stylesheet" href="style/base.css" />
+    <link rel="stylesheet" href="style/roster.css" />
+    <link rel="stylesheet" href="style/detail.css" />
+    <link rel="stylesheet" href="style/story.css" />
+    <link rel="stylesheet" href="style/visual.css" />
+    <link rel="stylesheet" href="style/collection.css" />
+    <link rel="stylesheet" href="style/home.css" />
+    <link rel="stylesheet" href="style/gallery.css" />
+    <link rel="stylesheet" href="style/story-ui.css" />
+  </head>
+  <body>
+    <header>
+      <h1 id="homeTitle" title="キャラ一覧へ">天啓パラドクス コレクター</h1>
+      <span id="appVersion" class="appver"></span>
+      <a id="updateBadge" class="updbadge" href="#" target="_blank" rel="noopener" style="display: none" title="新しいバージョンがあります">⬆ 更新あり</a>
+      <span class="hdspacer"></span>
+      <div id="homeBgmWidget" class="hbwidget" style="display: none">
+        <button id="hbIcon" class="hbchip" title="ホームBGM">
+          <span class="hbchip-note">♪</span>
+          <span class="hbchip-title"><span id="hbChipTitle"></span></span>
+        </button>
+        <div id="hbMenu" class="hbmenu" style="display: none">
+          <div class="hbmenu-head">
+            <span class="hbmenu-icon" id="hbMenuIcon" style="display: none"></span>
+            <div class="hbmenu-title" id="hbMenuTitle">未選択</div>
+          </div>
+          <div class="hbmenu-row hbseekrow" id="hbSeekRowI">
+            <span class="hbseeklabel">イントロ</span>
+            <div class="seekbar" id="hbSeekI" title="クリックでイントロへ移動"><i id="hbSeekFillI"></i></div>
+            <span class="hbtime" id="hbTimeI">0:00 / 0:00</span>
+          </div>
+          <div class="hbmenu-row hbseekrow" id="hbSeekRowM">
+            <span class="hbseeklabel">本体</span>
+            <div class="seekbar" id="hbSeekM" title="クリックで本体へ移動"><i id="hbSeekFillM"></i></div>
+            <span class="hbtime" id="hbTimeM">0:00 / 0:00</span>
+          </div>
+          <div class="hbmenu-row hbmodes">
+            <button class="hbmode" id="hbModeRepeat" data-mode="repeat">🔂 1曲</button>
+            <button class="hbmode" id="hbModeSeq" data-mode="sequence">🔁 順番</button>
+            <button class="hbmode" id="hbModeShuffle" data-mode="shuffle">🔀 シャッフル</button>
+            <button class="hbmode" id="hbChange" title="ホームのBGM一覧へ移動して曲を選び直す">⏭ 曲変更</button>
+          </div>
+          <div class="hbmenu-row">
+            <button class="hbmode" id="hbPriority" title="ストーリー再生時も、選択したBGMを止めずに鳴らし続けます。">常に優先して再生</button>
+          </div>
+          <div class="hbmenu-row">
+            <button class="hbctrl" id="hbPrev" title="前の曲">⏮</button>
+            <button class="hbctrl" id="hbMenuToggle" title="一時停止">⏸</button>
+            <button class="hbctrl" id="hbNext" title="次の曲">⏭</button>
+          </div>
+          <div class="hbmenu-row hbvolrow">
+            <span class="hbvolicon" aria-hidden="true">🔊</span>
+            <input id="hbVolume" class="hbvol volslider" type="range" min="0" max="150" step="1" value="70" title="BGMの音量" />
+          </div>
         </div>
       </div>
-    </div>
-    <a id="ghIssue" class="hdlink" href="#" target="_blank" rel="noopener" style="display:none">障害報告（GitHub）<span class="ext">↗</span></a>
-  </header>
+      <a id="ghIssue" class="hdlink" href="#" target="_blank" rel="noopener" style="display: none">障害報告（GitHub）<span class="ext">↗</span></a>
+    </header>
 
-  <audio id="homeBgmPlayer" loop style="display:none"></audio>
 
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="connbar">
-        <button class="btn primary" id="connToggle" style="flex:1">ゲームと接続</button>
-      </div>
-      <div id="connInfo" class="note" style="margin:2px 2px 4px"></div>
-      <button class="btn xs" id="refreshUser" style="display:none;margin:0 2px 8px">所持キャラ・レベルを更新</button>
-
-      <div class="gamebox">
-        <div class="boxhd">ゲームを開く</div>
-        <div class="gamelinks">
-          <a class="gamelink" href="https://play.games.dmm.com/game/tenkeiprdx" target="_blank" rel="noopener">全年齢<span class="ext">↗</span></a>
-          <a class="gamelink" href="https://play.games.dmm.co.jp/game/tenkeiprdx_x" target="_blank" rel="noopener">R18<span class="ext">↗</span></a>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="connbar">
+          <button class="btn primary" id="connToggle" style="flex: 1">ゲームと接続</button>
+          <button class="btn xs" id="dataReacquire" style="display: none; flex: 1" title="所持キャラとゲームのデータをまとめて取り直します">データ再取得</button>
         </div>
-      </div>
+        <div id="connInfo" class="note" style="margin: 2px 2px 4px"></div>
 
-      <div class="boxhd" style="margin:0 2px 6px">ホームディレクトリ</div>
-      <div class="fsbar" id="fsbar">
-        <span class="fsdot" id="fsDot"></span>
-        <span class="fstext" id="fsInfo">保存先フォルダ</span>
-        <button class="btn xs" id="fsPick">選ぶ</button>
-        <button class="btn xs" id="fsGrant" style="display:none">許可</button>
-      </div>
-
-      <details class="dm">
-        <summary>設定</summary>
-        <div class="note dim" style="margin:12px 0 3px">マスターボリューム</div>
-        <div class="inlinecfg" style="margin-bottom:8px">
-          <input id="masterVolume" type="range" min="0" max="100" step="1" value="50">
-          <span id="masterVolumeVal" class="hint">50%</span>
+        <div class="gamebox">
+          <div class="boxhd">ゲームを開く</div>
+          <div class="gamelinks">
+            <a class="gamelink" href="https://play.games.dmm.com/game/tenkeiprdx" target="_blank" rel="noopener">全年齢<span class="ext">↗</span></a>
+            <a class="gamelink" href="https://play.games.dmm.co.jp/game/tenkeiprdx_x" target="_blank" rel="noopener">R18<span class="ext">↗</span></a>
+          </div>
         </div>
-        <div class="note dim" style="margin:12px 0 3px">資産CDNベース（空=ゲームから自動捕捉）</div>
-        <input id="cdnBase" placeholder="https://cdne-…/production/production5-…" style="margin-bottom:4px">
-        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
-          <button class="btn xs" id="cdnSave">更新</button>
-          <button class="btn xs" id="cdnTest">テスト</button>
-          <button class="btn xs" id="cdnReset">デフォルトに戻す</button>
-          <span id="cdnSaved" class="okmsg"></span>
+
+        <div class="boxhd" style="margin: 0 2px 6px">ホームディレクトリ</div>
+        <div class="fsbar" id="fsbar">
+          <span class="fsdot" id="fsDot"></span>
+          <span class="fstext" id="fsInfo">保存先フォルダ</span>
+          <button class="btn xs" id="fsPick">選ぶ</button>
+          <button class="btn xs" id="fsGrant" style="display: none">許可</button>
         </div>
-        <pre id="cdnOut" class="statusout"></pre>
 
-        <div class="note dim" style="margin:12px 0 3px">ユーザーメールアドレス（入力不要）</div>
-        <input id="email" placeholder="you@example.com" style="margin-bottom:4px">
-        <button class="btn xs" id="emailSave">更新</button><button class="btn xs" id="emailClear" style="margin-left:4px">クリア</button><span id="emailSaved" class="okmsg"></span>
-        <div class="note dim" style="margin-top:6px">入力しなくても接続・DLに影響なし。問い合わせ時の本人確認用。</div>
-      </details>
-
-      <details class="dm">
-        <summary>データ管理</summary>
-        <div id="storageInfo" class="note"></div>
-        <button class="btn xs" id="resetCap">一時データを消す</button>
-        <div class="note dim" style="margin:8px 0 3px">索引（キャラ/シナリオ/資産）はマスタ・カタログから自動生成しキャッシュ。更新時は再生成。</div>
-        <button class="btn xs" id="rebuildIdx">索引を再生成</button>
-        <pre id="idxOut" class="statusout"></pre>
-      </details>
-
-      <div class="sbspace"></div>
-
-      <div class="reportbox">
         <details class="dm">
-          <summary>おてがみ</summary>
-          <div class="reportrow" style="margin-top:8px">
-            <input id="letterName" placeholder="おなまえ" maxlength="40">
-            <button class="btn xs" id="letterRand" title="キャラ名【二つ名】をランダム生成">🎲</button>
+          <summary>設定</summary>
+          <div class="note dim" style="margin: 12px 0 3px">マスターボリューム</div>
+          <div class="inlinecfg" style="margin-bottom: 8px">
+            <input id="masterVolume" class="volslider" type="range" min="0" max="150" step="1" value="50" title="音量" />
           </div>
-          <textarea id="letterBody" placeholder="内容（1000文字まで）" maxlength="1000" rows="4"></textarea>
-          <div class="reportfoot"><span id="letterCount" class="hint">0/1000</span></div>
-          <input id="letterEmail" disabled placeholder="メアド（設定から変更してください）">
-          <div class="reportrow" style="margin-top:6px">
-            <button class="btn xs" id="letterSend">送信</button>
-            <button class="btn xs" id="knownIssues" title="残っている課題・わかっている不具合">残課題と不具合</button>
-            <button class="btn xs" id="secretRecv" title="照会" style="display:none">😊</button>
-            <span id="letterMsg" class="okmsg"></span>
+          <div class="note dim" style="margin: 12px 0 3px">主人公の名前（ストーリー内の呼び名）</div>
+          <input id="playerName" placeholder="主人公" maxlength="16" style="margin-bottom: 4px" />
+          <div class="note dim">物語本文の「%username%」をこの名前に置き換えます。空欄なら「主人公」。次の台詞から反映されます。</div>
+          <div class="note dim" style="margin: 12px 0 3px">画像・音声の配信元</div>
+          <input id="cdnBase" placeholder="https://cdne-…/production/production0-…" style="margin-bottom: 4px" />
+          <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center">
+            <button class="btn xs" id="cdnSave">更新</button>
+            <button class="btn xs" id="cdnTest">テスト</button>
+            <button class="btn xs" id="cdnReset">クリア</button>
+            <span id="cdnSaved" class="okmsg"></span>
           </div>
+          <pre id="cdnOut" class="statusout"></pre>
+
+          <div class="note dim" style="margin: 12px 0 3px">ユーザーメールアドレス（入力不要）</div>
+          <input id="email" placeholder="you@example.com" style="margin-bottom: 4px" />
+          <button class="btn xs" id="emailSave">更新</button><button class="btn xs" id="emailClear" style="margin-left: 4px">クリア</button><span id="emailSaved" class="okmsg"></span>
+          <div class="note dim" style="margin-top: 6px">入力しなくても接続・DLに影響なし。問い合わせ時の本人確認用。</div>
         </details>
-      </div>
-    </aside>
 
-    <main id="main">
-      <div id="roster" style="display:none">
-        <div class="rosterhead">
-          <input id="rosterSearch" placeholder="名前で検索…">
-          <div class="rosterfilter" id="rosterType">
-            <button class="rf active" data-roster-type="character">キャラ</button>
-            <button class="rf" data-roster-type="main">メイン</button>
-            <button class="rf" data-roster-type="event">イベント</button>
-            <button class="rf" data-roster-type="special">特別</button>
-            <button class="rf" data-roster-type="home">ホーム</button>
-          </div>
-          <div class="rosterfilter" id="rosterOwn">
-            <button class="rf active" data-roster-own="all">すべて</button>
-            <button class="rf" data-roster-own="owned">所持</button>
-            <button class="rf" data-roster-own="unowned">未所持</button>
-          </div>
-          <select id="rosterGroup" class="rgsel"><option value="">グループすべて</option></select>
-          <select id="rosterRank" class="rgsel"><option value="">ランクすべて</option></select>
-          <span class="rostercount" id="rostercount"></span>
-          <button class="btn sm bulkbtn" id="bulkOpen">一括ダウンロード（キャラ）</button>
-          <button class="btn sm" id="sharedDl" title="物語の共通素材（背景/BGM/SE/フォント/演出）を _共有リソース/ へDL">共有リソースDL</button>
-        </div>
-        <div id="bulkStatus" class="bulkstatus" style="display:none"></div>
-        <pre id="sharedOut" class="statusout" style="display:none;margin:0 0 8px"></pre>
-        <div id="rosterGrid" class="rostergrid"></div>
-      </div>
+        <details class="dm" id="dlSection">
+          <summary>ダウンロード</summary>
+          <div id="dlSectionBody"></div>
+        </details>
 
-      <div class="empty" id="empty">
-        <span class="dim" id="emptyMsg">読み込み中…</span>
-      </div>
+        <details class="dm">
+          <summary>データ管理</summary>
 
-      <div id="detail" style="display:none">
-        <div class="detailnav">
-          <button class="btn sm" id="prevChar" title="前のキャラ">◀ 前</button>
-          <button class="btn sm backbtn" id="backToRoster" title="キャラ一覧へ戻る">↑ 一覧へ</button>
-          <button class="btn sm" id="nextChar" title="次のキャラ">次 ▶</button>
-        </div>
-        <div id="charHead"></div>
-        <div id="dlbar" class="dlbar" style="display:none">
-          <div id="dlmsg">準備中…</div>
-          <div class="bar"><i id="dlfill"></i></div>
-        </div>
-        <div id="playwrap">
-          <div class="audiotop">
-            <button class="btn xs" id="saveDecodedPack">デコード結果を保存（画像+ボイス）</button>
-            <label><input type="checkbox" id="show3d" checked> 3Dモデル表示</label>
-            <label><input type="checkbox" id="showSpine" checked> Spine表示</label>
-            <label><input type="checkbox" id="audioUi"> Audioコントロール表示</label>
-            <audio id="audio" style="display:none"></audio>
-          </div>
-          <div class="tabbar">
-            <button class="tab active" data-tab="image">イメージ</button>
-            <button class="tab" data-tab="story">ストーリー</button>
-            <button class="tab" data-tab="voice">ボイスギャラリー</button>
-          </div>
-          <section id="image" class="panel active">
-            <div class="v1tools">
-              <label class="note" style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" id="imageFlipY" checked>プレビュー上下反転</label>
-              <span style="margin-left:8px;color:#ff2222;font-weight:bold">※3D・Spineの表示には細かい不具合が残っている可能性があります</span>
+          <button class="btn xs" id="knownIssues" title="残っている課題・わかっている不具合">残課題と不具合の確認</button>
+          <button class="btn xs" id="v2Notice" title="ver2.0 の初回に出る案内" style="margin: 4px 0 8px">v2使用時の推奨事項</button>
+          <div id="indexRebuildHost"></div>
+          <table class="tmptbl" id="tmpDataTable"></table>
+          <div class="note dim" style="margin: 0 0 8px">※中身はブラウザの検証（F12）から Application を開き、IndexedDB と Extension Storage を確認してください。</div>
+        </details>
+
+        <div class="sbspace"></div>
+
+        <div class="sbtoprow"><button class="btn xs" id="scrollTopBtn" title="コンテンツを一番上までスクロール">↑ トップへ</button></div>
+
+        <div class="reportbox">
+          <details class="dm">
+            <summary>おてがみ</summary>
+            <div class="reportrow" style="margin-top: 8px">
+              <input id="letterName" placeholder="おなまえ" maxlength="40" />
+              <button class="btn xs" id="letterRand" title="キャラ名【二つ名】をランダム生成">🎲</button>
             </div>
-            <div class="imgsplit">
-              <div class="imgsplit-left">
-                <div id="imageHost" class="spinehost" style="display:none"></div>
+            <textarea id="letterBody" placeholder="内容（1000文字まで）" maxlength="1000" rows="4"></textarea>
+            <div class="reportfoot"><span id="letterCount" class="hint">0/1000</span></div>
+            <input id="letterEmail" disabled placeholder="メアド（設定から変更してください）" />
+            <div class="reportrow" style="margin-top: 6px">
+              <span id="letterMsg" class="okmsg" style="margin-right: auto"></span>
+              <button class="btn xs" id="letterSend">送信</button>
+              <button class="btn xs" id="secretRecv" style="display: none">😊</button>
+              <button class="btn xs" id="secretDrop" style="display: none">😢</button>
+            </div>
+          </details>
+        </div>
+      </aside>
+
+      <main id="main">
+        <div id="roster" style="display: none">
+          <div class="rosterhead">
+            <div class="rosterfilter" id="rosterType">
+              <button class="rf active" data-roster-type="character">キャラ</button>
+              <button class="rf" data-roster-type="main">メイン</button>
+              <button class="rf" data-roster-type="event">イベント</button>
+              <button class="rf" data-roster-type="special">特別</button>
+              <button class="rf" data-roster-type="home">ホーム</button>
+              <button class="rf" data-roster-type="other2d">その他2D</button>
+              <button class="rf" data-roster-type="other">その他3D</button>
+              <button class="rf" data-roster-type="item">アイテム</button>
+              <button class="rf" data-roster-type="monster">モンスター</button>
+            </div>
+            <span class="rostercount" id="rostercount"></span>
+            <button class="btn sm bulkbtn" id="bulkOpen">一括ダウンロード（キャラ）</button>
+            <button class="btn sm" id="sharedDl" title="物語の共通素材（背景/BGM/SE/フォント/演出）を _共有リソース/ へDL">共有リソースDL</button>
+          </div>
+          <div class="rosterhead">
+            <input id="rosterSearch" placeholder="名前で検索…" />
+            <div class="rosterfilter" id="rosterOwn">
+              <button class="rf active" data-roster-own="all">すべて</button>
+              <button class="rf" data-roster-own="owned">所持</button>
+              <button class="rf" data-roster-own="unowned">未所持</button>
+            </div>
+            <select id="rosterGroup" class="rgsel">
+              <option value="">グループすべて</option>
+            </select>
+            <select id="rosterRank" class="rgsel">
+              <option value="">ランクすべて</option>
+            </select>
+          </div>
+          <div id="bulkStatus" class="bulkstatus" style="display: none"></div>
+          <pre id="sharedOut" class="statusout" style="display: none; margin: 0 0 8px"></pre>
+          <div id="rosterGrid" class="rostergrid"></div>
+        </div>
+
+        <div class="empty" id="empty">
+          <span class="dim" id="emptyMsg">読み込み中…</span>
+        </div>
+
+        <div id="detail" style="display: none">
+          <div class="detailnav">
+            <button class="btn sm" id="prevChar" title="前のキャラ">◀ 前</button>
+            <button class="btn sm backbtn" id="backToRoster" title="キャラ一覧へ戻る">↑ 一覧へ</button>
+            <button class="btn sm" id="nextChar" title="次のキャラ">次 ▶</button>
+          </div>
+          <div id="charHead"></div>
+          <div id="dlbar" class="dlbar" style="display: none">
+            <div class="dlrow2">
+              <span class="dllbl">ストーリー</span>
+              <div class="bar"><i id="dlfillStory"></i></div>
+              <span class="dlpct" id="dlpctStory"></span>
+            </div>
+            <div id="dlmsgStory" class="dlsub"></div>
+            <div class="dlrow2">
+              <span class="dllbl">画像・音声</span>
+              <div class="bar"><i id="dlfill"></i></div>
+              <span class="dlpct" id="dlpctAssets"></span>
+            </div>
+            <div id="dlmsg">準備中…</div>
+          </div>
+          <div id="playwrap">
+            <div class="audiotop">
+              <button class="btn xs" id="saveDecodedPack">デコード結果を保存（画像+ボイス）…</button>
+              <label><input type="checkbox" id="show3d" checked /> 3Dモデル表示</label>
+              <label><input type="checkbox" id="showSpine" checked /> Spine表示</label>
+            </div>
+            <div class="tabbar">
+              <button class="tab active" data-tab="image">イメージ</button>
+              <button class="tab" data-tab="story">ストーリー</button>
+              <button class="tab" data-tab="voice">ボイスギャラリー</button>
+            </div>
+            <section id="image" class="panel active">
+              <div class="v1tools">
+                <label class="note" style="display: inline-flex; align-items: center; gap: 4px"><input type="checkbox" id="imageFlipY" checked />プレビュー上下反転</label>
               </div>
-              <div class="imgsplit-right">
-                <div id="model3dHost" class="model3dhost" style="display:none"></div>
-                <div id="spineHost" class="spinehost" style="display:none"></div>
+              <div class="imgsplit">
+                <div class="imgsplit-left">
+                  <div id="imageHost" class="spinehost" style="display: none"></div>
+                </div>
+                <div class="imgsplit-right">
+                  <div id="model3dHost" class="model3dhost" style="display: none"></div>
+                  <div id="weapon3dHost" class="model3dhost" style="display: none"></div>
+                  <div id="spineHost" class="spinehost" style="display: none"></div>
+                </div>
               </div>
+            </section>
+            <section id="story" class="panel">
+              <div id="sharedNotice" class="sharednotice" style="display: none"></div>
+              <div class="epsearchbar"><input id="lineSearch" placeholder="発言テキストを検索…" /><span class="note" id="lineSearchNote"></span></div>
+              <div class="linehits" id="lineHits" style="display: none"></div>
+              <div class="eplist" id="eplist"></div>
+              <div class="stage" id="stage" style="display: none"></div>
+              <div class="storyprog" id="storyProg" style="display: none">
+                <div class="seekbar" id="storyProgBar" title="クリックでその場面へ移動"><i id="storyProgFill"></i></div>
+                <span class="storyprog-num" id="prog"></span>
+              </div>
+              <div class="controls" id="controls" style="display: none">
+                <button class="btn" id="prev">◀ 前</button>
+                <button class="btn" id="next">次 ▶</button>
+                <label title="台詞に収録されている音声と、ブラウザの読み上げのどちらを鳴らすかを選びます。&#10;音量は再生画面の「設定」から変えられます。"
+                  >ボイスと読み上げ
+                  <select id="voiceMode">
+                    <option value="voice" selected>ボイスのみ</option>
+                    <option value="voice+tts">ボイス + ブラウザ読み上げ</option>
+                    <option value="tts">ブラウザ読み上げのみ</option>
+                    <option value="off">OFF</option>
+                  </select>
+                </label>
+                <button class="btn" id="stageMax">⛶ 最大化</button>
+              </div>
+              <button class="btn stageexit" id="stageExit">⤢ 縮小</button>
+            </section>
+            <section id="voice" class="panel">
+              <audio id="audio" class="voiceplayer" controls></audio>
+              <div class="voicegrid" id="voicegrid"></div>
+              <p class="note" id="voiceNote"></p>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div id="bulkModal" class="modalback" style="display: none">
+      <div class="modal">
+        <div class="modalhd">
+          <span id="bulkTitle">一括ダウンロード</span>
+          <button class="btn xs" id="bulkClose">閉じる</button>
+        </div>
+        <div class="modalbody">
+          <div class="bulknote note dim">
+            選択した対象を、安全な間隔をあけて順にダウンロードします。手動やマクロによる短時間の連続取得を避けるための機能です。<br />
+            ダイアログを閉じてもダウンロードは継続しますが、<strong>ブラウザのタブを閉じるとダウンロードは中断されます</strong>（再度開くと途中から再開します）。<br />
+            ストーリー情報（ゲームへのログインが必要）を先にまとめて取得し、そのあとで画像・音声をダウンロードします。途中でゲームとの接続が切れた場合は、ストーリー情報を取得できたぶんだけダウンロードして停止します。
+          </div>
+
+          <div class="bulkopt" id="bulkUnlockRow">
+            <span class="optlbl">ストーリー解放</span>
+            <div class="segbtn" id="bulkUnlock">
+              <button class="sg active" data-v="only">全解放のみ</button>
+              <button class="sg" data-v="priority">全解放を優先</button>
             </div>
-          </section>
-          <section id="story" class="panel">
-            <div id="sharedNotice" class="sharednotice" style="display:none"></div>
-            <div class="epsearchbar"><input id="lineSearch" placeholder="このキャラの発言テキストを検索…"><span class="note" id="lineSearchNote"></span></div>
-            <div class="linehits" id="lineHits" style="display:none"></div>
-            <div class="eplist" id="eplist"></div>
-            <div class="stage" id="stage" style="display:none"></div>
-            <div class="stagewarn">※ストーリー再生UIには不具合が残っています：描画ずれ／オート再生が途中で早く終わることがあります。</div>
-            <div class="controls" id="controls" style="display:none">
-              <button class="btn" id="prev">◀ 戻る</button>
-              <button class="btn" id="next">次へ ▶</button>
-              <label><input type="checkbox" id="voiceOn" checked> ボイス</label>
-              <span class="progress" id="prog"></span>
-              <span class="note">送り/オート/スキップ/ログ/設定はステージ内のボタンで操作できます（実ゲーム準拠）。</span>
+          </div>
+
+          <div class="bulkopt" id="bulkUnownedRow">
+            <span class="optlbl">未所持キャラ</span>
+            <div class="segbtn" id="bulkUnowned">
+              <button class="sg active" data-v="0">含めない</button>
+              <button class="sg" data-v="1">含める</button>
             </div>
-          </section>
-          <section id="voice" class="panel">
-            <div class="voicegrid" id="voicegrid"></div>
-            <p class="note" id="voiceNote"></p>
-          </section>
-        </div>
-      </div>
-    </main>
-  </div>
-
-  <div id="bulkModal" class="modalback" style="display:none">
-    <div class="modal">
-      <div class="modalhd">
-        <span id="bulkTitle">一括ダウンロード</span>
-        <button class="btn xs" id="bulkClose">閉じる</button>
-      </div>
-      <div class="modalbody">
-        <div class="bulknote note dim">
-          選択した対象を、安全な間隔をあけて順にダウンロードします。手動やマクロによる短時間の連続取得を避けるための機能です。<br>
-          ダイアログを閉じてもダウンロードは継続しますが、<strong>ブラウザのタブを閉じるとダウンロードは中断されます</strong>（再度開くと途中から再開します）。<br>
-          ストーリーメタ（ストーリー情報）を先に取得するため、途中でトークンが切れても資産（scene/ボイス/立ち絵/背景・キャラ詳細）のダウンロードは継続できます。
-        </div>
-
-        <div class="bulkopt" id="bulkUnlockRow">
-          <span class="optlbl">ストーリー解放</span>
-          <div class="segbtn" id="bulkUnlock">
-            <button class="sg active" data-v="only">全解放のみ</button>
-            <button class="sg" data-v="priority">全解放を優先</button>
           </div>
-        </div>
 
-        <div class="bulkopt" id="bulkUnownedRow">
-          <span class="optlbl">未所持キャラ</span>
-          <div class="segbtn" id="bulkUnowned">
-            <button class="sg active" data-v="0">含めない</button>
-            <button class="sg" data-v="1">含める</button>
+          <div class="bulkopt">
+            <span class="optlbl">既存</span>
+            <div class="segbtn" id="bulkOverwrite">
+              <button class="sg active" data-v="0">スキップ</button>
+              <button class="sg" data-v="1">上書き（再取得）</button>
+            </div>
           </div>
-        </div>
 
-        <div class="bulkopt">
-          <span class="optlbl">既存</span>
-          <div class="segbtn" id="bulkOverwrite">
-            <button class="sg active" data-v="0">スキップ</button>
-            <button class="sg" data-v="1">上書き（再取得）</button>
+          <div class="bulkopt">
+            <span class="optlbl">DL間隔</span>
+            <div class="segbtn" id="bulkInterval">
+              <button class="sg" data-v="30">30秒（非推奨）</button>
+              <button class="sg" data-v="60">1分</button>
+              <button class="sg active" data-v="180">3分</button>
+            </div>
           </div>
-        </div>
 
-        <div class="bulkopt">
-          <span class="optlbl">DL間隔</span>
-          <div class="segbtn" id="bulkInterval">
-            <button class="sg" data-v="60">1分（非推奨）</button>
-            <button class="sg" data-v="180">3分</button>
-            <button class="sg active" data-v="300">5分</button>
+          <div class="note dim" style="margin: 0 0 8px">
+            ストーリー情報をまとめて取得したあと、画像・音声を<strong>1件ごとに上記の間隔をあけて</strong>順に取得します（短いほどゲームサーバーへの負荷が増えます＝3分推奨）。1キャラの取得が5件以下のときは間隔をあけずに進みます。
           </div>
+
+          <div class="bulktarget" id="bulkTarget">対象 0 件</div>
+
+          <div id="bulkCard" class="bulkcard" style="display: none"></div>
+
+          <div class="bulkactions">
+            <button class="btn primary" id="bulkStart">開始</button>
+            <button class="btn rec" id="bulkStop" style="display: none">停止（中断）</button>
+            <button class="btn xs" id="bulkClear" style="display: none">履歴をクリア</button>
+          </div>
+
+          <details class="bulkdetails">
+            <summary class="note">ダウンロード状況</summary>
+            <div class="bulktablewrap">
+              <table class="bulktable" id="bulkTable">
+                <thead>
+                  <tr>
+                    <th>名前</th>
+                    <th>ストーリー情報</th>
+                    <th>本文・音声</th>
+                    <th>立ち絵など</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </details>
+
+          <details class="bulkdetails" id="bulkFailWrap" style="display: none">
+            <summary class="note" id="bulkFailSummary">ボイス欠落ログ</summary>
+            <div class="bulktablewrap"><div id="bulkFailList" class="bulkfaillist"></div></div>
+          </details>
+
         </div>
-
-        <div class="note dim" style="margin:0 0 8px">ストーリーメタ（認証API）を先行取得し、資産DL（公開CDN）はトークン失効に強いため<strong>キャラごとに上記の間隔をあけて</strong>順に取得します（短いほどBAN/負荷リスク増＝5分推奨）。</div>
-
-        <div class="bulktarget" id="bulkTarget">対象 0 件</div>
-
-        <div id="bulkCard" class="bulkcard" style="display:none"></div>
-
-        <div class="bulkactions">
-          <button class="btn primary" id="bulkStart">開始</button>
-          <button class="btn rec" id="bulkStop" style="display:none">停止（中断）</button>
-          <button class="btn xs" id="bulkClear" style="display:none">履歴をクリア</button>
-        </div>
-
-        <details class="bulkdetails">
-          <summary class="note">ダウンロード状況</summary>
-          <div class="bulktablewrap"><table class="bulktable" id="bulkTable"><thead><tr><th>名前</th><th>ストーリーメタ</th><th>ストーリーアセット</th><th>キャラ詳細</th></tr></thead><tbody></tbody></table></div>
-        </details>
-
-        <details class="bulkdetails" id="bulkFailWrap" style="display:none">
-          <summary class="note" id="bulkFailSummary">失敗ログ</summary>
-          <div class="bulktablewrap"><div id="bulkFailList" class="bulkfaillist"></div></div>
-        </details>
       </div>
     </div>
-  </div>
 
-  <script src="config.js"></script>
-  <script src="vendor/msgpack.min.js"></script>
-  <!-- data: 取得・保存・索引 -->
-  <script src="lib/data/util.js"></script>
-  <script src="lib/data/idb.js"></script>
-  <script src="lib/data/fsdir.js"></script>
-  <script src="lib/data/decode.js"></script>
-  <!-- render: テクスチャ/CRN/3D/Spine描画 -->
-  <script src="lib/unity/texcodec.js"></script>
-  <script src="vendor/crn-O2.js"></script>
-  <script src="vendor/unitycrn.js"></script>
-  <script src="lib/unity/crunch.js"></script>
-  <script src="lib/data/build-indexes.js"></script>
-  <script src="lib/data/net.js"></script>
-  <script src="lib/data/collection.js"></script>
-  <script src="lib/data/acquire.js"></script>
-  <script src="lib/data/bulk.js"></script>
-  <script src="lib/render/imgzoom.js"></script>
-  <script src="lib/story/spine-web.js"></script>
-  <script src="lib/render/visual.js"></script>
-  <script src="vendor/three.min.js"></script>
-  <script src="lib/unity/unity-sf.js"></script>
-  <script src="lib/unity/anim.js"></script>
-  <script src="lib/unity/mesh.js"></script>
-  <script src="lib/render/model3d-lib.js"></script>
-  <script src="lib/render/model3d.js"></script>
-  <script src="lib/render/particles.js"></script>
-  <script src="lib/render/aura.js"></script>
-  <script src="lib/data/char-assets.js"></script>
-  <!-- story: 実ゲーム忠実の演出再生(ステージGL/シナリオUI/HUD/エンジン) -->
-  <script src="lib/story/scenario-ui.js"></script>
-  <script src="lib/story/stage-gl.js"></script>
-  <script src="lib/story/story-engine.js"></script>
-  <script src="lib/story/scenario-hud.js"></script>
-  <!-- player: ビューアUIパネル -->
-  <script src="lib/player/audio-panel.js"></script>
-  <script src="lib/player/image-panel.js"></script>
-  <script src="lib/player/story-panel.js"></script>
-  <script src="lib/player/letter.js"></script>
-  <script src="player.js"></script>
-</body>
+    <script src="vendor/crn-O2.js"></script>
+    <script src="vendor/unitycrn.js"></script>
+    <script type="module" src="app/runtime/main.js"></script>
+  </body>
 </html>

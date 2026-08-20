@@ -1,0 +1,273 @@
+.otherlayout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.othercol-list {
+  flex: 1;
+  min-width: 0;
+}
+
+.othercol-view {
+  width: 520px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: calc(100vh - 150px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: #17151f;
+  border: 1px solid #2e2b3d;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.otherview-empty {
+  color: #8b84a0;
+  font-size: 12px;
+  text-align: center;
+  padding: 48px 8px;
+}
+
+.model3dhost {
+  border: 1px dashed #4a4270;
+  border-radius: 8px;
+  padding: 8px;
+  background: #12101a;
+  color: #a7a2bd;
+}
+
+.model3d-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  flex-wrap: wrap;
+}
+
+.model3d-lbl {
+  font-size: 12px;
+  color: #a7a2bd;
+}
+
+.model3d-warn {
+  color: #ff6b6b;
+}
+
+.model3d-clip {
+  background: #1c1930;
+  color: #e6e2f5;
+  border: 1px solid #3a3560;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  max-width: 220px;
+}
+
+.model3d-play {
+  background: #2a2545;
+  color: #e6e2f5;
+  border: 1px solid #4a4270;
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.model3d-play:hover {
+  background: #3a3560;
+}
+
+.model3d-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #a7a2bd;
+  cursor: pointer;
+}
+
+.model3d-toggle.override {
+  margin-left: 10px;
+}
+
+.model3d-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  max-width: 100%;
+}
+
+.model3d-group .model3d-group {
+  flex-wrap: wrap;
+}
+
+.model3d-break {
+  flex-basis: 100%;
+  height: 0;
+}
+
+.model3d-full {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+}
+
+.model3d-canvas {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  position: relative;
+}
+
+.model3d-canvas canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  border-radius: 6px;
+}
+
+.model3d-gllost {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  background: rgba(20, 18, 24, 0.72);
+  color: #ffe3ef;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.model3dhost:fullscreen {
+  display: flex;
+  flex-direction: column;
+  background: #0b0a14;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.model3dhost:fullscreen .model3d-canvas {
+  flex: 1;
+  aspect-ratio: auto;
+}
+
+.spinehost {
+  border: 1px dashed #4a4270;
+  border-radius: 8px;
+  padding: 10px;
+  background: #181622;
+  color: #a7a2bd;
+}
+
+.spine-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.spine-grid.stand {
+  grid-template-columns: 1fr 1fr;
+}
+
+.spine-grid.still,
+.spine-grid.one {
+  grid-template-columns: 1fr;
+}
+
+.spine-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.spine-cell-cap {
+  font-size: 12px;
+  color: #cbb8ff;
+  padding: 2px 2px 5px;
+}
+
+.spine-player-box {
+  width: 100%;
+  position: relative;
+  background: #0e0c16;
+  border-radius: 6px;
+}
+
+.spine-grid.stand .spine-player-box {
+  aspect-ratio: 3 / 4;
+}
+
+.spine-grid.still .spine-player-box {
+  aspect-ratio: 16 / 9;
+}
+
+.spine-player-box .spine-player {
+  width: 100%;
+  height: 100%;
+}
+
+.spine-player-box .spine-player canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.texprev {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+  align-items: start;
+}
+
+.texprev canvas,
+.texprev .imgcard img {
+  border: 1px solid #3a3650;
+  border-radius: 6px;
+  background: #12101a;
+  width: 100%;
+  height: auto;
+}
+
+.texprev .zoomable {
+  cursor: zoom-in;
+}
+
+.weapongrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.weaponcell {
+  border: 1px solid #2a2836;
+  border-radius: 6px;
+  padding: 6px;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .otherlayout {
+    flex-direction: column;
+  }
+  .othercol-view {
+    width: auto;
+    align-self: stretch;
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .spine-grid.stand {
+    grid-template-columns: 1fr;
+  }
+}
