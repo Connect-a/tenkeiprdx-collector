@@ -1,0 +1,138 @@
+.tokbadge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.tokbadge.ok {
+  background: #1f7a44;
+  color: #d6ffe4;
+  border: 1px solid #38c172;
+}
+
+.tokbadge.bad {
+  background: #8a2330;
+  color: #ffd6dc;
+  border: 1px solid #e3556a;
+}
+
+.tokhint {
+  color: #ffb15c;
+  font-size: 11.5px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.tokbadge.wait {
+  background: #6a5a1f;
+  color: #fff0c0;
+  border: 1px solid #c9a94b;
+}
+
+.loadspin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 120px;
+  color: #a7a2bd;
+  font-size: 13px;
+}
+
+.loadspin .spin {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #3a3560;
+  border-top-color: #b9a4ff;
+  border-radius: 50%;
+  animation: tpspin 0.8s linear infinite;
+}
+
+.imgcard {
+  width: auto;
+  min-width: 0;
+  background: #1d1b26;
+  border: 1px solid #2e2b3d;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.imgpreview {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #3a3650;
+  border-radius: 6px;
+}
+
+.imgcap {
+  font-size: 10.5px;
+  color: #a7a2bd;
+  margin-bottom: 6px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.imgmeta {
+  font-size: 10px;
+  color: #7a7392;
+  margin-top: 6px;
+}
+
+.imgfs {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 7, 12, 0.93);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 9999;
+  cursor: zoom-out;
+  padding: 24px;
+  overflow: hidden;
+}
+
+.imgfs.show {
+  display: flex;
+}
+
+.imgfs-img {
+  max-width: 96vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  background: #12101a;
+  cursor: grab;
+  will-change: transform;
+  touch-action: none;
+}
+
+.imgfs-img:active {
+  cursor: grabbing;
+}
+
+.imgfs-cap {
+  font-size: 12px;
+  color: #c8c4d8;
+  word-break: break-all;
+  max-width: 96vw;
+  text-align: center;
+  pointer-events: none;
+}
+
+@media (max-width: 1000px) {
+  .imgsplit {
+    grid-template-columns: 1fr;
+  }
+}
+
+@keyframes tpspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
