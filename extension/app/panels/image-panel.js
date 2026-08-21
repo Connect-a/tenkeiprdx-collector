@@ -1,6 +1,5 @@
-import { auraRenderer } from '../../engine/render/aura.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
-import { model3dRenderer } from '../../engine/render/model3d.js';
+import { loadModel3d, model3dSync, disposeModel3d, loadAura as getAuraRenderer } from '../../engine/render/lazy.js';
 import { glManager } from '../../engine/render/gl-manager.js';
 import { charAssets } from '../../data/char-assets.js';
 import { errText } from '../../core/messages.js';
@@ -21,6 +20,7 @@ export function createImagePanel(deps) {
   const showSpine = () => settings.get('showSpine');
   let _load3d = { key: null, byCostume: new Map() };
   let _weapon3d = [];
+  let _visuals = Promise.resolve();
   const _glRebuildOk = glManager.makeRebuildLimiter(8000, 2);
   const onGlContextLost = () => {
     if (_glRebuildOk()) {
@@ -31,8 +31,8 @@ export function createImagePanel(deps) {
     return false;
   };
 
-  const listAuras = () => (auraRenderer ? auraRenderer.list() : Promise.resolve([]));
-  const loadAura = (rel) => (auraRenderer ? auraRenderer.load(rel) : null);
+  const listAuras = async () => (await getAuraRenderer()).list();
+  const loadAura = async (rel) => (await getAuraRenderer()).load(rel);
 
   const voiceNoOf = (nm) => {
     const m = String(nm).match(/_(\d+)[a-z]*$/i);
@@ -50,6 +50,16 @@ export function createImagePanel(deps) {
       if (!clip) return;
       voiceOut.play(await utilHelpers.cachedAudioUrl(playerState.cur.voiceUrls, clip.name, async () => clip));
     } catch (e) {}
+  }
+
+  function syncSplitLayout() {
+    const split = document.querySelector('#image .imgsplit');
+    if (!split) return;
+    const shown = ['model3dHost', 'weapon3dHost', 'spineHost'].some((id) => {
+      const h = getById(id);
+      return h && h.style.display !== 'none';
+    });
+    split.classList.toggle('solo', !shown);
   }
 
   function showSpinner(host, label) {
@@ -84,6 +94,14 @@ export function createImagePanel(deps) {
   }
 
   async function runSpine() {
+    try {
+      await runSpineInner();
+    } finally {
+      syncSplitLayout();
+    }
+  }
+
+  async function runSpineInner() {
     const spineHost = getById('spineHost');
     if (!spineHost || !playerState.cur || !visualRenderer) return;
     if (!showSpine()) {
@@ -102,7 +120,7 @@ export function createImagePanel(deps) {
 
   function showSharedResNotice(host) {
     if (!host) return;
-    playerState._model3d = model3dRenderer.disposeModel3d(playerState._model3d);
+    playerState._model3d = disposeModel3d(playerState._model3d);
     host.style.display = '';
     host.innerHTML = '';
     host.appendChild(
@@ -123,16 +141,24 @@ export function createImagePanel(deps) {
   }
 
   async function render3dModel() {
+    try {
+      await render3dModelInner();
+    } finally {
+      syncSplitLayout();
+    }
+  }
+
+  async function render3dModelInner() {
     const host = getById('model3dHost');
     if (!host || !playerState.cur) return;
     if (!show3d()) {
-      playerState._model3d = model3dRenderer.disposeModel3d(playerState._model3d);
+      playerState._model3d = disposeModel3d(playerState._model3d);
       host.style.display = 'none';
       host.innerHTML = '';
       renderWeapons3d(null);
       return;
     }
-    if (!model3dRenderer || !charAssets) return;
+    if (!charAssets) return;
     const assets = (playerState.cur.meta || {}).assets || {};
     const folderKey = String(playerState.cur.folderKey || '');
     const hasModel = assets.model && (assets.model[folderKey] || assets.model[Object.keys(assets.model)[0]]);
@@ -148,7 +174,7 @@ export function createImagePanel(deps) {
     }
     showSpinner(host, '3Dモデルを読み込み中…');
     try {
-      playerState._model3d = model3dRenderer.disposeModel3d(playerState._model3d);
+      playerState._model3d = disposeModel3d(playerState._model3d);
       const charKey = playerState.contentKey();
       if (_load3d.key !== charKey) _load3d = { key: charKey, byCostume: new Map() };
       const costumeKey = String(playerState._costume || '');
@@ -205,7 +231,7 @@ export function createImagePanel(deps) {
         auraTexMap: auraLoaded && auraLoaded.texByMatPid,
       });
       opts.onContextLost = onGlContextLost;
-      playerState._model3d = model3dRenderer.render(host, d.model, d.matBundle, opts);
+      playerState._model3d = (await loadModel3d()).render(host, d.model, d.matBundle, opts);
       renderWeapons3d(d.weapons);
     } catch (e) {
       showError(host, '3Dモデルを表示できませんでした。' + errText(e));
@@ -226,7 +252,8 @@ export function createImagePanel(deps) {
     if (!host) return;
     disposeWeapons3d();
     const list = (weapons || []).filter((w) => w && w.model);
-    if (!show3d() || !list.length) {
+    const r3d = model3dSync();
+    if (!show3d() || !list.length || !r3d) {
       host.style.display = 'none';
       host.innerHTML = '';
       return;
@@ -240,7 +267,7 @@ export function createImagePanel(deps) {
       const box = el('div');
       const cell = el('div', 'weaponcell', [el('div', 'note dim', `#${w.id || '?'}　${w.slot || ''}`), box]);
       grid.appendChild(cell);
-      const r = model3dRenderer.render(box, w.model, w.materials, { height: 240 });
+      const r = r3d.render(box, w.model, w.materials, { height: 240 });
       if (r && r.dispose) _weapon3d.push(r);
       if (r && r.ok === false) cell.appendChild(el('div', 'note', '表示できませんでした（' + (r.reason || '不明') + '）'));
     }
@@ -279,15 +306,15 @@ export function createImagePanel(deps) {
     const key = playerState.contentKey();
     if (playerState.imageAutoKey !== key) {
       playerState.imageAutoKey = key;
-      runImageGallery();
-      render3dModel();
+      _visuals = Promise.all([runImageGallery(), render3dModel()]).catch(() => {});
     }
   }
 
   function resetForCharacter() {
+    _visuals = Promise.resolve();
     playerState.imageAutoKey = null;
     _load3d = { key: null, byCostume: new Map() };
-    playerState._model3d = model3dRenderer.disposeModel3d(playerState._model3d);
+    playerState._model3d = disposeModel3d(playerState._model3d);
     playerState._costume = null;
     disposeWeapons3d();
     for (const id of ['model3dHost', 'weapon3dHost']) {
@@ -297,6 +324,7 @@ export function createImagePanel(deps) {
         host.innerHTML = '';
       }
     }
+    syncSplitLayout();
   }
 
   function bind() {
@@ -309,5 +337,5 @@ export function createImagePanel(deps) {
     });
   }
 
-  return { bind, onTabSwitched, resetForCharacter };
+  return { bind, onTabSwitched, resetForCharacter, visualsReady: () => _visuals };
 }

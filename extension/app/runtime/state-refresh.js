@@ -6,8 +6,58 @@ import { playerState } from './player-state.js';
 import { updateFsUi, updateStorage } from '../views/fs-ui.js';
 import { renderRoster } from '../views/roster-ui.js';
 import { refreshDownloadSection, markDownloadSectionDirty } from '../views/download-section.js';
+import { ensureUserState } from './user-state-guard.js';
 
-export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl']) {
+let _scan = null;
+let _scanPending = false;
+
+export function pendingScan() {
+  return _scan;
+}
+
+export function beginScan() {
+  if (!_scanPending) return null;
+  return rescanAll();
+}
+
+export function rescanAll() {
+  _scanPending = false;
+  return startScan().then(afterScan);
+}
+
+function mergeScanned(scanned, startedAt) {
+  const prev = Array.isArray(playerState.dl) ? playerState.dl : [];
+  const byKey = new Map(scanned.map((x) => [String(x.folderKey), x]));
+  for (const e of prev) {
+    const k = String(e.folderKey);
+    if (e && e.at > startedAt && !byKey.has(k)) byKey.set(k, e);
+  }
+  playerState.dl = [...byKey.values()].sort((a, b) => (a.name > b.name ? 1 : -1));
+}
+
+function startScan() {
+  if (_scan) return _scan;
+  const startedAt = Date.now();
+  _scan = collectionRepository
+    .scanFolder()
+    .then((scanned) => mergeScanned(scanned, startedAt))
+    .catch((e) => {
+      console.error('[tp] 状態更新に失敗', e);
+    })
+    .finally(() => {
+      _scan = null;
+    });
+  return _scan;
+}
+
+async function afterScan() {
+  markDownloadSectionDirty();
+  await refreshDownloadSection();
+  if (playerState.rosterOpen) await renderRoster({ changed: ['fs'] });
+}
+
+export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opts) {
+  const deferScan = !!(opts && opts.deferScan);
   playerState.fsGranted = false;
   if (fileStore && fileStore.supported) {
     try {
@@ -21,10 +71,17 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl']) {
       try {
         collectionRepository.saveMasterArtifacts && collectionRepository.saveMasterArtifacts();
       } catch (e) {}
-      try {
-        playerState.dl = await collectionRepository.scanFolder();
-      } catch (e) {
-        console.error('[tp] 状態更新に失敗', e);
+      if (deferScan) {
+        let cached = null;
+        try {
+          cached = await collectionRepository.cachedFolderEntries();
+        } catch (e) {}
+        if (cached) {
+          playerState.dl = cached;
+          _scanPending = true;
+        } else startScan().then(afterScan);
+      } else {
+        await startScan();
       }
     } else {
       playerState.dl = [];
@@ -36,6 +93,7 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl']) {
       try {
         playerState.owned = await userStateService.ownedLevels();
       } catch (e) {}
+      if (playerState.dl.length) ensureUserState().catch(() => {});
     } else {
       playerState.owned = new Map();
     }

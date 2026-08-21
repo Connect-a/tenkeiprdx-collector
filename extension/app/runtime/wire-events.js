@@ -1,13 +1,14 @@
 import { bulkDownloader } from '../../data/acquire/bulk.js';
 import { fileStore } from '../../core/fsdir.js';
 import { collectionRepository } from '../../data/collection.js';
-import { SK } from '../../core/constants.js';
+import { setManualOrigin } from '../../data/origin.js';
 import { RECONNECT } from '../../core/messages.js';
 import { playerState } from './player-state.js';
 import { getById } from '../../core/dom.js';
 import { getStoryPanel } from './panel-state.js';
 import { parseRoute, isTargetRoute, routeHash } from './router.js';
 import { switchTab, setStageMax, updateCdnReset } from '../views/shell-ui.js';
+import { ensureEpisodes } from '../views/detail-view.js';
 import { navTo, navChar, setAppliedRouteKey } from './router-controller.js';
 import { renderRoster } from '../views/roster-ui.js';
 import { runLineSearch } from '../views/line-search.js';
@@ -19,6 +20,7 @@ import { reacquireData } from './data-reacquire.js';
 import { toast } from '../ui/notifier.js';
 import { runSharedDownload, sharedDlToast } from '../views/shared-notice.js';
 import { networkClient } from '../../data/network.js';
+import { settings } from '../../core/settings.js';
 import { assetUrlOn } from '../../core/paths.js';
 
 const probeRel = async () => {
@@ -38,7 +40,12 @@ const onClick = (id, fn) => on(id, 'click', fn);
 const eachIn = (id, sel, fn) => getById(id).querySelectorAll(sel).forEach(fn);
 
 function bindNavigation() {
-  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+  document.querySelectorAll('.tab').forEach((t) =>
+    t.addEventListener('click', () => {
+      switchTab(t.dataset.tab);
+      if (t.dataset.tab === 'story') ensureEpisodes();
+    }),
+  );
   const step = (d) => () => {
     const p = getStoryPanel();
     if (p) p.go(d);
@@ -50,6 +57,11 @@ function bindNavigation() {
   onClick('backToRoster', backToRoster);
   onClick('prevChar', () => navChar(-1));
   onClick('nextChar', () => navChar(1));
+  onClick('sidebarToggle', () => {
+    const collapsed = !document.body.classList.contains('sbcollapsed');
+    document.body.classList.toggle('sbcollapsed', collapsed);
+    settings.set('sidebarCollapsed', collapsed);
+  });
   onClick('scrollTopBtn', () => {
     const m = getById('main');
     if (m) m.scrollTo({ top: 0, behavior: 'smooth' });
@@ -113,6 +125,25 @@ function bindStage() {
     const rect = bar.getBoundingClientRect();
     if (rect.width <= 0) return;
     p.jumpFrac((e.clientX - rect.left) / rect.width);
+  });
+  onClick('stageZoomReset', () => {
+    const p = getStoryPanel();
+    if (p && p.resetView) p.resetView();
+  });
+  onClick('stageMove', () => {
+    const btn = getById('stageMove');
+    const on = !btn.classList.contains('active');
+    btn.classList.toggle('active', on);
+    const p = getStoryPanel();
+    if (p && p.setMoveMode) p.setMoveMode(on);
+  });
+  onClick('storyReplay', () => {
+    const p = getStoryPanel();
+    if (p && p.replayVoice) p.replayVoice();
+  });
+  onClick('stillToggle', () => {
+    const p = getStoryPanel();
+    if (p && p.toggleStill) p.toggleStill();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && getById('stage').classList.contains('max')) setStageMax(false);
@@ -187,7 +218,7 @@ function bindCdnSettings() {
     const out = getById('cdnOut');
     const v = (getById('cdnBase').value || '').trim().replace(/\/+$/, '');
     if (!v) {
-      await chrome.storage.local.remove(SK.assetRootManual);
+      await setManualOrigin(null);
       out.textContent = '';
       getById('cdnSaved').textContent = '自動に戻しました';
       setTimeout(() => (getById('cdnSaved').textContent = ''), 2500);
@@ -203,14 +234,14 @@ function bindCdnSettings() {
       toast('その配信元からは取得できなかったので保存しませんでした。自動取得のままです。', 'err');
       return;
     }
-    await chrome.storage.local.set({ [SK.assetRootManual]: v });
+    await setManualOrigin(v);
     getById('cdnSaved').textContent = '更新';
     setTimeout(() => (getById('cdnSaved').textContent = ''), 1500);
     updateCdnReset();
   });
   onClick('cdnReset', async () => {
     getById('cdnBase').value = '';
-    await chrome.storage.local.remove(SK.assetRootManual);
+    await setManualOrigin(null);
     getById('cdnOut').textContent = '';
     updateCdnReset();
   });

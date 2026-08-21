@@ -44,8 +44,9 @@ function create(host, opts) {
   const btnLogClose = mk('img', 'sbtn sb-logclose', backlog);
   btnLogClose.title = '閉じる';
   const choicePanel = mk('div', 'choicePanel', ui);
-  const askPanel = mk('div', 'askPanel', ui);
+  const askPanel = mk('div', 'askPanel', host);
   const askText = mk('div', 'askText', askPanel);
+  const askCount = mk('div', 'askCount', askPanel);
   const askRow = mk('div', 'askRow', askPanel);
   const askYes = mk('button', 'choiceBtn askBtn', askRow);
   const askNo = mk('button', 'choiceBtn askBtn', askRow);
@@ -178,23 +179,38 @@ function create(host, opts) {
 
   function ask(o) {
     const spec = o || {};
+    const secs = Math.max(0, Math.round(Number(spec.countdown) || 0));
+    const countLabel = spec.countdownText || ((n) => n + '秒後に進みます…');
     askText.textContent = spec.text || '';
     askYes.textContent = spec.yes || 'はい';
-    askNo.textContent = spec.no || 'いいえ';
+    askNo.textContent = spec.no || (secs ? 'キャンセル ⏎' : 'いいえ');
+    askYes.style.display = secs ? 'none' : '';
+    askCount.style.display = secs ? '' : 'none';
     let sel = 0;
     const paint = () => {
-      askYes.classList.toggle('on', sel === 0);
-      askNo.classList.toggle('on', sel === 1);
+      askYes.classList.toggle('on', !secs && sel === 0);
+      askNo.classList.toggle('on', !!secs || sel === 1);
     };
     paint();
     host.classList.add('askOpen');
     return new Promise((resolve) => {
+      let left = secs;
+      let tid = 0;
       const done = (v) => {
+        if (tid) clearInterval(tid);
         keyTrap = null;
         askYes.onclick = askNo.onclick = null;
         host.classList.remove('askOpen');
         resolve(v);
       };
+      if (secs) {
+        askCount.textContent = countLabel(left);
+        tid = setInterval(() => {
+          left -= 1;
+          if (left <= 0) done(true);
+          else askCount.textContent = countLabel(left);
+        }, 1000);
+      }
       askYes.onclick = (e) => {
         e.stopPropagation();
         done(true);
@@ -204,6 +220,11 @@ function create(host, opts) {
         done(false);
       };
       keyTrap = (e) => {
+        if (secs) {
+          if (e.key === ' ' || e.key === 'ArrowRight') done(true);
+          else if (e.key === 'ArrowLeft' || e.key === 'Enter' || e.key === 'Escape') done(false);
+          return;
+        }
         if (e.key === ' ') done(true);
         else if (e.key === 'Enter') done(sel === 0);
         else if (e.key === 'Escape') done(false);
@@ -216,11 +237,12 @@ function create(host, opts) {
   }
   async function finish() {
     if (ending || !player) return;
+    const wasAuto = autoOn;
     setAuto(false);
     if (host.classList.contains('choiceOpen') || !onEpisodeEnd) return;
     ending = true;
     try {
-      await onEpisodeEnd();
+      await onEpisodeEnd({ wasAuto });
     } finally {
       ending = false;
     }
@@ -234,6 +256,7 @@ function create(host, opts) {
     if (modal() || !player) return;
     if (skipOn) return setSkip(false);
     if (uiHidden) return showUi();
+    if (autoOn) setAuto(false);
     await player.advance();
   }
   async function back() {

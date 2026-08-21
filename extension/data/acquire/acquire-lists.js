@@ -13,16 +13,18 @@ const doneWithSkip = (c) => `完了 新規${c.got}件・既にあった分${c.sk
 
 async function runStaticsDownload(progress, opts) {
   const stop = (opts && opts.shouldAbort) || (() => false);
-  const list = (await staticsList()).filter((s) => s.url);
+  const all = await staticsList();
+  const list = all.filter((s) => s.url);
+  const noUrl = all.length - list.length;
   const dir = await fileStore.getDir(_D.shared, { create: true });
-  if (!dir || !list.length) return { got: 0, skip: 0, fail: 0 };
+  if (!dir || !list.length) return { got: 0, skip: 0, missing: 0, unresolved: noUrl, failed: 0 };
   const sess = dlSession.create();
   for (const s of list) {
     if (stop()) break;
     await sess.saveUrl(dir, { url: s.url, subpath: s.path, label: s.name }, "statics/接続を確認");
   }
   if (progress) progress(`統計素材 完了 新規${sess.counters.got}件`);
-  return { got: sess.counters.got, skip: sess.counters.skip, fail: sess.counters.fail };
+  return { got: sess.counters.got, skip: sess.counters.skip, missing: sess.counters.missing, unresolved: noUrl + sess.counters.unresolved, failed: sess.counters.fail };
 }
 
 async function runOther2dDownload(items, progress, opts) {
@@ -35,7 +37,7 @@ async function runOther2dDownload(items, progress, opts) {
     done: doneWithSkip,
   });
   const st = await runStaticsDownload(null, opts);
-  return { got: ctx.got + st.got, skip: ctx.skip + st.skip, fail: ctx.fail + st.fail, total: ctx.total + st.got + st.skip, purged: ctx.purged, stopped: !!ctx.stopped };
+  return { got: ctx.got + st.got, skip: ctx.skip + st.skip, missing: ctx.missing + st.missing, unresolved: st.unresolved, failed: ctx.fail + st.failed, total: ctx.total + st.got + st.skip, purged: ctx.purged, stopped: !!ctx.stopped };
 }
 
 async function runMonsterDownload(progress, opts) {
@@ -49,7 +51,7 @@ async function runMonsterDownload(progress, opts) {
     tick: everyN(20),
     done: doneWithSkip,
   });
-  return { got: ctx.got, skip: ctx.skip, fail: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
+  return { got: ctx.got, skip: ctx.skip, missing: ctx.missing, unresolved: 0, failed: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
 }
 
 async function runOther3dDownload(progress, opts) {
@@ -63,7 +65,7 @@ async function runOther3dDownload(progress, opts) {
     tick: everyN(20),
     done: doneWithSkip,
   });
-  return { got: ctx.got, skip: ctx.skip, fail: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
+  return { got: ctx.got, skip: ctx.skip, missing: ctx.missing, unresolved: 0, failed: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
 }
 
 async function castRepairPlan(ids, prefix) {
@@ -98,7 +100,7 @@ async function runCastRepair(ids, progress, opts) {
     tick: (c, phase) => (phase === 'dl' ? `取得中 ${c.done}/${c.total}` : null),
     done: doneWithSkip,
   });
-  return { got: ctx.got, skip: ctx.skip, fail: ctx.fail, total: ctx.total, purged: ctx.purged, noAsset };
+  return { got: ctx.got, skip: ctx.skip, missing: ctx.missing, unresolved: 0, failed: ctx.fail, total: ctx.total, purged: ctx.purged, noAsset };
 }
 
 export const acquireLists = { runStaticsDownload, runOther2dDownload, runMonsterDownload, runOther3dDownload, runCastRepair };

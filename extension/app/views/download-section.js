@@ -1,7 +1,7 @@
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { collectionRepository } from '../../data/collection.js';
 import { errText, LOW_QUALITY_INDEX, pinnedBaseStale } from '../../core/messages.js';
-import { SK } from '../../core/constants.js';
+import { resolveOrigin } from '../../data/origin.js';
 import { getById, el, append } from '../../core/dom.js';
 import { toast } from '../ui/notifier.js';
 import { refreshLists } from '../runtime/state-refresh.js';
@@ -46,9 +46,11 @@ async function setPhantom(key, n) {
 }
 
 const purgedText = (r) => (r && r.purged ? `・壊れた分を削除${r.purged}件` : '');
-const summary = (r) => `新規${r.got}件` + (r.skip != null ? `・既にあった分${r.skip}件` : '') + (r.missing ? `・データ無し${r.missing}件` : '') + (r.fail ? `・失敗${r.fail}件` : '') + purgedText(r);
+const unresolvedText = (r) => (r && r.unresolved ? `・取り先が分からない分${r.unresolved}件（ゲームと接続して索引を作り直してください）` : '');
+const summary = (r) =>
+  `新規${r.got}件` + (r.skip != null ? `・既にあった分${r.skip}件` : '') + (r.missing ? `・データ無し${r.missing}件` : '') + (r.failed ? `・失敗${r.failed}件` : '') + unresolvedText(r) + purgedText(r);
 
-const fromStatus = (st) => ({ have: (st.have ? st.have.size : 0) + (st.haveFiles ? st.haveFiles.size : 0), total: st.total || 0 });
+const fromStatus = (st) => ({ have: (st.have ? st.have.size : 0) + (st.haveFiles ? st.haveFiles.size : 0), total: st.total || 0, unknown: st.unknown || 0 });
 
 async function lowQualityRow() {
   try {
@@ -62,11 +64,10 @@ async function lowQualityRow() {
 
 async function pinnedBaseRow() {
   try {
-    const o = await chrome.storage.local.get([SK.assetRootManual, SK.assetRootEnv]);
-    const manual = (o[SK.assetRootManual] || '').replace(/\/+$/, '');
-    const env = (o[SK.assetRootEnv] || '').replace(/\/+$/, '');
-    if (!manual || !env || manual === env) return null;
-    return el('div', 'dlrow', el('div', 'note warn', pinnedBaseStale(manual, env)));
+    const cur = await resolveOrigin();
+    const auto = (await resolveOrigin({ ignoreManual: true })).assets;
+    if (!cur.manual || !auto || cur.manual === auto) return null;
+    return el('div', 'dlrow', el('div', 'note warn', pinnedBaseStale(cur.manual, auto)));
   } catch (e) {
     return null;
   }
@@ -85,7 +86,7 @@ const JOBS = [
     label: 'ホーム',
     hint: 'シーンイラスト・1コマ漫画・BGM・ホーム背景・プロフィールアイコン',
     run: (onProgress, opts) => assetAcquirer.collectHome(onProgress, null, opts),
-    done: (r) => `新規${r.got}件・既にあった分${r.skip}件` + (r.miss ? `・データ無し${r.miss}件` : '') + purgedText(r),
+    done: (r) => `新規${r.got}件・既にあった分${r.skip}件` + (r.missing ? `・データ無し${r.missing}件` : '') + unresolvedText(r) + purgedText(r),
     status: () => collectionRepository.homeAssetStatus(),
   },
   {
@@ -114,17 +115,20 @@ const JOBS = [
   },
 ];
 
-function badgeText(have, total, phantom) {
+function badgeText(have, total, unknown, phantom) {
+  const un = unknown || 0;
   const ph = phantom || 0;
-  const missing = Math.max(0, total - have - ph);
+  const rest = Math.max(0, total - have - un - ph);
   if (!total) return { cls: 'dim', text: '—' };
-  if (have <= 0) return { cls: 'no', text: '未取得' };
-  if (missing <= 0) return { cls: 'ok', text: have >= total ? '✓ 取得済み' : `✓ 取得済み（欠品${total - have}）` };
-  return { cls: 'part', text: `一部 ${have}/${total}` };
+  if (have <= 0 && !un) return { cls: 'no', text: '未取得' };
+  if (rest > 0) return { cls: 'part', text: `一部 ${have}/${total}` };
+  if (un > 0) return { cls: 'part', text: `✓ 取得済み（取り先不明${un}）` };
+  if (ph > 0) return { cls: 'ok', text: `✓ 取得済み（配信なし${ph}）` };
+  return { cls: 'ok', text: '✓ 取得済み' };
 }
 
-function paint(badge, spin, have, total, phantom, running) {
-  const b = badgeText(have, total, phantom);
+function paint(badge, spin, have, total, unknown, phantom, running) {
+  const b = badgeText(have, total, unknown, phantom);
   badge.className = 'dlbadge ' + b.cls;
   badge.textContent = b.text;
   spin.style.display = running ? '' : 'none';
@@ -141,10 +145,10 @@ async function paintFromStatus(job, badge, spin) {
   markChecking(badge, spin);
   try {
     const [st, map] = [await job.status(), await phantoms()];
-    paint(badge, spin, st.have, st.total, map[job.key], false);
+    paint(badge, spin, st.have, st.total, st.unknown, map[job.key], false);
     return st;
   } catch (e) {
-    paint(badge, spin, 0, 0, 0, false);
+    paint(badge, spin, 0, 0, 0, 0, false);
     return null;
   }
 }
@@ -188,18 +192,18 @@ function jobRow(job) {
           const r = await job.run(
             (m, f, c) => {
               note.textContent = m;
-              if (c) paint(badge, spin, base + (c.got || 0), total, 0, true);
+              if (c) paint(badge, spin, base + (c.got || 0), total, 0, 0, true);
             },
             { shouldAbort: () => stopReq },
           );
           note.textContent = (r && r.stopped ? '停止しました｜' : '') + (job.done || summary)(r);
-          toast(`${job.label}${r && r.stopped ? 'を停止しました' : 'を取得しました'}（${(job.done || summary)(r)}）`, r && (r.fail || r.stopped) ? 'err' : 'ok');
+          toast(`${job.label}${r && r.stopped ? 'を停止しました' : 'を取得しました'}（${(job.done || summary)(r)}）`, r && (r.failed || r.stopped) ? 'err' : 'ok');
           await refreshLists(['fs']);
           if (job.status) {
             try {
               const st = await job.status();
-              if (r && !r.stopped && !r.fail) await setPhantom(job.key, Math.max(0, (st.total || 0) - (st.have || 0)));
-              paint(badge, spin, st.have, st.total, (await phantoms())[job.key], false);
+              if (r && !r.stopped && !r.failed) await setPhantom(job.key, r.missing || 0);
+              paint(badge, spin, st.have, st.total, st.unknown, (await phantoms())[job.key], false);
             } catch (e) {
               await paintFromStatus(job, badge, spin);
             }

@@ -1,4 +1,4 @@
-import { ensureIndexes } from './index-store.js';
+import { resolveOrigin } from './origin.js';
 
 const STATICS_DIR = 'statics';
 
@@ -15,7 +15,7 @@ const FILES = VIDEOS.map(([n, name]) => ({ key: 'video_' + n.toLowerCase(), name
 export async function staticsList() {
   let base = null;
   try {
-    base = (await ensureIndexes()).meta.staticsBase || null;
+    base = (await resolveOrigin()).statics || null;
   } catch (e) {}
   return FILES.map((f) => ({ ...f, url: base ? `${base}/${f.sub}` : null, path: `${STATICS_DIR}/${f.file}` }));
 }

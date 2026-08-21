@@ -16,6 +16,53 @@ const RANK_ORDER = ['UR', 'S', 'A', 'B'];
 let filterMeta = {};
 let renderSeq = 0;
 
+const VERIFY_CONC = 8;
+const verified = new Set();
+const queue = [];
+let observer = null;
+let draining = false;
+
+async function verifyOne(folderKey) {
+  const arr = playerState.dl;
+  const i = arr.findIndex((x) => String(x.folderKey) === folderKey);
+  if (i < 0 || !arr[i].handle) return;
+  let fresh = null;
+  try {
+    fresh = await collectionRepository.scanFolderHandle(arr[i].handle, folderKey);
+  } catch (e) {}
+  if (!fresh) return;
+  const old = arr[i].counts || {};
+  arr[i] = { ...fresh, at: Date.now() };
+  if (old.have !== fresh.counts.have || old.partial !== fresh.counts.partial) await updateCard(folderKey);
+}
+
+async function drainQueue() {
+  if (draining) return;
+  draining = true;
+  while (queue.length) await Promise.all(queue.splice(0, VERIFY_CONC).map(verifyOne));
+  draining = false;
+}
+
+function watchCards(grid) {
+  if (observer) observer.disconnect();
+  if (typeof IntersectionObserver !== 'function') return;
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        observer.unobserve(en.target);
+        const fk = en.target.dataset.fk;
+        if (!fk || verified.has(fk)) continue;
+        verified.add(fk);
+        queue.push(fk);
+      }
+      if (queue.length) drainQueue();
+    },
+    { rootMargin: '200px' },
+  );
+  for (const card of grid.querySelectorAll('.rcard')) if (!verified.has(card.dataset.fk)) observer.observe(card);
+}
+
 function fillSelect({ selId, field, order, allLabel, current, onChange }) {
   const sel = getById(selId);
   if (!sel) return;
@@ -154,6 +201,7 @@ export async function renderRoster(opts) {
   }
   grid.appendChild(frag);
   getById('rostercount').textContent = model.summary;
+  watchCards(grid);
 }
 
 export async function rosterModel() {
@@ -169,15 +217,15 @@ export async function rosterModel() {
   const byName = (a, b) => (a.displayName > b.displayName ? 1 : -1);
   const matchSearch = (it) => !f || kanaKey(it.displayName).includes(fk) || String(it.folderKey).includes(f);
 
+  const summaryOf = (all) => `${all.filter((x) => episodeCounts.availableCount(x) > 0).length} / ${all.length}`;
+
   if (rosterKind === 'character') {
     const full = [];
     const partial = [];
     const unowned = [];
-    let ownedCount = 0;
     for (const it of items) {
       if (playerState.rosterGroup && (it.group || '') !== playerState.rosterGroup) continue;
       if (playerState.rosterRank && (it.rank || '') !== playerState.rosterRank) continue;
-      if (it.owned) ownedCount++;
       if (playerState.rosterOwn === 'owned' && !it.owned) continue;
       if (playerState.rosterOwn === 'unowned' && it.owned) continue;
       if (!matchSearch(it)) continue;
@@ -192,10 +240,10 @@ export async function rosterModel() {
       rosterKind,
       groups: [
         { title: '★ 全ストーリー解放', items: full },
-        { title: '解放途中（Lv70未満）', items: partial },
+        { title: '解放途中', items: partial },
         { title: '未所持', items: unowned },
       ],
-      summary: `所持${ownedCount}体 / 全ストーリー${full.length}体`,
+      summary: summaryOf(items),
     };
   }
 
@@ -208,16 +256,10 @@ export async function rosterModel() {
     }
     const order = ['スペシャルエピソード', 'イベントエピソード', 'エクストラエピソード', '特別エピソード'];
     const subs = Object.keys(bySub).sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
-    let n = 0;
-    let unl = 0;
-    for (const s of subs) {
-      n += bySub[s].length;
-      unl += bySub[s].filter((x) => episodeCounts.availableCount(x) > 0).length;
-    }
     return {
       rosterKind,
       groups: subs.map((s) => ({ title: s, items: bySub[s].sort(byName) })),
-      summary: `特別エピソード ${n}件（解放制）${unl ? ` / 解放済み${unl}件DL可` : ' / 解放済み無し'}`,
+      summary: summaryOf(items),
     };
   }
 
@@ -225,11 +267,9 @@ export async function rosterModel() {
   const done = [];
   const progress = [];
   const locked = [];
-  let clearedCards = 0;
   for (const it of items) {
     if (!matchSearch(it)) continue;
     const avail = episodeCounts.availableCount(it);
-    if (avail > 0) clearedCards++;
     (episodeCounts.storyFull(it) ? done : avail > 0 ? progress : locked).push(it);
   }
   done.sort(byOrder);
@@ -242,7 +282,7 @@ export async function rosterModel() {
       { title: '進行中（クリア途中）', sections: questSections(rosterKind, progress) },
       { title: '未クリア', sections: questSections(rosterKind, locked) },
     ],
-    summary: `${TYPE_LABEL[rosterKind]} ${done.length + progress.length + locked.length}件 / クリア済み${clearedCards}件`,
+    summary: summaryOf(items),
   };
 }
 

@@ -1,4 +1,7 @@
 import { fileStore } from '../core/fsdir.js';
+import { utilHelpers } from '../core/util.js';
+
+const LIST_CONC = 16;
 
 const folderOf = (p) => {
   const i = p.lastIndexOf('/');
@@ -17,10 +20,11 @@ async function presentFiles(dirName, paths) {
       if (!byFolder.has(f)) byFolder.set(f, []);
       byFolder.get(f).push(p);
     }
-    for (const [f, list] of byFolder) {
-      const names = new Set(await fileStore.listUnder(dir, f));
-      for (const p of list) if (names.has(fileOf(p))) have.add(p);
-    }
+    const groups = [...byFolder.entries()];
+    const listed = await utilHelpers.pool(groups, LIST_CONC, async ([f]) => new Set(await fileStore.listUnder(dir, f)));
+    groups.forEach(([, list], i) => {
+      for (const p of list) if (listed[i].has(fileOf(p))) have.add(p);
+    });
   } catch (e) {}
   return have;
 }

@@ -84,6 +84,21 @@ function cachedChild(parent, name) {
   }
   return p;
 }
+async function dropCachedPath(parent, parts) {
+  let d = parent;
+  for (const p of parts) {
+    const m = _dirCache.get(d);
+    if (!m) return;
+    const pr = m.get(p);
+    m.delete(p);
+    if (!pr) return;
+    try {
+      d = await pr;
+    } catch (e) {
+      return;
+    }
+  }
+}
 async function descend(dirHandle, parts, create) {
   let d = dirHandle;
   for (const p of parts) d = create ? await d.getDirectoryHandle(p, { create: true }) : await cachedChild(d, p);
@@ -165,7 +180,13 @@ async function purgeEmpty(dirHandle, depth) {
         n += await purgeEmpty(entry, lv + 1);
         continue;
       }
-      if (entry.kind !== 'file' || _writing.has(name)) continue;
+      if (entry.kind !== 'file') continue;
+      const swap = name.match(/^(.*?)(?:\.\d+)?\.crswap$/);
+      if (swap) {
+        if (!_writing.has(swap[1])) kill.push(name);
+        continue;
+      }
+      if (_writing.has(name)) continue;
       try {
         if (!(await entry.getFile()).size) kill.push(name);
       } catch (e) {}
@@ -174,7 +195,8 @@ async function purgeEmpty(dirHandle, depth) {
     return n;
   }
   for (const name of kill) {
-    if (_writing.has(name)) continue;
+    const swap = name.match(/^(.*?)(?:\.\d+)?\.crswap$/);
+    if (_writing.has(swap ? swap[1] : name)) continue;
     try {
       await dirHandle.removeEntry(name);
       n++;
@@ -218,6 +240,25 @@ async function readUnder(dirHandle, subpath) {
     return null;
   }
 }
+const STALE = new Set(['NotReadableError', 'NotFoundError', 'InvalidStateError']);
+async function readBytesUnder(dirHandle, subpath) {
+  const parts = subpath.split('/');
+  const fn = parts.pop();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const d = await descend(dirHandle, parts, false);
+      const fh = await d.getFileHandle(fn, { create: false });
+      return new Uint8Array(await (await fh.getFile()).arrayBuffer());
+    } catch (e) {
+      if (attempt === 0 && e && STALE.has(e.name)) {
+        await dropCachedPath(dirHandle, parts);
+        continue;
+      }
+      return null;
+    }
+  }
+  return null;
+}
 async function listUnder(dirHandle, subdir, { nonEmpty } = {}) {
   let d;
   try {
@@ -237,6 +278,27 @@ async function listUnder(dirHandle, subdir, { nonEmpty } = {}) {
     }
     out.push(fn);
   }
+  return out;
+}
+async function listDirsUnder(dirHandle, subdir) {
+  const out = new Map();
+  let d;
+  try {
+    d = await descend(dirHandle, subdir.split('/').filter(Boolean), false);
+  } catch (e) {
+    return out;
+  }
+  try {
+    for await (const [name, entry] of d.entries()) if (entry.kind === 'directory') out.set(name, entry);
+  } catch (e) {}
+  return out;
+}
+async function listFilesIn(dirHandle) {
+  const out = [];
+  if (!dirHandle) return out;
+  try {
+    for await (const [name, entry] of dirHandle.entries()) if (entry.kind === 'file') out.push(name);
+  } catch (e) {}
   return out;
 }
 const SIZE_CONC = 24;
@@ -304,26 +366,20 @@ async function listFolderDirs() {
   }
   return out;
 }
+const ROOT_TOPS = new Set([...Object.values(DIRS), ...Object.values(FOLDER_PARENTS)]);
 async function readBundleUnder(folderHandle, rel) {
   if (!rel || typeof rel !== 'string') return null;
-  let dir, sub;
-  if (rel.startsWith(DIRS.shared + '/')) {
-    dir = await getDir(DIRS.shared, { create: false });
-    sub = rel.slice(DIRS.shared.length + 1);
-  } else {
-    dir = folderHandle;
-    sub = rel;
+  if (ROOT_TOPS.has(rel.split('/')[0])) {
+    const root = await load();
+    return root ? readBytesUnder(root, rel) : null;
   }
-  if (!dir) return null;
-  const f = await readUnder(dir, sub);
-  return f ? new Uint8Array(await f.arrayBuffer()) : null;
+  return folderHandle ? readBytesUnder(folderHandle, rel) : null;
 }
 async function readNamedBundle(dirName, sub) {
   if (!sub) return null;
   const d = await getDir(dirName, { create: false });
   if (!d) return null;
-  const f = await readUnder(d, sub);
-  return f ? new Uint8Array(await f.arrayBuffer()) : null;
+  return readBytesUnder(d, sub);
 }
 async function walkBundles(dirHandle, prefix, out, depth) {
   out = out || [];
@@ -356,7 +412,10 @@ export const fileStore = {
   writeUnder,
   removeUnder,
   readUnder,
+  readBytesUnder,
   listUnder,
+  listDirsUnder,
+  listFilesIn,
   anyEntry,
   totalSize,
   exists,

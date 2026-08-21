@@ -22,6 +22,9 @@ export function registerPanels(r = {}) {
   panels = Array.isArray(r.panels) ? r.panels : [];
 }
 
+export function getLetterPanel() {
+  return letterPanel;
+}
 export function getImagePanel() {
   return imagePanel;
 }

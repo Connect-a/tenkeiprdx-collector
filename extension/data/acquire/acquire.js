@@ -1,6 +1,6 @@
 import { unityDecode } from '../../unity/decode.js';
 import { fileStore } from '../../core/fsdir.js';
-import { DIRS, SK, DL_CONC, OTHER_EPISODE_SUBTYPE } from '../../core/constants.js';
+import { DIRS, SK, DL_CONC, OTHER_EPISODE_SUBTYPE, FOLDER_PARENTS } from '../../core/constants.js';
 import { networkClient } from '../network.js';
 import { dlSession } from '../dl-session.js';
 import { ensureIndexes } from '../index-store.js';
@@ -15,7 +15,7 @@ import { fileNameOf } from '../../core/paths.js';
 import { PLACE } from '../../core/placement.js';
 import { assetStore } from '../asset-store.js';
 const { assetRoot, fetchBytes, apiFetchBytes } = networkClient;
-const { ownedLevels, unlockedPaidSet, clearedNodeSet, userLoaded } = userStateService;
+const { ownedLevels, unlockedPaidSet, clearedNodeSet, openEpisodeSet, userLoaded } = userStateService;
 const sleep = utilHelpers.sleep;
 const pool = utilHelpers.pool;
 const bytesToB64 = utilHelpers.bytesToB64;
@@ -37,8 +37,10 @@ function episodeLocked(ep, ctx) {
     if (!ctx.clearedLoaded) return true;
     if (!ctx.clearedSet.has(String(ep.episodeId))) return true;
   }
-  const reqLevel = ctx.apiType === 'Character' ? (ctx.storyUnlockLevels || [])[(ep.order || 1) - 1] : null;
-  if (ctx.level != null && reqLevel != null && ctx.level < reqLevel) return true;
+  if (ctx.apiType === 'Character') {
+    if (!ctx.openLoaded) return true;
+    if (!ctx.openSet || !ctx.openSet.has(String(ep.episodeId))) return true;
+  }
   return false;
 }
 
@@ -64,9 +66,8 @@ async function readSavedScenes(dir, episodes, { contents = true } = {}) {
     choiceGroupsByEp = {};
   if (!contents) return { sceneBytes, servedByEp, choiceGroupsByEp };
   for (const ep of episodes) {
-    const gd = await fileStore.readUnder(dir, `story/${ep.episodeId}/getDetails.bin`);
-    if (gd) {
-      const bytes = new Uint8Array(await gd.arrayBuffer());
+    const bytes = await fileStore.readBytesUnder(dir, `story/${ep.episodeId}/getDetails.bin`);
+    if (bytes) {
       const served = {};
       try {
         extractSceneUrls(bytes, served);
@@ -80,8 +81,8 @@ async function readSavedScenes(dir, episodes, { contents = true } = {}) {
     for (const fn of await fileStore.listUnder(dir, `story/${ep.episodeId}`, { nonEmpty: true })) {
       const m = fn.match(/^scene_(\d+)\.bin$/);
       if (m) {
-        const f = await fileStore.readUnder(dir, `story/${ep.episodeId}/${fn}`);
-        if (f) sceneBytes[m[1]] = new Uint8Array(await f.arrayBuffer());
+        const b = await fileStore.readBytesUnder(dir, `story/${ep.episodeId}/${fn}`);
+        if (b) sceneBytes[m[1]] = b;
       }
     }
   }
@@ -104,9 +105,11 @@ async function planApiEpisodes(folderKey, opts) {
   const paid = meta0.apiType === 'Special' ? await unlockedPaidSet() : null;
   const cleared = meta0.apiType === 'Quest' ? await clearedNodeSet() : null;
   const clearedLoaded = meta0.apiType === 'Quest' ? await userLoaded() : true;
+  const openSet = meta0.apiType === 'Character' ? await openEpisodeSet() : null;
+  const openLoaded = meta0.apiType === 'Character' ? await userLoaded() : true;
   const eps = [];
   for (const ep of meta0.episodes) {
-    if (episodeLocked(ep, { apiType: meta0.apiType, level, storyUnlockLevels: CFG.storyUnlockLevels, clearedSet: cleared, clearedLoaded, paidSet: paid })) continue;
+    if (episodeLocked(ep, { apiType: meta0.apiType, level, openSet, openLoaded, clearedSet: cleared, clearedLoaded, paidSet: paid })) continue;
     const served = servedByEp[ep.episodeId];
     const need = new Set([...(ep.sceneBinIds || []).map(String), ...(served || [])]);
     const complete = served != null && [...need].every((sid) => sceneBytes[sid]);
@@ -278,8 +281,11 @@ async function createAcquireContext(folderKey, meta0, opts) {
   }
 
   const idx = await ensureIndexes();
+  let castDirsP = null;
+  const castDirs = () => (castDirsP = castDirsP || fileStore.listFolderDirs().then((ds) => new Map(ds.filter((d) => d.parent === FOLDER_PARENTS.character).map((d) => [String(d.folderKey), d]))));
   return {
     folderKey: String(folderKey),
+    castDirs,
     meta0,
     download,
     decode,
@@ -323,7 +329,7 @@ function planEpisodes(ctx, choiceGroupsByEp, gate, savedIds) {
 }
 
 async function decodeEpisodeScenes(ctx, ep, epMeta, sceneBytes, voice) {
-  const used = { bg: new Set(), bgm: new Set(), se: new Set(), insert: new Set() };
+  const used = { bg: new Set(), bgm: new Set(), se: new Set(), insert: new Set(), still: new Set() };
   const queue = ep.sceneBinIds.map(String);
   const own = new Set(queue);
   const seen = new Set();
@@ -370,6 +376,7 @@ async function decodeEpisodeScenes(ctx, ep, epMeta, sceneBytes, voice) {
     try {
       for (const cm of (decoded[0] && decoded[0][4]) || []) {
         if (typeof cm[28] === 'string' && cm[28] && !/^no_?se$/i.test(cm[28])) used.se.add(cm[28]);
+        if (typeof cm[7] === 'string' && cm[7]) used.still.add(cm[7]);
         if (cm[23] != null && cm[23] !== '' && (Number(cm[24]) || 0) !== 1) used.insert.add(String(cm[23]));
       }
     } catch (e) {}
@@ -475,6 +482,22 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
         await ctx.grabOwn(trel, PLACE.episode(epDir, 'cgthumb'), `cgthumb ${name}`);
       });
     }
+  }
+
+  for (const name of used.still) {
+    const rel = ctx.sceneAssets[name];
+    if (!rel) {
+      routing.unresolved.push('still:' + name);
+      continue;
+    }
+    queueAssetGrab(ctx, {
+      rel,
+      label: `still ${name}`,
+      sharedFirst: /^bg_(adventure|eventstill)_/i.test(name),
+      episodeDir: PLACE.episode(epDir, 'cg'),
+      onGot: (path) => ((epMeta.cg || (epMeta.cg = {}))[name] = path),
+      onFail: () => routing.dlFailed.push('still:' + name),
+    });
   }
 
   for (const name of used.bgm) {
@@ -594,9 +617,15 @@ function queueCastSpines(ctx, routing) {
       }
       const c = ctx.idx.master.characters[id];
       const rec = { name: (c && c.name) || '', title: (c && c.title) || '' };
+      const own = (await ctx.castDirs()).get(id);
       for (const cat of ['spine', 'spinelight']) {
         const rel = (a2[cat] || [])[0];
         if (!rel) continue;
+        const mine = own ? await assetStore.locate(own.handle, rel, PLACE.visual(cat)) : null;
+        if (mine) {
+          rec[cat] = `${own.parent}/${own.dirName}/${mine}`;
+          continue;
+        }
         const cp = await ctx.grabAsset(ctx.sharedDir, rel, null, `${cat} ${id}`);
         if (cp) rec[cat] = `${DIRS.shared}/${cp}`;
       }
@@ -684,7 +713,8 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
   const gate = {
     apiType: meta0.apiType,
     level,
-    storyUnlockLevels: CFG.storyUnlockLevels,
+    openSet: meta0.apiType === 'Character' ? await openEpisodeSet() : null,
+    openLoaded: meta0.apiType === 'Character' ? await userLoaded() : true,
     clearedSet: meta0.apiType === 'Quest' ? await clearedNodeSet() : null,
     clearedLoaded: meta0.apiType === 'Quest' ? await userLoaded() : true,
     paidSet: meta0.apiType === 'Special' ? await unlockedPaidSet() : null,
@@ -701,7 +731,6 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
     chapter: meta0.chapter || '',
     attachmentColors: meta0.attachmentColors,
     level: level != null ? level : undefined,
-    storyUnlockLevels: CFG.storyUnlockLevels || null,
     episodes: orderedEpMetas,
     voiceGallery: null,
     assets: {},

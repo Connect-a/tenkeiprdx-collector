@@ -7,6 +7,7 @@ import { utilHelpers } from '../../core/util.js';
 import { scenarioSettings } from './scenario-settings.js';
 import { createBgmEngine } from '../../core/bgm-engine.js';
 const { audioBlobUrl, cachedAudioUrl, sleep, revokeUrlMap } = utilHelpers;
+const TTS_MIN_REAL_MS = 350;
 
 function create(deps) {
   const els = deps.els || {};
@@ -168,11 +169,13 @@ function create(deps) {
     u.volume = audible ? Math.min(1, masterVol() * 1.8) : 0;
     st.ttsUtter = u;
     st.ttsState = 'speaking';
-    const fin = () => {
-      if (st.ttsUtter === u) st.ttsState = 'done';
+    const startedAt = Date.now();
+    u.onend = () => {
+      if (st.ttsUtter === u) st.ttsState = Date.now() - startedAt < TTS_MIN_REAL_MS ? 'unavailable' : 'done';
     };
-    u.onend = fin;
-    u.onerror = fin;
+    u.onerror = () => {
+      if (st.ttsUtter === u) st.ttsState = 'unavailable';
+    };
     try {
       s.speak(u);
     } catch (e) {

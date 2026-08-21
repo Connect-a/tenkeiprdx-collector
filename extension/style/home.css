@@ -344,6 +344,14 @@
   min-width: 0;
 }
 
+.imgsplit.solo {
+  grid-template-columns: 1fr;
+}
+
+.imgsplit.solo .imgsplit-right {
+  display: none;
+}
+
 .hbicon {
   display: inline-flex;
   width: 28px;

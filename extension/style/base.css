@@ -145,6 +145,28 @@ body {
   margin: 0 2px 6px;
 }
 
+.hdmenu {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #b9b3cc;
+  font-size: 17px;
+  line-height: 1;
+  padding: 5px 9px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hdmenu:hover {
+  background: #26232f;
+  border-color: #3a3650;
+  color: #e8e6f0;
+}
+
+body.sbcollapsed .sidebar {
+  display: none;
+}
+
 .toastwrap {
   position: fixed;
   right: 16px;
@@ -272,11 +294,24 @@ body {
   margin-bottom: 0;
 }
 
+.detailtop {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.detailtop > #charHead {
+  flex: 1;
+  min-width: 0;
+}
+
 .detailnav {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
+  flex: none;
+  margin-left: auto;
   flex-wrap: wrap;
 }
 
@@ -784,9 +819,25 @@ code {
   padding: 1.4rem 1.5rem 0.4rem;
   line-height: 1.75;
   font-size: 18px;
+  max-height: 58vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .upmodal-body p {
   margin: 0 0 0.35rem;
+}
+.upmodal-sec {
+  margin: 1.5rem 0 0.6rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line, #3a3a44);
+  font-size: 20px;
+  font-weight: 700;
+  color: #cbb8ff;
+}
+.upmodal-body > .upmodal-sec:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 .upmodal-foot {
   display: flex;

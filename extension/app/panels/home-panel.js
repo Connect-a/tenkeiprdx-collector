@@ -124,7 +124,10 @@ export function createHomePanel(deps) {
     bgm.setDownloaded([...bgmDlList('homeBgm'), ...bgmDlList('otherBgm')]);
 
     grid.innerHTML = '';
-    grid.appendChild(homeDownloadBar(data));
+    const homeTotal = SECTION_ORDER.reduce((n, section) => n + (data[section] || []).length, 0);
+    const homeGot = SECTION_ORDER.reduce((n, section) => n + Math.min(_home.got[section].size, (data[section] || []).length), 0);
+    getById('rostercount').textContent = `${homeGot} / ${homeTotal}`;
+    if (homeGot < homeTotal) grid.appendChild(homeDownloadBar(data, homeTotal - homeGot));
     grid.appendChild(el('div', 'homenav', SECTION_ORDER.map((section) => el('button', { class: 'homenavlink', text: `${HOME_SECTIONS[section].label} ${(data[section] || []).length}`, on: { click: () => goToSection(section) } }))));
 
     for (const section of SECTION_ORDER) {
@@ -137,13 +140,13 @@ export function createHomePanel(deps) {
     }
   }
 
-  function homeDownloadBar(data) {
+  function homeDownloadBar(data, missing) {
     const status = el('span', { class: 'note dim', id: 'homeDlStatus' });
     const pbar = el('div', { class: 'hpbar', id: 'homePbar', style: { display: 'none' }, html: '<i></i>' });
     const dlBtn = el('button', {
-      class: 'btn primary',
+      class: 'btn sm primary',
       id: 'homeDl',
-      text: 'ホームのリソースダウンロード',
+      text: `ホームリソースDL（${missing}）`,
       on: {
         click: async () => {
           const root = fileStore && fileStore.supported ? await fileStore.ensure() : null;
@@ -163,7 +166,7 @@ export function createHomePanel(deps) {
               status.textContent = `取得中… ${processed}/${total}`;
               applyHomeItem(section, entry);
             });
-            const short = `新規${r.got}件・既にあった分${r.skip}件${r.miss ? `・ゲーム側にデータが無い分${r.miss}件` : ''}${r.unresolved ? `・紐づけできなかった分${r.unresolved}件` : ''}`;
+            const short = `新規${r.got}件・既にあった分${r.skip}件${r.missing ? `・ゲーム側にデータが無い分${r.missing}件` : ''}${r.unresolved ? `・紐づけできなかった分${r.unresolved}件` : ''}`;
             status.textContent = `完了（${short}）`;
             toast(`ホーム画面の素材を取得しました（${short}）`, 'ok');
           } catch (e) {

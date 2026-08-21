@@ -14,7 +14,7 @@ function binlistEpisodesCovered(meta, distSet) {
 
 function openEpisodeCount(meta, ctx, level) {
   const episodes = meta.episodes || [];
-  if (meta.rosterKind === 'character') return level != null ? userStateService.unlockedCount(level) : 0;
+  if (meta.rosterKind === 'character') return level != null ? episodes.filter((e) => ctx.openEpisodes.has(String(e.episodeId))).length : 0;
   if (meta.rosterKind === 'special') return episodes.filter((e) => e.paidMasterId == null || ctx.paidUnlocked.has(String(e.paidMasterId))).length;
   return episodes.filter((e) => ctx.clearedNodes.has(String(e.episodeId))).length;
 }
@@ -60,6 +60,7 @@ async function rosterUserContext(opts) {
     ownedLevels: await userStateService.ownedLevels(),
     paidUnlocked: await userStateService.unlockedPaidSet(),
     clearedNodes: await userStateService.clearedNodeSet(),
+    openEpisodes: await userStateService.openEpisodeSet(),
     dlMap: new Map(dlArr.map((x) => [String(x.folderKey), x])),
     distSet: opts.distSet || null,
   };

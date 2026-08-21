@@ -59,7 +59,7 @@ async function buildSharedResources(progress, opts) {
     },
     done: (c) => `完了 新規${c.got}件・既にあった分${c.skip}件・失敗${c.fail}件 / 全${c.total}件`,
   });
-  return { got: ctx.got, skip: ctx.skip, fail: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
+  return { got: ctx.got, skip: ctx.skip, missing: ctx.missing, unresolved: 0, failed: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
 }
 
 async function sharedResourcesPresent() {
@@ -85,9 +85,9 @@ async function sharedStatus() {
   try {
     const list = await sharedResourceRels();
     const have = await assetStore.presentIds(DIRS.shared, list);
-    return { have: have.size, total: list.length };
+    return { have: have.size, total: list.length, unknown: 0 };
   } catch (e) {
-    return { have: 0, total: 0 };
+    return { have: 0, total: 0, unknown: 0 };
   }
 }
 

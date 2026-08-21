@@ -10,6 +10,15 @@ const DEFS = {
   homeBgmPlaying: { key: 'homeBgmPlaying', def: true, type: 'bool' },
   homeBgmPriority: { key: 'homeBgmPriority', def: false, type: 'bool' },
   playerName: { key: 'storyPlayerName', def: '', type: 'text', max: 16 },
+  storyMosaic: { key: 'storyMosaic', def: false, type: 'bool' },
+  stillGroupMale: { key: 'stillGroupMale', def: 1, type: 'num', min: 0, max: 1 },
+  stillGroupPenis: { key: 'stillGroupPenis', def: 1, type: 'num', min: 0, max: 1 },
+  stillGroupHand: { key: 'stillGroupHand', def: 1, type: 'num', min: 0, max: 1 },
+  stillGroupFemale: { key: 'stillGroupFemale', def: 1, type: 'num', min: 0, max: 1 },
+  stillGroupBg: { key: 'stillGroupBg', def: 1, type: 'num', min: 0, max: 1 },
+  stillGroupOther: { key: 'stillGroupOther', def: 1, type: 'num', min: 0, max: 1 },
+  stillBackImgHidden: { key: 'stillBackImgHidden', def: false, type: 'bool' },
+  sidebarCollapsed: { key: 'sidebarCollapsed', def: false, type: 'bool' },
 };
 
 const state = {};

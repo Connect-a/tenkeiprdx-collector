@@ -2,11 +2,14 @@ import { el, getById } from '../../core/dom.js';
 
 const ROSTER_CONTROLS = ['rosterSearch', 'rosterOwn', 'rosterGroup', 'rosterRank', 'bulkOpen', 'sharedDl'];
 
-export function hideRosterControls() {
+export function hideRosterControls({ keepSearch } = {}) {
   for (const id of ROSTER_CONTROLS) {
+    if (keepSearch && id === 'rosterSearch') continue;
     const node = getById(id);
     if (node) node.style.display = 'none';
   }
+  const search = getById('rosterSearch');
+  if (keepSearch && search) search.style.display = '';
 }
 
 export function splitLayout(grid, viewId, placeholder) {

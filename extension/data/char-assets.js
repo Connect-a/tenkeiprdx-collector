@@ -8,8 +8,7 @@ const EMPTY_MAT = { materials: [], textures: [] };
 
 async function readBundle(handle, rel) {
   if (!rel || !handle) return null;
-  const f = await fileStore.readUnder(handle, rel);
-  return f ? new Uint8Array(await f.arrayBuffer()) : null;
+  return fileStore.readBytesUnder(handle, rel);
 }
 
 async function buildWeapons(read, list) {
@@ -125,10 +124,10 @@ function build3dOptions(loaded, master, ui) {
 
 async function extractClips(handle, path) {
   if (!handle || !path) return [];
-  const f = await fileStore.readUnder(handle, path);
-  if (!f) return [];
+  const b = await fileStore.readBytesUnder(handle, path);
+  if (!b) return [];
   try {
-    return await unityDecode.extractVoiceClips(new Uint8Array(await f.arrayBuffer()));
+    return await unityDecode.extractVoiceClips(b);
   } catch (e) {
     return [];
   }

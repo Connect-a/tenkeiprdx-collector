@@ -24,8 +24,6 @@ export function applyKindTabs(rosterKind) {
   document.querySelectorAll('.tab').forEach((t) => {
     t.style.display = charOnly || t.dataset.tab !== 'voice' ? '' : 'none';
   });
-  const tools = document.querySelector('#playwrap .audiotop');
-  if (tools) tools.style.display = '';
   for (const id of ['show3d', 'showSpine']) {
     const lb = getById(id) && getById(id).closest('label');
     if (lb) lb.style.display = charOnly ? '' : 'none';

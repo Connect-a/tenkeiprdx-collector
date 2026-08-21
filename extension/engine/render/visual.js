@@ -5,12 +5,154 @@ import { imageZoom } from './imgzoom.js';
 import { characterMeta, episodeIdOf } from '../../data/character-meta.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { spineWeb } from '../story/spine-web.js';
+import { slotGroup } from '../story/slot-group.js';
 import { DIRS } from '../../core/constants.js';
 import { bundleName } from '../../core/paths.js';
-import { el, append } from '../../core/dom.js';
+import { el, append, filterBox } from '../../core/dom.js';
 import { fileStore } from '../../core/fsdir.js';
+import { assetStore } from '../../data/asset-store.js';
+import { ensureIndexes } from '../../data/index-store.js';
 import { unityDecode } from '../../unity/decode.js';
 const mapLimit = (items, limit, worker) => utilHelpers.pool(Array.isArray(items) ? items : [], limit, worker);
+
+const VIS_STATES = [
+  ['1', '表示'],
+  ['0.5', '半透明'],
+  ['0', '非表示'],
+];
+let _visSeq = 0;
+const setupAlpha = (slot) => (slot.data && slot.data.color && slot.data.color.a != null ? slot.data.color.a : 1);
+function installPlayerVis(player) {
+  if (player.__visHooked) return player.__vis;
+  player.__vis = {};
+  const orig = player.drawFrame ? player.drawFrame.bind(player) : null;
+  if (!orig) return player.__vis;
+  const held = new Set();
+  player.drawFrame = function (rnf) {
+    try {
+      const sk = player.skeleton;
+      if (sk && sk.slots)
+        for (const slot of sk.slots) {
+          const name = slot.data.name;
+          const a = player.__vis[name];
+          if (a != null) {
+            slot.color.a = a;
+            held.add(name);
+          } else if (held.has(name)) {
+            slot.color.a = setupAlpha(slot);
+            held.delete(name);
+          }
+        }
+    } catch (e) {}
+    return orig(rnf);
+  };
+  player.__visHooked = true;
+  return player.__vis;
+}
+function visRadios(initial, onPick) {
+  const name = 'pv' + _visSeq++;
+  const w = el('span', 'stillradios');
+  for (const [v, t] of VIS_STATES) {
+    const input = el('input', { type: 'radio', name, value: v, checked: String(initial) === v });
+    input.addEventListener('change', () => {
+      if (input.checked) onPick(Number(v));
+    });
+    w.appendChild(el('label', 'stillradio', [input, el('span', { text: t })]));
+  }
+  return w;
+}
+function applyVisFilter(panel, q) {
+  const on = !!q;
+  panel.querySelectorAll('.stillgrp').forEach((wrap) => {
+    const parts = wrap.querySelector('.stillparts');
+    let any = false;
+    wrap.querySelectorAll('.stillpart-row').forEach((row) => {
+      const nm = (row.querySelector('.stillpart-lbl').textContent || '').toLowerCase();
+      const m = !on || nm.includes(q);
+      row.style.display = m ? '' : 'none';
+      if (m && on) any = true;
+    });
+    if (parts) parts.style.display = on ? (any ? '' : 'none') : 'none';
+    wrap.style.display = on && !any ? 'none' : '';
+  });
+}
+function buildVisPanel(panel, player) {
+  const sk = player && player.skeleton;
+  if (!sk || !sk.slots) {
+    panel.textContent = '（読み込み中… もう一度開いてください）';
+    return false;
+  }
+  panel.innerHTML = '';
+  const vis = installPlayerVis(player);
+  const groups = new Map();
+  for (const slot of sk.slots) {
+    const nm = slot.data.name;
+    const g = slotGroup(nm);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(nm);
+  }
+  const setRad = (root, a) => root.querySelectorAll('.stillradios input[value="' + a + '"]').forEach((r) => (r.checked = true));
+  panel.appendChild(
+    el('div', 'stillpanel-hd', [
+      el('span', { text: '表示制御' }),
+      el('button', {
+        class: 'btn xs',
+        text: '全表示',
+        on: {
+          click: () => {
+            for (const k of Object.keys(vis)) delete vis[k];
+            setRad(panel, 1);
+          },
+        },
+      }),
+    ]),
+  );
+  const fb = filterBox({ placeholder: '部品名でフィルタ（入力すると部品を表示）…' }, (q) => applyVisFilter(panel, q));
+  panel.appendChild(fb.wrap);
+  for (const [g, names] of groups) {
+    const wrap = el('div', 'stillgrp');
+    const parts = el('div', { class: 'stillparts', style: { display: 'none' } });
+    const grad = visRadios(1, (a) => {
+      for (const n of names) {
+        if (a === 1) delete vis[n];
+        else vis[n] = a;
+      }
+      setRad(parts, a);
+    });
+    const exp = el('button', { class: 'btn xs', text: '部品' });
+    exp.addEventListener('click', () => (parts.style.display = parts.style.display === 'none' ? '' : 'none'));
+    wrap.appendChild(el('div', 'stillgrp-row', [el('span', { class: 'stillgrp-lbl', text: g + '（' + names.length + '）' }), grad, exp]));
+    for (const n of names) {
+      const prad = visRadios(1, (a) => {
+        if (a === 1) delete vis[n];
+        else vis[n] = a;
+      });
+      parts.appendChild(el('div', 'stillpart-row', [el('span', { class: 'stillpart-lbl', text: n }), prad]));
+    }
+    wrap.appendChild(parts);
+    panel.appendChild(wrap);
+  }
+  return true;
+}
+function attachVisControl(cell, player) {
+  const panel = el('div', { class: 'spine-vispanel', style: { display: 'none' } });
+  const btn = el('button', {
+    class: 'btn xs spine-visbtn',
+    text: '表示制御',
+    on: {
+      click: () => {
+        if (panel.style.display !== 'none') {
+          panel.style.display = 'none';
+          return;
+        }
+        if (!panel.__built) panel.__built = buildVisPanel(panel, player);
+        panel.style.display = '';
+      },
+    },
+  });
+  cell.appendChild(btn);
+  cell.appendChild(panel);
+}
 
 const crunchCaps = () => {
   const canCrunch = !!(CRUNCH_MOD && CRUNCH_MOD.canDecodeCrunched && CRUNCH_MOD.canDecodeCrunched());
@@ -34,6 +176,56 @@ const readParsedBundle = async (cur, relPath) => {
   if (!f) return null;
   return unityDecode.parseUnityFS(new Uint8Array(await f.arrayBuffer()));
 };
+
+async function storySceneBgNames(cur) {
+  const names = new Set();
+  const eps = (cur && cur.meta && Array.isArray(cur.meta.episodes) && cur.meta.episodes) || [];
+  for (const ep of eps) {
+    const dir = 'story/' + episodeIdOf(ep);
+    let files = [];
+    try {
+      files = await fileStore.listUnder(cur.handle, dir);
+    } catch (e) {}
+    for (const fn of files) {
+      if (!/^scene_.*\.json$/i.test(fn)) continue;
+      try {
+        const f = await fileStore.readUnder(cur.handle, dir + '/' + fn);
+        if (!f) continue;
+        const tl = JSON.parse(await f.text());
+        for (const ln of (tl && tl.lines) || []) if (ln && ln.bg) names.add(String(ln.bg));
+      } catch (e) {}
+    }
+  }
+  return names;
+}
+
+async function sharedStoryImagePaths(cur, known) {
+  const names = await storySceneBgNames(cur);
+  if (!names.size) return [];
+  let sceneAssets = {};
+  let generic = new Set();
+  try {
+    const idx = await ensureIndexes();
+    sceneAssets = idx.assets.sceneAssetIndex || {};
+    generic = new Set(idx.master.sharedImageNames || []);
+  } catch (e) {}
+  const out = [];
+  for (const name of [...names].sort()) {
+    if (generic.has(name)) continue;
+    const rel = sceneAssets[name];
+    if (!rel) continue;
+    let sub = null;
+    try {
+      sub = await assetStore.locate(DIRS.shared, rel);
+    } catch (e) {}
+    if (!sub) continue;
+    const path = DIRS.shared + '/' + sub;
+    if (known.has(path)) continue;
+    known.add(path);
+    out.push(path);
+  }
+  return out;
+}
 
 const getVisuals = (meta) => (meta && Array.isArray(meta.visuals) && meta.visuals) || (characterMeta && characterMeta.buildVisuals ? characterMeta.buildVisuals(meta || {}) : []);
 const spineVisuals = (meta) => getVisuals(meta).filter((v) => v.kind === 'spine' && /\.bundle$/i.test(v.path || ''));
@@ -89,6 +281,7 @@ function reapDetachedSpinePlayers() {
 const currentRenderGen = () => _renderGen;
 
 let _galleryUrls = [];
+let _galleryCanvases = [];
 function disposeGallery() {
   for (const u of _galleryUrls) {
     try {
@@ -96,6 +289,13 @@ function disposeGallery() {
     } catch (e) {}
   }
   _galleryUrls = [];
+  for (const cv of _galleryCanvases) {
+    try {
+      cv.width = 0;
+      cv.height = 0;
+    } catch (e) {}
+  }
+  _galleryCanvases = [];
 }
 
 async function renderSpinePreview(cur, hostEl) {
@@ -202,6 +402,7 @@ async function renderSpinePreview(cur, hostEl) {
         },
       });
       myPlayers.push(player);
+      attachVisControl(cell, player);
       anyOk = true;
     } catch (e) {
       playerErr = e && e.message ? e.message : String(e);
@@ -243,8 +444,8 @@ async function renderImageGallery(cur, hostEl, opt) {
 
   let paths = imageVisuals(cur.meta || {}).map((v) => v.path);
   if (includeStoryAssets && cur.handle && fileStore.walkBundles) {
+    const known = new Set([...paths, ...spineVisuals(cur.meta || {}).map((v) => v.path)]);
     try {
-      const known = new Set([...paths, ...spineVisuals(cur.meta || {}).map((v) => v.path)]);
       const SKIP = /(^|\/)(visual\/(spine|spinelight|model|materials|weapon|illustvoice)\/|story\/[^/]+\/(voice|bgm|se)\/|voice_gallery\.)/i;
       for (const rel of await fileStore.walkBundles(cur.handle)) {
         if (known.has(rel) || SKIP.test(rel)) continue;
@@ -252,8 +453,12 @@ async function renderImageGallery(cur, hostEl, opt) {
         paths.push(rel);
       }
     } catch (e) {}
+    paths = paths.slice(0, maxBundles);
+    try {
+      paths.push(...(await sharedStoryImagePaths(cur, known)));
+    } catch (e) {}
   }
-  paths = paths.slice(0, maxBundles);
+  paths = paths.slice(0, maxBundles + 40);
   if (!paths.length) {
     hostEl.textContent = '画像系バンドルの候補が見つかりませんでした。';
     return { ok: false, error: 'no image bundle paths' };
@@ -401,6 +606,7 @@ async function renderImageGallery(cur, hostEl, opt) {
       const frag = document.createDocumentFragment();
       for (const item of res.items) {
         if (summary.rendered >= maxItems) break;
+        if (item.canvas) _galleryCanvases.push(item.canvas);
         frag.appendChild(imageZoom.createImageCard(item));
         summary.items.push({ path: item.path, width: item.width, height: item.height, offset: item.offset, type: item.type });
         summary.rendered += 1;
@@ -413,6 +619,7 @@ async function renderImageGallery(cur, hostEl, opt) {
     paths.map((p, i) => ({ p, i })),
     maxConcurrent,
     async ({ p, i }) => {
+      if (myGen !== currentRenderGen()) return;
       const res = await decodeBundle(p);
       if (myGen !== currentRenderGen()) return;
       done[i] = { res, slot: slots[i] };

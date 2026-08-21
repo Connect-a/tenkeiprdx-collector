@@ -16,6 +16,10 @@
   flex-wrap: wrap;
 }
 
+.rhright {
+  margin-left: auto;
+}
+
 #rosterSearch {
   padding: 8px 10px;
   border-radius: 8px;

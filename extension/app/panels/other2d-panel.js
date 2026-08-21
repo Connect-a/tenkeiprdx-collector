@@ -37,15 +37,13 @@ export function createOther2dPanel(deps) {
   const ready = (e) => (e.file ? _haveFiles.has(e.file) : e.ids.some((s) => _have.has(s)));
   const readBundle = (rel) => assetStore.readAsset(DIRS.shared, rel);
 
-  function dlBar(entries) {
-    const missing = entries.flatMap((e) => e.refs.filter((r) => !_have.has(r.id)));
+  function dlBar(missing, count) {
     return downloadBar({
-      text: `立ち絵を ${DIRS.shared} へ取得します（ストーリー再生の共演立ち絵と同じ置き場なので、物語側からも使われます）。`,
-      label: `すべてダウンロード（${entries.length}件 / ${missing.length}バンドル）`,
+      label: `その他2D DL（${count}）`,
       run: async (onProgress) => {
         try {
           const r = await assetAcquirer.runOther2dDownload(missing, onProgress);
-          toast(`その他2Dを取得しました（新規${r.got}件・既にあった分${r.skip}件${r.fail ? `・失敗${r.fail}件` : ''}）`, r.fail ? 'err' : 'ok');
+          toast(`その他2Dを取得しました（新規${r.got}件・既にあった分${r.skip}件${r.failed ? `・失敗${r.failed}件` : ''}）`, r.failed ? 'err' : 'ok');
           await render();
         } catch (er) {
           onProgress(errText(er));
@@ -156,11 +154,12 @@ export function createOther2dPanel(deps) {
     _list = st.list;
     _have = st.have;
     _haveFiles = st.haveFiles || new Set();
-    getById('rostercount').textContent = `その他2D ${_list.length}件（取得済み ${st.ready}）`;
+    getById('rostercount').textContent = `${st.ready} / ${_list.length}`;
 
     grid.innerHTML = '';
-    const missingEntries = _list.filter((e) => !ready(e));
-    if (missingEntries.length) grid.appendChild(dlBar(missingEntries));
+    const missing = _list.filter((e) => !ready(e)).flatMap((e) => e.refs.filter((r) => !_have.has(r.id)));
+    const missingFiles = _list.filter((e) => e.file && !_haveFiles.has(e.file)).length;
+    if (missing.length || missingFiles) grid.appendChild(dlBar(missing, missing.length + missingFiles));
     const { listCol } = splitLayout(grid, 'other2dView', 'カードを選ぶとここに立ち絵表示');
     _ordered = SECTIONS.flatMap(([, pick]) => _list.filter(pick));
     for (const [title, pick] of SECTIONS) {

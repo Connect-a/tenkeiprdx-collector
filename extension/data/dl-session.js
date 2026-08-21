@@ -51,6 +51,18 @@ async function saveAsset(session, dir, rel, spec) {
   return { ...r, label: spec.label };
 }
 
+const dirIds = new WeakMap();
+let dirSeq = 0;
+function dirId(d) {
+  if (!d) return '0';
+  let n = dirIds.get(d);
+  if (!n) {
+    n = String(++dirSeq);
+    dirIds.set(d, n);
+  }
+  return n;
+}
+
 function createDlSession(opts) {
   const session = {
     counters: { got: 0, skip: 0, fail: 0, missing: 0, unresolved: 0, recovered: 0 },
@@ -63,7 +75,21 @@ function createDlSession(opts) {
     return r;
   };
   session.saveUrl = async (targetDir, spec, note) => guard(await saveUrl(session, targetDir, spec), note);
-  session.saveAsset = async (dir, rel, spec, note) => guard(await saveAsset(session, dir, rel, spec), note);
+
+  const inflight = new Map();
+  session.saveAsset = async (dir, rel, spec, note) => {
+    const key = `${dirId(dir)}|${spec.place || ''}|${rel}`;
+    const known = inflight.get(key);
+    if (known) {
+      const r = await known;
+      return { ...r, status: r.status === 'got' ? 'skip' : r.status };
+    }
+    const p = (async () => guard(await saveAsset(session, dir, rel, spec), note))();
+    inflight.set(key, p);
+    const r = await p;
+    if (r.status !== 'got' && r.status !== 'skip') inflight.delete(key);
+    return r;
+  };
 
   session.flushDeferred = async (onProgress) => {
     const q = session.deferred;

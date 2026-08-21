@@ -1,7 +1,7 @@
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { assetStore } from '../../data/asset-store.js';
 import { PLACE } from '../../core/placement.js';
-import { model3dRenderer } from '../../engine/render/model3d.js';
+import { loadModel3d, disposeModel3d } from '../../engine/render/lazy.js';
 import { glManager } from '../../engine/render/gl-manager.js';
 import { charAssets } from '../../data/char-assets.js';
 import { DIRS } from '../../core/constants.js';
@@ -46,7 +46,7 @@ export function createOtherPanel(deps) {
     const sig = list.length + ':' + (status ? status.ready + '/' + status.total : '') + ':' + list.map((e) => e.id).join(',');
     if (_listSig === sig && grid.querySelector('.otherlayout')) return;
     _listSig = sig;
-    _model3d = model3dRenderer.disposeModel3d(_model3d);
+    _model3d = disposeModel3d(_model3d);
     grid.innerHTML = '';
     if (!list.length) {
       grid.appendChild(el('div', 'emptyrow', 'その他の3Dデータがありません。「ゲームと接続」してからやり直してください。'));
@@ -56,7 +56,7 @@ export function createOtherPanel(deps) {
     for (const c of CATEGORY) byCat[c.key] = [];
     for (const e of list) (byCat[e.category] || byCat.misc).push(e);
     const present = CATEGORY.filter((c) => byCat[c.key].length);
-    getById('rostercount').textContent = `その他3D ${list.length}体（${present.map((c) => `${c.label}${byCat[c.key].length}`).join(' / ')}）`;
+    getById('rostercount').textContent = `${(status && status.ready) || 0} / ${list.length}`;
 
     if (status && status.missing.length) grid.appendChild(dlBar(status));
 
@@ -91,7 +91,7 @@ export function createOtherPanel(deps) {
       run: async (onProgress) => {
         try {
           const r = await assetAcquirer.runOther3dDownload(onProgress);
-          toast(`その他3Dを取得しました（新規${r.got}件・失敗${r.fail}件／全${r.total}件）`, r.fail ? 'err' : 'ok');
+          toast(`その他3Dを取得しました（新規${r.got}件・失敗${r.failed}件／全${r.total}件）`, r.failed ? 'err' : 'ok');
           _listSig = '';
           const grid = getById('rosterGrid');
           if (grid) await renderList(grid);
@@ -120,7 +120,7 @@ export function createOtherPanel(deps) {
     }
     host.innerHTML = spinnerHtml('3Dを読み込み中…');
     try {
-      _model3d = model3dRenderer.disposeModel3d(_model3d);
+      _model3d = disposeModel3d(_model3d);
       const matRel = e.material;
       const model = await charAssets.loadModelBundle(grab, e.model, e.meshDeps);
       if (!model) {
@@ -153,11 +153,12 @@ export function createOtherPanel(deps) {
       }
       const canvasHost = el('div');
       host.appendChild(canvasHost);
+      const renderer = await loadModel3d();
       const paint = () => {
-        _model3d = model3dRenderer.disposeModel3d(_model3d);
+        _model3d = disposeModel3d(_model3d);
         const opts = charAssets.build3dOptions({ mouthAtlas, weapons }, e, { height: 440 });
         opts.onContextLost = () => (_glRebuildOk() ? (paint(), true) : false);
-        const r = model3dRenderer.render(canvasHost, model, matBundle, opts);
+        const r = renderer.render(canvasHost, model, matBundle, opts);
         _model3d = r && r.dispose ? r : null;
         if (r && r.ok === false) {
           const reason = r.reason === 'no-meshes' || r.reason === 'no-renderable-unityMesh' ? `このモデル(#${e.id})は表示できる形状データを持っていません。` : '3Dを表示できませんでした。';
@@ -189,7 +190,7 @@ export function createOtherPanel(deps) {
 
   function reset() {
     clearView('otherView', 'カードを選ぶとここに3D表示');
-    _model3d = model3dRenderer.disposeModel3d(_model3d);
+    _model3d = disposeModel3d(_model3d);
     _listSig = '';
   }
 

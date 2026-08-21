@@ -1,9 +1,10 @@
 export const TYPE_LABEL = { character: 'キャラ', main: 'メイン', event: 'イベント', special: '特別', home: 'ホーム', other: 'その他3D', item: 'アイテム', monster: 'モンスター', other2d: 'その他2D' };
 
 import { settings } from '../../core/settings.js';
+import { DEFAULT_PLAYER_NAME } from '../../core/constants.js';
 
 export const chip = (rosterKind) => (TYPE_LABEL[rosterKind] ? `<span class="chip ${rosterKind}">${TYPE_LABEL[rosterKind]}</span>` : '');
-export const nameFix = (s) => (s || '').replace(/%username%/gi, settings.get('playerName') || '主人公');
+export const nameFix = (s) => (s || '').replace(/%username%/gi, settings.get('playerName') || DEFAULT_PLAYER_NAME);
 export const kanaKey = (s) =>
   String(s || '')
     .replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60))
