@@ -179,6 +179,8 @@ const TABLE_HANDLERS = {
   },
   32(p, acc) {
     acc.sceneMeta[num(p[0])] = { label: p[1], title: p[2], binIds: [...(p[8] || []), ...(p[9] || [])].map((x) => String(num(x))) };
+    const imgs = [...(Array.isArray(p[10]) ? p[10] : []), ...(Array.isArray(p[11]) ? p[11] : [])].filter((x) => typeof x === 'string' && x);
+    if (imgs.length) acc.sceneImages[String(num(p[0]))] = imgs;
     if (Array.isArray(p[10])) for (const b of p[10]) if (typeof b === 'string' && b) acc.sceneBgNames.add(b);
     if (!Array.isArray(p[12])) return;
     const ttl = str(p[2]) || str(p[1]);
@@ -272,6 +274,8 @@ function collectRecords(recs) {
     characters: {},
     sceneMeta: {},
     sceneBgNames: new Set(),
+    sceneImages: {},
+    sceneOwners: {},
     eventMap: {},
     locMap: {},
     monsterSpecies: [],
@@ -302,9 +306,16 @@ function collectRecords(recs) {
   return acc;
 }
 
+function noteSceneOwner(acc, masterId, owner) {
+  const k = String(masterId);
+  if (!k || k === 'null' || !owner) return;
+  (acc.sceneOwners[k] || (acc.sceneOwners[k] = new Set())).add(owner);
+}
+
 function attachCharacterEpisodes(acc, binIdsOf) {
   for (const p of acc.deferred[33]) {
     const base = String(num(p[3]));
+    noteSceneOwner(acc, num(p[1]), base);
     const sc = acc.sceneMeta[num(p[1])] || {};
     if (!acc.characters[base]) acc.characters[base] = { name: '(不明)', title: '' };
     const c = acc.characters[base];
@@ -328,6 +339,7 @@ function buildQuestIndex(acc, binIdsOf) {
     const sc = acc.sceneMeta[epId];
     g.nodes.push({
       episodeId: String(num(p[0])),
+      masterId: String(epId),
       locId: loc.id,
       locName: loc.name,
       locShort: loc.short,
@@ -346,7 +358,9 @@ function buildQuestIndex(acc, binIdsOf) {
     const cards = splitChapters(g.nodes);
     const many = cards.length > 1;
     for (const c of cards) {
-      questIndex[many ? `${eid}c${c.gOrder}` : String(eid)] = {
+      const questKey = many ? `${eid}c${c.gOrder}` : String(eid);
+      for (const n of c.nodes) noteSceneOwner(acc, n.masterId, 'quest_' + questKey);
+      questIndex[questKey] = {
         event: Number(eid),
         name: g.name,
         type: g.type,
@@ -374,6 +388,7 @@ function buildOtherIndex(acc, binIdsOf) {
   const episodes = [];
   for (const [sid, sc] of Object.entries(acc.sceneMeta)) {
     if (used.has(String(sid))) continue;
+    noteSceneOwner(acc, sid, 'special_other');
     episodes.push({
       paidMasterId: null,
       episodeId: String(sid),
@@ -398,6 +413,7 @@ function buildSpecialIndex(acc, binIdsOf) {
     const eid = m ? m[1] : 'misc';
     const sc = acc.sceneMeta[episodeId] || {};
     const subType = SPECIAL_SUBTYPE[num(p[8])] || '特別エピソード';
+    noteSceneOwner(acc, episodeId, 'special_' + eid);
     const ev = specialMap[eid] || (specialMap[eid] = { event: eid, name: sc.title || sc.label || '特別エピソード' + eid, subType, episodes: [] });
     ev.episodes.push({
       paidMasterId: String(num(p[0])),
@@ -465,6 +481,21 @@ function attachWeaponVariants(acc) {
   }
 }
 
+function buildSharedImageNames(acc) {
+  const owners = {};
+  for (const [sid, names] of Object.entries(acc.sceneImages)) {
+    const os = acc.sceneOwners[sid];
+    if (!os) continue;
+    for (const n of names) {
+      const s = owners[n] || (owners[n] = new Set());
+      for (const o of os) s.add(o);
+    }
+  }
+  return Object.keys(owners)
+    .filter((n) => owners[n].size > 1)
+    .sort();
+}
+
 function masterIndexes(recs) {
   const acc = collectRecords(recs);
   const binIdsOf = (sceneId) => {
@@ -505,6 +536,7 @@ function masterIndexes(recs) {
     missionGroups: acc.missionGroups,
     equipWeapons: acc.equipWeapons,
     sceneBgNames: [...acc.sceneBgNames],
+    sharedImageNames: buildSharedImageNames(acc),
   };
 }
 

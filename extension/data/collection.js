@@ -3,7 +3,7 @@ import { folderModel, characterDetail } from './folder-model.js';
 import { rosterItems, buildRosterItemFor } from './roster.js';
 import { otherList, other3dStatus, other3dReady, monsterList, monsterStatus, monsterReady, other2dList, other2dStatus, itemList, itemGroups } from './entity-lists.js';
 import { homeData, homeStatus, homeAssetStatus, otherBgmList } from './home-data.js';
-import { scanFolder, scanOneFolder } from './folder-scan.js';
+import { scanFolder, scanOneFolder, scanFolderHandle, cachedFolderEntries } from './folder-scan.js';
 
 export const collectionRepository = {
   ensureIndexes,
@@ -36,4 +36,6 @@ export const collectionRepository = {
 
   scanFolder,
   scanOneFolder,
+  scanFolderHandle,
+  cachedFolderEntries,
 };

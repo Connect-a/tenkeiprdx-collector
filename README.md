@@ -31,19 +31,20 @@
 
 ### Brave での許可のしかた
 
-1. アドレスバーに `brave://flags/#file-system-access-api` を入力して開く
+1. ブラウザのアドレスバーに `brave://flags/#file-system-access-api` を入力して開く
 2. File System Access API を Enabled に変更
 3. Relaunch（Brave を再起動）
 4. その後、ビューアで「保存先フォルダ」を選び直す
 
 ## 📦 インストール
 
-1. `chrome://extensions`（Edge は `edge://extensions`）を開き、デベロッパーモードを ON
-2. 「パッケージ化されていない拡張機能を読み込む」を押す
-3. `extension` フォルダを選択
-   - リポジトリを clone した場合 … このリポジトリの `extension` フォルダ
-   - Release の zip/7z を使う場合 … 任意のフォルダに展開し、その中の `extension` フォルダ
-4. ツールバーの拡張アイコンをクリックしてビューアを開く
+1. [Releases](https://github.com/Connect-a/tenkeiprdx-collector/releases) を開き、いちばん上（最新版）の **Assets** から zip か 7z をダウンロードして、任意のフォルダに展開する
+2. ブラウザのアドレスバーに `chrome://extensions`（Edge は `edge://extensions`）を入力して開き、デベロッパーモードを ON
+3. 「パッケージ化されていない拡張機能を読み込む」を押す
+4. 手順1で展開したフォルダの中の `extension` フォルダを選択
+5. ツールバーの拡張アイコンをクリックしてビューアを開く
+
+リポジトリを clone して使う場合は、手順1のかわりに clone したフォルダの `extension` を選んでください。
 
 ## 🚀 使い方（3ステップ）
 

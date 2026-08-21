@@ -1,6 +1,11 @@
 import { spineWeb } from './spine-web.js';
 import { utilHelpers } from '../../core/util.js';
 import { emoAnim } from './emo-anim.js';
+import { createMosaicPass } from './mosaic-pass.js';
+import { createStillCompositor } from './still-compositor.js';
+import { slotGroup } from './slot-group.js';
+const MOSAIC_RE = /mosaic/i;
+const MOSAIC_REF_BLOCK = 10;
 const SP = () => spineWeb.lib();
 const GL = () => spineWeb.lib() && spineWeb.lib().webgl;
 const ACT_DUR = { 1: 0.5, 2: 1.0, 3: 1.3, 4: 0.25, 6: 0.5, 9: 0.7 };
@@ -57,7 +62,8 @@ function buildSpineSkeleton(ctx, inputs) {
   const off = new spine.Vector2(),
     size = new spine.Vector2();
   skeleton.getBounds(off, size, []);
-  return { data, skeleton, state, bounds: { x: off.x, y: off.y, w: size.x, h: size.y }, curAnim: null, anims: data.animations.map((a) => a.name) };
+  const mosaicSlots = data.slots.filter((s) => MOSAIC_RE.test(s.name)).map((s) => s.name);
+  return { data, skeleton, state, bounds: { x: off.x, y: off.y, w: size.x, h: size.y }, curAnim: null, anims: data.animations.map((a) => a.name), hasMosaic: mosaicSlots.length > 0, mosaicSlots };
 }
 
 function create(canvas, opts) {
@@ -69,6 +75,16 @@ function create(canvas, opts) {
   const gl = ctx.gl;
   const renderer = new wgl.SceneRenderer(canvas, ctx, true);
   const spine = SP();
+  const mosaicOn = o.mosaicOn || (() => false);
+  const onStill = o.onStill || (() => {});
+  let mosaic = null;
+  let stillVis = null;
+  let userZoom = 1;
+  let userPanX = 0;
+  let userPanY = 0;
+  let cleanStill = false;
+  let stillComp = null;
+  let stillSpeed = 1;
   const skels = new Map();
   const cast = new Map();
   let emoInstances = [];
@@ -203,35 +219,46 @@ function create(canvas, opts) {
     } else {
       camCur = { ...camTo };
     }
-    gl.viewport(0, 0, W, H);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    const items = mode === 'still' && stillItem ? [stillItem] : [...cast.values(), ...leaving];
+    let useMosaic = false;
+    if (mosaicOn() && items.some((it) => it.rec && !it.rec.dead && it.rec.hasMosaic)) {
+      if (!mosaic) mosaic = createMosaicPass(gl);
+      useMosaic = mosaic.ensure(W, H);
+    }
     const cam = renderer.camera;
     const stillM = mode === 'still' && stillItem;
+    const uz = userZoom > 0 ? userZoom : 1;
     if (stillM) {
       const b = stillItem.bounds,
         sa = W / H;
       const D = Math.max(1, CAM.planeZ - (camCur.camZ || 0));
-      const vh = (2 * D * fovTan) / CAM.worldPerSkel,
+      const vh = (2 * D * fovTan) / CAM.worldPerSkel / uz,
         vw = vh * sa;
-      cam.position.x = b.x + b.w / 2 + (camCur.camX || 0) / CAM.worldPerSkel;
-      cam.position.y = b.y + b.h / 2 + (camCur.camY || 0) / CAM.worldPerSkel;
+      cam.position.x = b.x + b.w / 2 + (camCur.camX || 0) / CAM.worldPerSkel - userPanX * (vw / W);
+      cam.position.y = b.y + b.h / 2 + (camCur.camY || 0) / CAM.worldPerSkel + userPanY * (vh / H);
       cam.setViewport(vw, vh);
       cam.update();
     } else {
-      const z = camCur.zoom || 1;
-      cam.position.x = W * (0.5 + camCur.panX);
-      cam.position.y = H * (0.5 + camCur.panY);
-      cam.setViewport(W / z, H / z);
+      const z = (camCur.zoom || 1) * uz;
+      const vw = W / z,
+        vh = H / z;
+      cam.position.x = W * (0.5 + camCur.panX) - userPanX * (vw / W);
+      cam.position.y = H * (0.5 + camCur.panY) + userPanY * (vh / H);
+      cam.setViewport(vw, vh);
       cam.update();
     }
+    const cleanActive = mode === 'still' && cleanStill && !!stillVis && !!stillItem && !useMosaic;
+    if (useMosaic) mosaic.bindScene();
+    gl.viewport(0, 0, W, H);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     renderer.begin();
-    const items = mode === 'still' && stillItem ? [stillItem] : [...cast.values(), ...leaving];
     const finishedOut = [];
+    const mosaicRecs = [];
     for (const it of items) {
       const rec = it.rec;
       if (!rec || rec.dead) continue;
-      rec.state.update(delta);
+      rec.state.update(delta * (mode === 'still' ? stillSpeed : 1));
       rec.state.apply(rec.skeleton);
       let ox = 0,
         oy = 0,
@@ -296,14 +323,30 @@ function create(canvas, opts) {
       try {
         rec.skeleton.color.set(dv, dv, dv, alpha);
       } catch (e) {}
+      if (mode === 'still' && !cleanActive) applyStillVis(rec.skeleton);
       rec.skeleton.updateWorldTransform();
-      try {
-        renderer.drawSkeleton(rec.skeleton, true);
-      } catch (e) {}
+      if (!cleanActive) {
+        try {
+          renderer.drawSkeleton(rec.skeleton, true);
+        } catch (e) {}
+      }
+      if (useMosaic && rec.hasMosaic) mosaicRecs.push(rec);
     }
     if (finishedOut.length) leaving = leaving.filter((x) => !finishedOut.includes(x));
     if (mode !== 'still' && emoInstances.length) drawEmotions(t, W, H);
     renderer.end();
+    if (cleanActive && stillItem && stillItem.rec && !stillItem.rec.dead) renderCleanStill(stillItem.rec);
+    if (useMosaic) {
+      mosaic.bindMask();
+      gl.viewport(0, 0, W, H);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      renderer.begin();
+      for (const rec of mosaicRecs) drawMosaicOnly(rec);
+      renderer.end();
+      const block = Math.max(3, Math.round((W / refWidth()) * MOSAIC_REF_BLOCK));
+      mosaic.composite(W / block, H / block);
+    }
     if (typeof o.onCam === 'function') o.onCam({ panX: camCur.panX || 0, panY: camCur.panY || 0, zoom: camCur.zoom || 1, mode });
   }
 
@@ -348,6 +391,96 @@ function create(canvas, opts) {
       }
     }
     if (emoInstances.some((e) => e.done)) emoInstances = emoInstances.filter((e) => !e.done);
+  }
+  function applyStillVis(sk) {
+    for (const slot of sk.slots) {
+      const a = stillVis ? stillVis.get(slot.data.name) : null;
+      slot.color.a = a != null ? a : 1;
+    }
+  }
+  let lastStillRec = undefined;
+  function emitStill(rec) {
+    const key = rec && !rec.dead && rec.skeleton ? rec : null;
+    if (key === lastStillRec) return;
+    lastStillRec = key;
+    onStill(key ? key.skeleton.slots.map((s) => ({ name: s.data.name, group: slotGroup(s.data.name) })) : null);
+  }
+  function cleanRuns(rec) {
+    const order = rec.skeleton.drawOrder || rec.skeleton.slots;
+    const runs = [];
+    let cur = null;
+    for (let i = 0; i < order.length; i++) {
+      const g = slotGroup(order[i].data.name);
+      const a = stillVis.get(order[i].data.name);
+      const av = a != null ? a : 1;
+      if (!cur || cur.group !== g) {
+        cur = { group: g, from: i, to: i, maxA: 0, vis: false };
+        runs.push(cur);
+      }
+      cur.to = i;
+      if (av > 0) {
+        cur.vis = true;
+        if (av > cur.maxA) cur.maxA = av;
+      }
+    }
+    return runs.filter((r) => r.vis);
+  }
+  function drawRunOnly(rec, run) {
+    const sk = rec.skeleton;
+    const order = sk.drawOrder || sk.slots;
+    const inRun = new Set();
+    for (let i = run.from; i <= run.to; i++) {
+      const slot = order[i];
+      const a = stillVis.get(slot.data.name);
+      if ((a != null ? a : 1) > 0) {
+        inRun.add(slot);
+        slot.color.a = 1;
+      }
+    }
+    const saved = [];
+    for (const slot of sk.slots) {
+      if (inRun.has(slot)) continue;
+      const att = slot.getAttachment();
+      if (att) {
+        saved.push([slot, att]);
+        slot.setAttachment(null);
+      }
+    }
+    try {
+      renderer.drawSkeleton(sk, true);
+    } catch (e) {}
+    for (const [slot, att] of saved) slot.setAttachment(att);
+  }
+  function renderCleanStill(rec) {
+    if (!stillComp) stillComp = createStillCompositor(gl);
+    if (!stillComp.ensure(canvas.width, canvas.height)) return false;
+    const runs = cleanRuns(rec);
+    stillComp.beginAccum();
+    for (const r of runs) {
+      stillComp.bindTemp();
+      renderer.begin();
+      drawRunOnly(rec, r);
+      renderer.end();
+      stillComp.overAccum(r.maxA);
+    }
+    stillComp.toCanvas();
+    return true;
+  }
+  function drawMosaicOnly(rec) {
+    const sk = rec.skeleton;
+    const saved = [];
+    for (const slot of sk.slots) {
+      if (MOSAIC_RE.test(slot.data.name)) continue;
+      const att = slot.getAttachment();
+      if (att) {
+        saved.push([slot, att]);
+        slot.setAttachment(null);
+      }
+    }
+    try {
+      renderer.drawSkeleton(sk, true);
+    } catch (e) {}
+    for (const [slot, att] of saved) slot.setAttachment(att);
   }
   const onResize = () => resize();
   self.addEventListener('resize', onResize);
@@ -399,15 +532,37 @@ function create(canvas, opts) {
       leaving = [];
       if (!rec || rec.dead) {
         stillItem = null;
+        emitStill(null);
         return false;
       }
+      try {
+        rec.skeleton.setToSetupPose();
+      } catch (e) {}
       setAnim(rec, animName, true, timeScale);
       stillItem = { rec, tx: 0, y: 0, sx: 1, sy: 1, dim: 1, tr: null, bounds: rec.bounds };
+      emitStill(rec);
       return true;
+    },
+    setStillVisibility(map) {
+      stillVis = map ? new Map(Object.entries(map)) : null;
+    },
+    setUserZoom(v) {
+      userZoom = v > 0 ? v : 1;
+    },
+    setUserPan(x, y) {
+      userPanX = x || 0;
+      userPanY = y || 0;
+    },
+    setStillClean(v) {
+      cleanStill = !!v;
+    },
+    setStillSpeed(v) {
+      stillSpeed = v >= 0 ? v : 1;
     },
     setCast(list) {
       mode = 'cast';
       stillItem = null;
+      emitStill(null);
       const W = canvas.width,
         H = canvas.height;
       const refW = refWidth(),
@@ -486,6 +641,7 @@ function create(canvas, opts) {
       leaving = [];
       stillItem = null;
       snapCamNeutral();
+      emitStill(null);
     },
     dispose() {
       disposed = true;
@@ -493,6 +649,18 @@ function create(canvas, opts) {
       self.removeEventListener('resize', onResize);
       if (ro) ro.disconnect();
       stopVis();
+      if (mosaic) {
+        try {
+          mosaic.dispose();
+        } catch (e) {}
+        mosaic = null;
+      }
+      if (stillComp) {
+        try {
+          stillComp.dispose();
+        } catch (e) {}
+        stillComp = null;
+      }
       try {
         renderer.dispose();
       } catch (e) {}

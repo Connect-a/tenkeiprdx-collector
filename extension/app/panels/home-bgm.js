@@ -8,6 +8,7 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
   let _downloaded = [];
   let _shuffleOrder = [];
   let _hasIntro = false;
+  let _drag = null;
   let _gen = 0;
   let _raf = 0;
   const _bufs = new Map();
@@ -139,7 +140,7 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
       }
       return;
     }
-    await select({ id: e.id, name: e.name, path: m.audio });
+    await select({ id: e.id, name: e.name, path: m.audio, intro: m.intro || null });
   }
 
   function buildShuffle() {
@@ -230,14 +231,19 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
   function barSet(suffix, which, on) {
     const seek = getById('hbSeek' + suffix);
     if (!seek) return;
-    const dur = engine.duration(which);
-    const cur = engine.position(which);
-    const fill = getById('hbSeekFill' + suffix);
-    if (fill) fill.style.width = (dur > 0 ? Math.min(1, cur / dur) * 100 : 0).toFixed(2) + '%';
-    const t = getById('hbTime' + suffix);
-    if (t) t.textContent = fmtTime(cur) + ' / ' + fmtTime(dur);
     const row = getById('hbSeekRow' + suffix);
     if (row) row.classList.toggle('active', on);
+    if (_drag && _drag.suffix === suffix) return;
+    const dur = engine.duration(which);
+    const cur = engine.position(which);
+    drawBar(suffix, dur > 0 ? Math.min(1, cur / dur) : 0, dur, cur);
+  }
+
+  function drawBar(suffix, ratio, dur, cur) {
+    const fill = getById('hbSeekFill' + suffix);
+    if (fill) fill.style.width = (ratio * 100).toFixed(2) + '%';
+    const t = getById('hbTime' + suffix);
+    if (t) t.textContent = fmtTime(cur == null ? ratio * dur : cur) + ' / ' + fmtTime(dur);
   }
 
   function updateSeek() {
@@ -248,19 +254,44 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
     barSet('M', 'main', p === 'main');
   }
 
-  function seekPhase(phase, ev) {
-    if (!_sel) return;
-    if (phase === 'intro' && !_hasIntro) return;
-    const dur = engine.duration(phase);
-    if (!dur) return;
-    const seek = getById(phase === 'intro' ? 'hbSeekI' : 'hbSeekM');
-    if (!seek) return;
-    const rect = seek.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-    engine.seek(phase, ratio * dur);
-    setWant(true);
-    sync();
-    updateWidget();
+  const ratioAt = (el, ev) => {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 ? Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width)) : 0;
+  };
+
+  function bindSeek(phase, suffix) {
+    const el = getById('hbSeek' + suffix);
+    if (!el) return;
+    el.addEventListener('pointerdown', (ev) => {
+      if (!_sel || (phase === 'intro' && !_hasIntro)) return;
+      const dur = engine.duration(phase);
+      if (!dur) return;
+      _drag = { phase, suffix, dur, ratio: ratioAt(el, ev) };
+      try {
+        el.setPointerCapture(ev.pointerId);
+      } catch (e) {}
+      drawBar(suffix, _drag.ratio, dur);
+      ev.preventDefault();
+    });
+    el.addEventListener('pointermove', (ev) => {
+      if (!_drag || _drag.suffix !== suffix) return;
+      _drag.ratio = ratioAt(el, ev);
+      drawBar(suffix, _drag.ratio, _drag.dur);
+    });
+    el.addEventListener('pointerup', (ev) => {
+      if (!_drag || _drag.suffix !== suffix) return;
+      const d = _drag;
+      _drag = null;
+      engine.seek(d.phase, ratioAt(el, ev) * d.dur);
+      setWant(true);
+      sync();
+      updateWidget();
+    });
+    el.addEventListener('pointercancel', () => {
+      if (!_drag || _drag.suffix !== suffix) return;
+      _drag = null;
+      updateSeek();
+    });
   }
 
   function updateWidget() {
@@ -368,8 +399,8 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
     getById('hbMenuToggle')?.addEventListener('click', menuToggle);
     getById('hbPrev')?.addEventListener('click', () => step(-1));
     getById('hbNext')?.addEventListener('click', () => step(1));
-    getById('hbSeekI')?.addEventListener('click', (ev) => seekPhase('intro', ev));
-    getById('hbSeekM')?.addEventListener('click', (ev) => seekPhase('main', ev));
+    bindSeek('intro', 'I');
+    bindSeek('main', 'M');
     settings.subscribe((n) => {
       if (n === 'homeBgmVolume' || n === 'masterVolume') applyVolume();
       else if (n === 'homeBgmPriority') {

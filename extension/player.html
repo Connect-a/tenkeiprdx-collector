@@ -16,6 +16,7 @@
   </head>
   <body>
     <header>
+      <button class="hdmenu" id="sidebarToggle" title="サイドバーの表示／非表示" aria-label="サイドバーの表示／非表示">☰</button>
       <h1 id="homeTitle" title="キャラ一覧へ">天啓パラドクス コレクター</h1>
       <span id="appVersion" class="appver"></span>
       <a id="updateBadge" class="updbadge" href="#" target="_blank" rel="noopener" style="display: none" title="新しいバージョンがあります">⬆ 更新あり</a>
@@ -95,8 +96,8 @@
             <input id="masterVolume" class="volslider" type="range" min="0" max="150" step="1" value="50" title="音量" />
           </div>
           <div class="note dim" style="margin: 12px 0 3px">主人公の名前（ストーリー内の呼び名）</div>
-          <input id="playerName" placeholder="主人公" maxlength="16" style="margin-bottom: 4px" />
-          <div class="note dim">物語本文の「%username%」をこの名前に置き換えます。空欄なら「主人公」。次の台詞から反映されます。</div>
+          <input id="playerName" placeholder="おーじ" maxlength="16" style="margin-bottom: 4px" />
+          <div class="note dim">物語本文の「%username%」をこの名前に置き換えます。空欄なら「おーじ」。次の台詞から反映されます。</div>
           <div class="note dim" style="margin: 12px 0 3px">画像・音声の配信元</div>
           <input id="cdnBase" placeholder="https://cdne-…/production/production0-…" style="margin-bottom: 4px" />
           <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center">
@@ -122,7 +123,7 @@
           <summary>データ管理</summary>
 
           <button class="btn xs" id="knownIssues" title="残っている課題・わかっている不具合">残課題と不具合の確認</button>
-          <button class="btn xs" id="v2Notice" title="ver2.0 の初回に出る案内" style="margin: 4px 0 8px">v2使用時の推奨事項</button>
+          <button class="btn xs" id="v2Notice" title="ver2.1 / ver2.0 の更新時に出る案内" style="margin: 4px 0 8px">更新のお知らせ（v2使用時の推奨事項）</button>
           <div id="indexRebuildHost"></div>
           <table class="tmptbl" id="tmpDataTable"></table>
           <div class="note dim" style="margin: 0 0 8px">※中身はブラウザの検証（F12）から Application を開き、IndexedDB と Extension Storage を確認してください。</div>
@@ -167,8 +168,6 @@
               <button class="rf" data-roster-type="monster">モンスター</button>
             </div>
             <span class="rostercount" id="rostercount"></span>
-            <button class="btn sm bulkbtn" id="bulkOpen">一括ダウンロード（キャラ）</button>
-            <button class="btn sm" id="sharedDl" title="物語の共通素材（背景/BGM/SE/フォント/演出）を _共有リソース/ へDL">共有リソースDL</button>
           </div>
           <div class="rosterhead">
             <input id="rosterSearch" placeholder="名前で検索…" />
@@ -183,6 +182,8 @@
             <select id="rosterRank" class="rgsel">
               <option value="">ランクすべて</option>
             </select>
+            <button class="btn sm primary rhright" id="sharedDl" title="物語の共通素材（背景/BGM/SE/フォント/演出）を _共有リソース/ へDL">共有リソースDL</button>
+            <button class="btn sm bulkbtn" id="bulkOpen">一括ダウンロード（キャラ）</button>
           </div>
           <div id="bulkStatus" class="bulkstatus" style="display: none"></div>
           <pre id="sharedOut" class="statusout" style="display: none; margin: 0 0 8px"></pre>
@@ -194,12 +195,14 @@
         </div>
 
         <div id="detail" style="display: none">
-          <div class="detailnav">
-            <button class="btn sm" id="prevChar" title="前のキャラ">◀ 前</button>
-            <button class="btn sm backbtn" id="backToRoster" title="キャラ一覧へ戻る">↑ 一覧へ</button>
-            <button class="btn sm" id="nextChar" title="次のキャラ">次 ▶</button>
+          <div class="detailtop">
+            <div id="charHead"></div>
+            <div class="detailnav">
+              <button class="btn sm" id="prevChar" title="前のキャラ">◀ 前</button>
+              <button class="btn sm backbtn" id="backToRoster" title="キャラ一覧へ戻る">↑ 一覧へ</button>
+              <button class="btn sm" id="nextChar" title="次のキャラ">次 ▶</button>
+            </div>
           </div>
-          <div id="charHead"></div>
           <div id="dlbar" class="dlbar" style="display: none">
             <div class="dlrow2">
               <span class="dllbl">ストーリー</span>
@@ -215,11 +218,6 @@
             <div id="dlmsg">準備中…</div>
           </div>
           <div id="playwrap">
-            <div class="audiotop">
-              <button class="btn xs" id="saveDecodedPack">デコード結果を保存（画像+ボイス）…</button>
-              <label><input type="checkbox" id="show3d" checked /> 3Dモデル表示</label>
-              <label><input type="checkbox" id="showSpine" checked /> Spine表示</label>
-            </div>
             <div class="tabbar">
               <button class="tab active" data-tab="image">イメージ</button>
               <button class="tab" data-tab="story">ストーリー</button>
@@ -227,7 +225,10 @@
             </div>
             <section id="image" class="panel active">
               <div class="v1tools">
-                <label class="note" style="display: inline-flex; align-items: center; gap: 4px"><input type="checkbox" id="imageFlipY" checked />プレビュー上下反転</label>
+                <label><input type="checkbox" id="imageFlipY" checked />プレビュー上下反転</label>
+                <label><input type="checkbox" id="show3d" checked />3Dモデル表示</label>
+                <label><input type="checkbox" id="showSpine" checked />Spine表示</label>
+                <button class="btn xs" id="saveDecodedPack">デコード結果を保存（画像+ボイス）…</button>
               </div>
               <div class="imgsplit">
                 <div class="imgsplit-left">
@@ -251,8 +252,9 @@
                 <span class="storyprog-num" id="prog"></span>
               </div>
               <div class="controls" id="controls" style="display: none">
-                <button class="btn" id="prev">◀ 前</button>
-                <button class="btn" id="next">次 ▶</button>
+                <button class="btn xs" id="prev">◀ 前</button>
+                <button class="btn xs" id="next">次 ▶</button>
+                <button class="btn xs" id="storyReplay" title="今の台詞のボイス／読み上げをもう一度再生">▶ ボイス再生</button>
                 <label title="台詞に収録されている音声と、ブラウザの読み上げのどちらを鳴らすかを選びます。&#10;音量は再生画面の「設定」から変えられます。"
                   >ボイスと読み上げ
                   <select id="voiceMode">
@@ -262,8 +264,12 @@
                     <option value="off">OFF</option>
                   </select>
                 </label>
-                <button class="btn" id="stageMax">⛶ 最大化</button>
+                <button class="btn xs" id="stillToggle" title="この一枚絵の表示調整パネルを開閉">表示調整</button>
+                <button class="btn xs" id="stageMove" title="ONの間、画面ドラッグで移動・ホイールでズームできます">✋ 移動</button>
+                <button class="btn xs" id="stageZoomReset" title="ズームと移動位置を元に戻す">移動リセット</button>
+                <button class="btn xs" id="stageMax" style="margin-left: auto">⛶ 最大化</button>
               </div>
+              <div class="stillpanel" id="stillPanel" style="display: none"></div>
               <button class="btn stageexit" id="stageExit">⤢ 縮小</button>
             </section>
             <section id="voice" class="panel">
@@ -333,7 +339,7 @@
           <div class="bulkactions">
             <button class="btn primary" id="bulkStart">開始</button>
             <button class="btn rec" id="bulkStop" style="display: none">停止（中断）</button>
-            <button class="btn xs" id="bulkClear" style="display: none">履歴をクリア</button>
+            <button class="btn" id="bulkClear" style="display: none">履歴をクリア</button>
           </div>
 
           <details class="bulkdetails">

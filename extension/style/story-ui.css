@@ -5,14 +5,15 @@
   border-bottom: 1px solid #2e2b3d;
 }
 
-.audiotop {
+.v1tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  margin: 12px 0 8px;
+  margin: 0 0 10px;
 }
 
-.audiotop label {
+.v1tools label {
   font-size: 13px;
   color: #b0aac4;
   display: inline-flex;

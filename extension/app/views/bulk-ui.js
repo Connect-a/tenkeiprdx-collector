@@ -9,6 +9,9 @@ import { TYPE_LABEL, html } from '../ui/ui-format.js';
 import { toast } from '../ui/notifier.js';
 import { failureGroups } from '../../core/failure-report.js';
 import { isSingleDlActive as getSingleDlActive } from './download-ui.js';
+import { ensureUserState } from '../runtime/user-state-guard.js';
+import { rescanAll } from '../runtime/state-refresh.js';
+import { networkClient } from '../../data/network.js';
 
 const DL_INTERVALS = [30, 60, 180];
 const bulkOpts = { unlockedMode: 'only', overwrite: false, includeUnowned: false, dlIntervalSec: 180 };
@@ -90,7 +93,7 @@ export async function refreshBulkTarget() {
   if (!target) return;
   const st = await bulkDownloader.getState();
   if (st && bulkDownloader.isActive(st.phase)) {
-    target.textContent = '実行中（対象は開始時に確定済み）';
+    target.textContent = '';
     return;
   }
   const list = await collectBulkCandidates();
@@ -145,6 +148,9 @@ export async function openBulk() {
   getById('bulkModal').style.display = '';
   await refreshBulkTarget();
   await renderBulkCard();
+  rescanAll()
+    .then(() => refreshBulkTarget())
+    .catch(() => {});
 }
 export function closeBulk() {
   getById('bulkModal').style.display = 'none';
@@ -155,6 +161,7 @@ export async function startBulk() {
     toast('個別ダウンロードの実行中は一括ダウンロードができません。', 'err');
     return;
   }
+  if (!(await ensureUserState({ onDemand: true }))) return;
   const list = playerState._bulkCandidates || (await collectBulkCandidates());
   if (!list.length) {
     toast('対象が0件です', 'err');
@@ -174,12 +181,13 @@ export async function startBulk() {
 }
 
 let _bulkFailureButtons = null;
+const SUMMARY_TTL_MS = 5000;
+let _summaryAt = 0;
+let _summaryCache = null;
+let _failSig = '';
 
-async function renderBulkFailures(st) {
-  const wrap = getById('bulkFailWrap'),
-    sum = getById('bulkFailSummary'),
-    list = getById('bulkFailList');
-  if (!wrap) return;
+async function missingSummaries(force) {
+  if (!force && _summaryCache && Date.now() - _summaryAt < SUMMARY_TTL_MS) return _summaryCache;
   let mv = null,
     ms = null;
   try {
@@ -188,6 +196,17 @@ async function renderBulkFailures(st) {
   try {
     ms = await assetAcquirer.missingScenesSummary();
   } catch (e) {}
+  _summaryCache = { mv, ms };
+  _summaryAt = Date.now();
+  return _summaryCache;
+}
+
+async function renderBulkFailures(st, opts) {
+  const wrap = getById('bulkFailWrap'),
+    sum = getById('bulkFailSummary'),
+    list = getById('bulkFailList');
+  if (!wrap) return;
+  const { mv, ms } = await missingSummaries(!!(opts && opts.force));
   _latestBulkMissingSummary = mv;
   const voiceRows = (mv && mv.rows) || [];
   const sceneRows = (ms && ms.rows) || [];
@@ -197,9 +216,13 @@ async function renderBulkFailures(st) {
     list.innerHTML = '';
     _bulkFailureButtons = null;
     _latestBulkMissingSummary = null;
+    _failSig = '';
     return;
   }
   wrap.style.display = '';
+  const sig = `${voiceRows.length}|${(mv && mv.scenes) || 0}|${sceneRows.length}|${(ms && ms.scenes) || 0}|${((st && st.failures) || []).length}`;
+  if (sig === _failSig && list.querySelector('.bk-fail')) return;
+  _failSig = sig;
   const parts = [];
   if (voiceRows.length) parts.push(`ボイス欠落 ${mv.chars}キャラ/${mv.stories}話/${mv.scenes}scene（URL${mv.withUrl}）`);
   if (sceneRows.length) parts.push(`台本欠落 ${ms.chars}キャラ/${ms.stories}話/${ms.scenes}scene`);
@@ -231,7 +254,7 @@ async function renderBulkFailures(st) {
         click: async () => {
           await assetAcquirer.clearCdnMissing();
           await assetAcquirer.clearMissingScenes();
-          await renderBulkFailures(st);
+          await renderBulkFailures(st, { force: true });
         },
       },
     });
@@ -309,7 +332,8 @@ export async function renderBulkCard() {
   card.style.display = '';
 
   const rows = [];
-  rows.push(`<div class="bk-line"><span class="bk-phase ${st.phase}">${PHASE_LABEL[st.phase] || ''}</span> ${s.processed}/${s.total}${s.running ? '（DL中' + s.running + '）' : ''}</div>`);
+  const badge = `${active ? '<span class="dlspin"></span>' : ''}<span class="bk-phase ${st.phase}">${PHASE_LABEL[st.phase] || ''}</span>`;
+  rows.push(`<div class="bk-line">${badge} ${s.processed}/${s.total}${s.running ? '（DL中' + s.running + '）' : ''}</div>`);
   rows.push(
     `<div class="bk-line dim">ストーリー情報 ${gd.done}/${gd.total}${gd.failed ? '（失敗' + gd.failed + '）' : ''}｜本文・画像・音声 取得済み${s.done} / スキップ${s.skipped} / 失敗${s.failed}</div>`,
   );
@@ -325,6 +349,8 @@ export async function renderBulkCard() {
     rows.push(html`<div class="bk-line dim bk-slot">${slotA}</div>`);
     rows.push(html`<div class="bk-line dim bk-slot">${slotB}</div>`);
   }
+  const fbs = networkClient.fallbackStats ? networkClient.fallbackStats() : null;
+  if (fbs && (fbs.hit || fbs.off)) rows.push(`<div class="bk-line dim">旧世代から救済 ${fbs.hit}件${fbs.off ? '（効果が無いため打ち切り）' : ''}</div>`);
   if (st.phase === 'error' && st.lastError) rows.push(html`<div class="bk-line err">エラー: ${st.lastError}</div>`);
   if (st.tokenError) rows.push(`<div class="bk-line err">トークンが切れているためシナリオのDLができません。ゲームと再接続してください。</div>`);
   card.innerHTML = rows.join('');
@@ -363,26 +389,29 @@ function bannerPhase(st) {
   return next ? `待機中…（NEXT：${next.name}）` : '待機中…';
 }
 
-export async function renderBulkBanner() {
-  const st = await bulkDownloader.getState();
-  const banner = getById('bulkStatus');
-  if (!banner) return;
-  if (!st || !bulkDownloader.isActive(st.phase)) {
-    banner.style.display = 'none';
-    banner.innerHTML = '';
-    return;
-  }
-  const s = bulkDownloader.stats(st.items);
-  const gd = st.gd || { total: 0, done: 0 };
-  banner.style.display = '';
+function buildBanner(banner) {
   banner.innerHTML = `<span class="bkdot"></span><span class="bktxt"></span><button class="btn xs" id="bulkBannerStop">停止</button>`;
-  banner.querySelector('.bktxt').textContent = `一括ダウンロード中 ${s.processed}/${s.total} ${bannerPhase(st)}`;
   banner.querySelector('.bktxt').addEventListener('click', openBulk);
   banner.querySelector('.bkdot').addEventListener('click', openBulk);
   banner.querySelector('#bulkBannerStop').addEventListener('click', (e) => {
     e.stopPropagation();
     bulkDownloader.stop();
   });
+}
+
+export async function renderBulkBanner() {
+  const banner = getById('bulkStatus');
+  if (!banner) return;
+  const st = await bulkDownloader.getState();
+  if (!st || !bulkDownloader.isActive(st.phase)) {
+    banner.style.display = 'none';
+    if (banner.firstChild) banner.innerHTML = '';
+    return;
+  }
+  if (!banner.querySelector('.bktxt')) buildBanner(banner);
+  const s = bulkDownloader.stats(st.items);
+  banner.style.display = '';
+  banner.querySelector('.bktxt').textContent = `一括ダウンロード中 ${s.processed}/${s.total} ${bannerPhase(st)}`;
 }
 
 export function ensureBulkTick(on) {

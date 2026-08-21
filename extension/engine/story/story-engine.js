@@ -3,7 +3,7 @@ import { assetStore } from '../../data/asset-store.js';
 import { unityDecode } from '../../unity/decode.js';
 import { fileStore } from '../../core/fsdir.js';
 import { ensureIndexes } from '../../data/index-store.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS, DEFAULT_PLAYER_NAME } from '../../core/constants.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { stageGl } from './stage-gl.js';
 import { scenarioUi } from './scenario-ui.js';
@@ -17,7 +17,16 @@ const AUTO_VOICE_GAP_MS = 400;
 const AUTO_VOICE_LOAD_CAP_MS = 2500;
 const AUTO_TTS_MIN_GAP_MS = 500;
 const AUTO_TTS_CAP_MS = 30000;
-const AUTO_NOVOICE_MS = 4000;
+const AUTO_READ_BASE_MS = 800;
+const AUTO_READ_PER_CHAR_MS = 120;
+const AUTO_READ_MIN_MS = 1500;
+const AUTO_READ_MAX_MS = 24000;
+const readWaitMs = (text) => {
+  const n = String(text || '').replace(/\s/g, '').length;
+  if (!n) return AUTO_READ_MIN_MS;
+  const revealed = n * scenarioSettings.textMs();
+  return Math.max(AUTO_READ_MIN_MS, Math.min(AUTO_READ_MAX_MS, AUTO_READ_BASE_MS + AUTO_READ_PER_CHAR_MS * n - revealed));
+};
 const INTRO_WAIT_MS = 2700;
 const POSMAP = { 0: 0, 1: -326, 2: -196, 3: 0, 4: 196, 5: 326 };
 const SPKFLAG = { 1: 1, 2: 2, 3: 4, 4: 8, 5: 16 };
@@ -58,8 +67,8 @@ function create(opts) {
   const bgmEnabled = o.bgmEnabled || (() => true);
   const ttsMode = o.ttsMode || (() => 'off');
   const masterVol = o.masterVol || (() => 0.5);
-  const playerName = typeof o.playerName === 'function' ? o.playerName : () => o.playerName || '主人公';
-  const subUser = (s) => (s == null ? s : String(s).replace(/%username%/gi, playerName() || '主人公'));
+  const playerName = typeof o.playerName === 'function' ? o.playerName : () => o.playerName || DEFAULT_PLAYER_NAME;
+  const subUser = (s) => (s == null ? s : String(s).replace(/%username%/gi, playerName() || DEFAULT_PLAYER_NAME));
   const ST = {
     folderHandle: null,
     meta: null,
@@ -309,7 +318,8 @@ function create(opts) {
       fr = ST.frames[ST.idx];
     const gameVoiced = !!(fr && fr.voice && voiceEnabled());
     const mode = ttsMode(),
-      useTts = audio.hasTts();
+      useTts = mode === 'on' && audio.hasTts();
+    const readMs = readWaitMs(fr && fr.text);
     return new Promise((resolve) => {
       let revealAt = 0;
       const done = (ok) => {
@@ -334,15 +344,15 @@ function create(opts) {
           return;
         }
         if (useTts) {
-          audio.speakCurrent(gen, mode === 'on');
+          audio.speakCurrent(gen, true);
           if (audio.ttsState === 'unavailable') {
-            if (Date.now() - revealAt >= AUTO_NOVOICE_MS) return done(true);
+            if (Date.now() - revealAt >= readMs) return done(true);
             return;
           }
           if (audio.ttsState === 'done' || Date.now() - revealAt > AUTO_TTS_CAP_MS) return finishAfter(AUTO_TTS_MIN_GAP_MS);
           return;
         }
-        if (Date.now() - revealAt >= AUTO_NOVOICE_MS) return done(true);
+        if (Date.now() - revealAt >= readMs) return done(true);
       }, 60);
     });
   }
@@ -488,7 +498,7 @@ function create(opts) {
     audio.playBgm(fr);
     const gameVoiced = !!(fr.voice && voiceEnabled()),
       mode = ttsMode();
-    if (!gameVoiced && (mode === 'on' || ST.autoActive)) audio.speakCurrent(gen, mode === 'on');
+    if (!gameVoiced && mode === 'on') audio.speakCurrent(gen, true);
     else audio.cancelTts();
     if (o.onFrame) {
       try {
@@ -560,7 +570,7 @@ function create(opts) {
       ST.ep = ep;
       await crunchReady(4000);
       if (!ST.stage) {
-        ST.stage = stageGl.create(o.canvas, Object.assign({ onCam: applyBgParallax }, o.stageOpts || {}));
+        ST.stage = stageGl.create(o.canvas, Object.assign({ onCam: applyBgParallax, mosaicOn: o.mosaicOn, onStill: o.onStill }, o.stageOpts || {}));
       }
       if (!ST.emoAtlas && scenarioUi) {
         try {
@@ -713,7 +723,12 @@ function create(opts) {
     },
     replayVoice() {
       const fr = ST.frames[ST.idx];
-      if (fr) audio.playVoice(fr);
+      if (!fr) return;
+      if (fr.voice && voiceEnabled()) audio.playVoice(fr);
+      else if (ttsMode() !== 'off' && audio.hasTts && audio.hasTts()) {
+        audio.cancelTts();
+        audio.speakCurrent(ST.gen, true);
+      }
     },
     backlog() {
       const out = [];
@@ -742,6 +757,21 @@ function create(opts) {
     },
     refreshBgm() {
       audio.refreshBgm();
+    },
+    setStillVisibility(map) {
+      if (ST.stage && ST.stage.setStillVisibility) ST.stage.setStillVisibility(map);
+    },
+    setUserZoom(v) {
+      if (ST.stage && ST.stage.setUserZoom) ST.stage.setUserZoom(v);
+    },
+    setUserPan(x, y) {
+      if (ST.stage && ST.stage.setUserPan) ST.stage.setUserPan(x, y);
+    },
+    setStillClean(v) {
+      if (ST.stage && ST.stage.setStillClean) ST.stage.setStillClean(v);
+    },
+    setStillSpeed(v) {
+      if (ST.stage && ST.stage.setStillSpeed) ST.stage.setStillSpeed(v);
     },
     stopAudio() {
       audio.stopAllAudio();

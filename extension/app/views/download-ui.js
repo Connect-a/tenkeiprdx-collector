@@ -12,6 +12,7 @@ import { refreshLists, folderHandle } from '../runtime/state-refresh.js';
 import { openCharacter, appendDetailInfo } from './detail-view.js';
 import { closeRoster } from './roster-view.js';
 import { audioScene } from '../runtime/audio-scene.js';
+import { ensureUserState } from '../runtime/user-state-guard.js';
 
 let _singleDLActive = false;
 
@@ -79,6 +80,11 @@ export async function runDownload(folderKey, triggerBtn) {
     if (!root) {
       setProgress('先に保存先フォルダを選んでください', 0);
       await refreshLists(['fs', 'owned']);
+      return;
+    }
+    if (!(await ensureUserState({ onDemand: true }))) {
+      setProgress('解放状態が読み取れないため中止しました', 0);
+      getById('dlbar').classList.add('err');
       return;
     }
     let r = null,

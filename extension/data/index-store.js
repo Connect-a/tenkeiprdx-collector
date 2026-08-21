@@ -6,6 +6,7 @@ import { DIRS, SK } from '../core/constants.js';
 import { networkClient } from './network.js';
 import { utilHelpers } from '../core/util.js';
 import { buildIndexes as BUILD_MOD } from './build-indexes.js';
+import { parseOrigin, saveOrigin, recoverOrigin } from './origin.js';
 import { CFG } from '../config.js';
 
 const { assetRoot, fetchBytesRaw, apiFetchBytes } = networkClient;
@@ -39,8 +40,7 @@ async function readFolderMaster() {
   try {
     const d = await fileStore.getDir(MASTER_DIR, { create: false });
     if (!d) return null;
-    const f = await fileStore.readUnder(d, MASTER_FILE);
-    return f ? new Uint8Array(await f.arrayBuffer()) : null;
+    return await fileStore.readBytesUnder(d, MASTER_FILE);
   } catch (e) {
     return null;
   }
@@ -79,24 +79,15 @@ async function resolveCatalogNames(base) {
     diag.step = 'no-env';
     return { names: null, diag };
   }
-  const envText = latin1.decode(envBytes);
-  let assetBase = null;
-  const ab = envText.match(/https:\/\/[a-z0-9.-]+\/production\/production\d+-[0-9a-f-]{36}(?=\/Assets\/)/i);
-  if (ab) {
-    assetBase = ab[0];
-    diag.assetBaseFromEnv = assetBase;
-    try {
-      await chrome.storage.local.set({ [SK.assetRootEnv]: assetBase });
-    } catch (e) {}
-  }
-  const m = envText.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-statics/);
-  if (!m) {
-    diag.step = 'no-guid';
+  const parsed = parseOrigin(latin1.decode(envBytes));
+  diag.originFromEnv = parsed;
+  const saved = await saveOrigin(parsed, 'env');
+  const assetBase = parsed.assets || null;
+  const staticsBase = (saved && saved.statics) || null;
+  if (!staticsBase) {
+    diag.step = 'no-statics';
     return { names: null, diag, assetBase };
   }
-  diag.guid = m[0];
-  const staticsBase = `${(assetBase || base).split('/production/')[0]}/production/${m[0]}`;
-  diag.staticsBase = staticsBase;
   const idxUrl = `${staticsBase}/InGameStatics/IndexFiles/CatalogMetadataIndex.json`;
   diag.idxUrl = idxUrl;
   let j = null;
@@ -168,8 +159,8 @@ async function fetchCatalogs(base, prog) {
   const readDiskCatalog = async (fname) => {
     if (!sharedDir) return null;
     try {
-      const f = await fileStore.readUnder(sharedDir, CATALOG_DIR + '/' + fname);
-      return f ? dec.decode(f instanceof Uint8Array ? f : new Uint8Array(await f.arrayBuffer())) : null;
+      const b = await fileStore.readBytesUnder(sharedDir, CATALOG_DIR + '/' + fname);
+      return b ? dec.decode(b) : null;
     } catch (e) {
       return null;
     }
@@ -226,9 +217,19 @@ async function fetchCatalogs(base, prog) {
     }
   }
 
+  const first = names[0] ? await loadCatalog('web', names[0], names[0]) : null;
+  if (names[0] && !first) {
+    const next = await recoverOrigin();
+    if (next) {
+      base = next;
+      diag.recoveredBase = next;
+    }
+  }
+
   let savedCatalogs = 0;
-  for (const nm of names) {
-    const r = await loadCatalog('web', nm, nm);
+  for (let i = 0; i < names.length; i++) {
+    const nm = names[i];
+    const r = i === 0 && first ? first : await loadCatalog('web', nm, nm);
     if (!r) continue;
     if (r.fresh) {
       await writeDiskCatalog(nm, r.txt);
@@ -294,7 +295,6 @@ async function buildIndexes(progress, masterBinIn, fromFolder) {
       builtVersion: extVersion(),
       builtAt: Date.now(),
       catalogOk: Object.keys(built.assets.assetIndex).length > 0,
-      staticsBase: catalogs.staticsBase,
       catalogCount: (catalogs.objects || []).length,
       altCatalogCount: catalogs.diag ? catalogs.diag.altCatalogs || 0 : 0,
       altRelCount: Object.keys(catalogs.altRel || {}).length,

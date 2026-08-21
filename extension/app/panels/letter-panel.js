@@ -4,7 +4,12 @@ import { openUpgradeNotice } from '../runtime/upgrade-notice.js';
 const LETTER_MAX = 1000;
 
 const KNOWN_ISSUES_TITLE = '残っている課題・わかっている不具合';
-const KNOWN_ISSUES = ['・特別エピソード（EX・イベント有償エピソード）の再生は未検証です', '・ストーリー再生に細かい表示ズレがあり得ます', '・3Dキャラのオーラ描画が壊れています'];
+const KNOWN_ISSUES = [
+  '・特別エピソード（EX・イベント有償エピソード）の再生は未検証です',
+  '・ストーリー再生に細かい表示ズレがあり得ます',
+  '・3Dキャラのオーラ描画が壊れています',
+  '・BGMとストーリーキャラの名前が紐づけできていないものがあります',
+];
 
 export function createLetterPanel(deps) {
   const { getById, toast, CFG, collectionRepository, nameFix, onDistUpdated, onDistCleared } = deps;
@@ -40,6 +45,23 @@ export function createLetterPanel(deps) {
       const b = getById(id);
       if (b) b.style.display = show;
     }
+  }
+
+  function openReport(text) {
+    const body = getById('letterBody');
+    if (!body) return false;
+    const dt = body.closest('details');
+    if (dt) dt.open = true;
+    const cur = (body.value || '').trim();
+    const add = String(text || '').trim();
+    const next = cur && add && !cur.includes(add) ? `${cur}\n${add}` : add || cur;
+    body.value = next.slice(0, LETTER_MAX);
+    updateCount();
+    try {
+      body.scrollIntoView({ block: 'center' });
+    } catch (e) {}
+    body.focus();
+    return true;
   }
 
   function splitBunsetsu(text) {
@@ -244,6 +266,7 @@ export function createLetterPanel(deps) {
   }
 
   return {
+    openReport,
     bind() {
       bindEmail();
       bindLetter();

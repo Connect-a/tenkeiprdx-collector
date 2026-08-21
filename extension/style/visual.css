@@ -194,6 +194,21 @@
   padding: 2px 2px 5px;
 }
 
+.spine-visbtn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.spine-vispanel {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #201e2a;
+  border: 1px solid #3a3650;
+  border-radius: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
 .spine-player-box {
   width: 100%;
   position: relative;

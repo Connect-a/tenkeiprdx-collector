@@ -1,20 +1,20 @@
 import { fileStore } from '../../core/fsdir.js';
 import { assetRefs } from '../asset-refs.js';
 import { DIRS, DL_CONC } from '../../core/constants.js';
-import { networkClient } from '../network.js';
+import { resolveOrigin } from '../origin.js';
 import { dlSession } from '../dl-session.js';
 import { ensureIndexes } from '../index-store.js';
 import { homeData, otherBgmList } from '../home-data.js';
 import { utilHelpers } from '../../core/util.js';
-const { assetRoot } = networkClient;
 
 async function collectHome(progress, onItem, opts) {
   const stop = (opts && opts.shouldAbort) || (() => false);
   const idx = await ensureIndexes();
   const hi = idx.master.homeIndex || { sceneIllust: [], comic: [], homeBgm: [] };
   const sa = idx.assets.sceneAssetIndex || {};
-  const staticsBase = idx.meta.staticsBase || null;
-  const base = await assetRoot();
+  const origin = await resolveOrigin();
+  const staticsBase = origin.statics;
+  const base = origin.assets;
   const dir = await fileStore.getDir(DIRS.home, { create: true });
   if (!dir) throw new Error('フォルダ権限がありません');
   const sharedDir = await fileStore.getDir(DIRS.shared, { create: true });
@@ -107,7 +107,7 @@ async function collectHome(progress, onItem, opts) {
     }${purged ? `・壊れた分を削除${purged}件` : ''}）`,
     1,
   );
-  return { got: counters.got, skip: counters.skip, miss: counters.missing, unresolved: counters.unresolved, fail: counters.fail, purged, stopped };
+  return { got: counters.got, skip: counters.skip, missing: counters.missing, unresolved: counters.unresolved, failed: counters.fail, total, purged, stopped };
 }
 
 export const acquireHome = { collectHome };

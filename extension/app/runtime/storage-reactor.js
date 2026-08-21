@@ -18,8 +18,8 @@ let manualPinned = false;
 
 async function loadAssetRootPin() {
   try {
-    const o = await chrome.storage.local.get(SK.assetRootManual);
-    manualPinned = !!o[SK.assetRootManual];
+    const o = await chrome.storage.local.get(SK.originManual);
+    manualPinned = !!o[SK.originManual];
   } catch (e) {}
 }
 
@@ -37,9 +37,11 @@ function onChanged(ch, area) {
     const ov = ch.bulkState.oldValue;
     const active = nv && bulkDownloader.isActive(nv.phase);
     ensureBulkTick(!!active);
-    renderBulkBanner();
-    const bulkModal = getById('bulkModal');
-    if (bulkModal && bulkModal.style.display !== 'none') renderBulkCard();
+    if (!active) {
+      renderBulkBanner();
+      const bulkModal = getById('bulkModal');
+      if (bulkModal && bulkModal.style.display !== 'none') renderBulkCard();
+    }
     const nItems = Array.isArray(nv && nv.items) ? nv.items : [];
     const oItems = Array.isArray(ov && ov.items) ? ov.items : [];
     const doneKey = (it) => String((it && (it.id != null ? it.id : it.folderKey)) || '');
@@ -47,10 +49,11 @@ function onChanged(ch, area) {
     for (const it of nItems) {
       const fk = doneKey(it);
       if (!fk || it.status !== 'done' || oDoneSet.has(fk)) continue;
-      collectionRepository
-        .scanOneFolder(fk)
+      const known = playerState.dl.find((x) => String(x.folderKey) === fk);
+      (known && known.handle ? collectionRepository.scanFolderHandle(known.handle, fk) : collectionRepository.scanOneFolder(fk))
         .then((entry) => {
           if (!entry) return;
+          entry.at = Date.now();
           const arr = Array.isArray(playerState.dl) ? playerState.dl : (playerState.dl = []);
           const idx = arr.findIndex((x) => String(x.folderKey) === fk);
           if (idx >= 0) arr[idx] = entry;
@@ -87,19 +90,20 @@ function onChanged(ch, area) {
     }, 1500);
   }
 
-  if (ch.assetRoot || ch.assetRootManual || ch.assetRootEnv) {
+  if (ch.origin || ch.originManual) {
+    const auto = (ch.origin && ch.origin.newValue && ch.origin.newValue.assets) || '';
     const cdnBase = getById('cdnBase');
     if (cdnBase) {
-      const auto = (ch.assetRootEnv && ch.assetRootEnv.newValue) || (ch.assetRoot && ch.assetRoot.newValue);
       if (auto) cdnBase.placeholder = auto;
-      if (ch.assetRootManual && document.activeElement !== cdnBase) {
-        cdnBase.value = ch.assetRootManual.newValue || '';
+      if (ch.originManual && document.activeElement !== cdnBase) {
+        cdnBase.value = ch.originManual.newValue || '';
         updateCdnReset();
       }
     }
-    const autoChanged = (ch.assetRootEnv && ch.assetRootEnv.oldValue !== ch.assetRootEnv.newValue) || (ch.assetRoot && ch.assetRoot.oldValue && ch.assetRoot.oldValue !== ch.assetRoot.newValue);
-    const changed = ch.assetRootManual ? ch.assetRootManual.oldValue !== ch.assetRootManual.newValue : !manualPinned && !!autoChanged;
-    if (ch.assetRootManual) manualPinned = !!ch.assetRootManual.newValue;
+    const oldAssets = ch.origin && ch.origin.oldValue && ch.origin.oldValue.assets;
+    const autoChanged = !!(ch.origin && oldAssets && oldAssets !== auto);
+    const changed = ch.originManual ? ch.originManual.oldValue !== ch.originManual.newValue : !manualPinned && autoChanged;
+    if (ch.originManual) manualPinned = !!ch.originManual.newValue;
     if (changed) {
       try {
         collectionRepository.invalidateIndex();

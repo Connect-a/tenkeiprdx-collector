@@ -4,6 +4,8 @@ export const FOLDER_PARENTS = { character: '_キャラ', main: '_メインシナ
 
 export const OTHER_EPISODE_SUBTYPE = 'その他エピソード';
 
+export const DEFAULT_PLAYER_NAME = 'おーじ';
+
 export const FAIL_CAP = 20;
 
 export const DL_CONC = { asset: 32, decode: 8 };
@@ -45,9 +47,8 @@ export const MONSTER_RACE_NAMES = {
 };
 
 export const SK = {
-  assetRoot: 'assetRoot',
-  assetRootManual: 'assetRootManual',
-  assetRootEnv: 'assetRootEnv',
+  origin: 'origin',
+  originManual: 'originManual',
   indexCache: 'indexCache',
   apiAuth: 'apiAuth',
   apiAuthBad: 'apiAuthBad',

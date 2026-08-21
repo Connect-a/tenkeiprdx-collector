@@ -3,13 +3,14 @@ import { assetStore } from '../../data/asset-store.js';
 import { DIRS, RARITY_NAMES, AFFILIATION_NAMES, MONSTER_TYPE_NAMES, MONSTER_RACE_NAMES } from '../../core/constants.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
-import { model3dRenderer } from '../../engine/render/model3d.js';
+import { loadModel3d, disposeModel3d } from '../../engine/render/lazy.js';
 import { glManager } from '../../engine/render/gl-manager.js';
 import { spineWeb } from '../../engine/story/spine-web.js';
 import { charAssets } from '../../data/char-assets.js';
 import { errText } from '../../core/messages.js';
 import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, downloadBar, noteRow } from '../ui/panel-shell.js';
 import { el } from '../../core/dom.js';
+import { kanaKey } from '../ui/ui-format.js';
 
 const ICON_ORDER = ['monstericon', 'battleicon', 'chibiicon', 'awakenicon'];
 
@@ -22,6 +23,9 @@ export function createMonsterPanel(deps) {
   let _spine = [];
   let _gen = 0;
   let _cards = new Map();
+  let _cardsHost = null;
+  let _ready = 0;
+  let _searchBound = false;
 
   function disposeAll() {
     for (const p of _spine) {
@@ -30,7 +34,7 @@ export function createMonsterPanel(deps) {
       } catch (e) {}
     }
     _spine = [];
-    _model3d = model3dRenderer.disposeModel3d(_model3d);
+    _model3d = disposeModel3d(_model3d);
   }
 
   function view(e) {
@@ -55,7 +59,7 @@ export function createMonsterPanel(deps) {
       run: async (onProgress) => {
         try {
           const r = await assetAcquirer.runMonsterDownload(onProgress);
-          toast(`モンスター資産を取得しました（新規${r.got}件${r.fail ? `・失敗${r.fail}件` : ''}）`, r.fail ? 'err' : 'ok');
+          toast(`モンスター資産を取得しました（新規${r.got}件${r.failed ? `・失敗${r.failed}件` : ''}）`, r.failed ? 'err' : 'ok');
           await render();
         } catch (er) {
           onProgress(errText(er));
@@ -138,12 +142,12 @@ export function createMonsterPanel(deps) {
     const paint = async (variant) => {
       const [model, matBundle] = [await loadModel(variant, v), await loadMaterials(variant, v)];
       if (!alive()) return;
-      _model3d = model3dRenderer.disposeModel3d(_model3d);
+      _model3d = disposeModel3d(_model3d);
       canvasHost.innerHTML = '';
       if (!model) return noteRow(canvasHost, '3Dモデルが未取得か、読み込めませんでした。');
       const opts = charAssets.build3dOptions({ weapons }, e, { height: 380, hidePartsUI: true });
       opts.onContextLost = () => (_glRebuildOk() ? (paint(variant), true) : false);
-      const r = model3dRenderer.render(canvasHost, model, matBundle, opts);
+      const r = (await loadModel3d()).render(canvasHost, model, matBundle, opts);
       _model3d = r && r.dispose ? r : null;
       if (r && r.ok === false) noteRow(canvasHost, '3Dを表示できませんでした（' + (r.reason || '不明') + '）。');
     };
@@ -220,10 +224,37 @@ export function createMonsterPanel(deps) {
     openMonster(entry);
   }
 
+  function matches(e, q) {
+    if (!q) return true;
+    const name = e.name ? nameFix(e.name) : '';
+    return kanaKey(name).includes(kanaKey(q)) || String(e.id).includes(q);
+  }
+
+  function paintCards() {
+    if (!_cardsHost) return;
+    const q = ((getById('rosterSearch') || {}).value || '').trim();
+    const shown = (_list || []).filter((e) => matches(e, q));
+    _cards = new Map();
+    _cardsHost.innerHTML = '';
+    _cardsHost.append(...shown.map(card));
+    const count = getById('rostercount');
+    if (count) count.textContent = `${_ready} / ${(_list || []).length}`;
+  }
+
+  function bindSearch() {
+    if (_searchBound) return;
+    const input = getById('rosterSearch');
+    if (!input) return;
+    _searchBound = true;
+    input.addEventListener('input', () => {
+      if (_cardsHost && _cardsHost.isConnected) paintCards();
+    });
+  }
+
   async function render() {
     const grid = getById('rosterGrid');
     if (!grid) return;
-    hideRosterControls();
+    hideRosterControls({ keepSearch: true });
     disposeAll();
     _gen++;
     _cards = new Map();
@@ -240,13 +271,16 @@ export function createMonsterPanel(deps) {
       status = await collectionRepository.monsterStatus(_list);
     } catch (er) {}
     _have = (status && status.have) || new Set();
-    getById('rostercount').textContent = `モンスター ${_list.length}体（全部そろっているのは ${status ? status.ready : 0}体）`;
+    _ready = status ? status.ready : 0;
 
     grid.innerHTML = '';
     if (status && status.missing.length) grid.appendChild(dlBar(status));
 
     const { listCol } = splitLayout(grid, 'monsterView', 'カードを選ぶとここに表示');
-    listCol.appendChild(el('div', 'rostercards', _list.map(card)));
+    _cardsHost = el('div', 'rostercards');
+    listCol.appendChild(_cardsHost);
+    bindSearch();
+    paintCards();
   }
 
   function reset() {

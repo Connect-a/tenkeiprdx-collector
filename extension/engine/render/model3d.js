@@ -438,6 +438,7 @@ function createExpression(T, st, deps) {
   return { applyClipExpr, updateBlink, applyMouthIndex };
 }
 
+const PITCH_LIMIT = Math.PI / 2;
 const POSE_VALUE = '__boon';
 const SPEED_OPTIONS = [
   ['0.25', '0.25x'],
@@ -965,7 +966,6 @@ function buildCharacterMeshes(T, st, deps) {
         viaAP = socketInfo.viaAP;
       const wparent = socket || root;
       const wTex = buildTextureMap(w.materials || { materials: [], textures: [] });
-      const wroot = (w.model.transforms || []).find((t) => t.fatherPathID === '0' || t.fatherPathID === 0);
       const s = w.scale || 1;
       const wAvatar = w.model.avatar;
       const wCanSkin = !!(wAvatar && wAvatar.count && wAvatar.hashToIndex);
@@ -1009,11 +1009,7 @@ function buildCharacterMeshes(T, st, deps) {
         if (!wobj) {
           wobj = new T.Mesh(geo, wmat);
           wobj.frustumCulled = false;
-          if (wroot) {
-            wobj.position.set(wroot.pos[0], wroot.pos[1], wroot.pos[2]);
-            wobj.quaternion.set(wroot.rot[0], wroot.rot[1], wroot.rot[2], wroot.rot[3]);
-            wobj.scale.set(wroot.scale[0] * s, wroot.scale[1] * s, wroot.scale[2] * s);
-          } else if (s !== 1) wobj.scale.setScalar(s);
+          if (s !== 1) wobj.scale.setScalar(s);
           wparent.add(wobj);
         }
         const wol = makeOutline(unityMesh, !!wOutlineSkel, wOutlineSkel, wToon ? wToon.outlineThickness : null, wToon && wToon.outlineColor, wOutlineSkel ? wrig : wobj);
@@ -1268,7 +1264,7 @@ function render(hostEl, model, materialBundle, opt) {
     if (dragging) {
       state.yaw += dx * 0.01;
       state.pitch += dy * 0.01;
-      state.pitch = Math.max(-1.0, Math.min(1.0, state.pitch));
+      state.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, state.pitch));
       lx = e.clientX;
       ly = e.clientY;
       applyRot();

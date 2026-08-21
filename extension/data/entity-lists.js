@@ -453,7 +453,8 @@ export async function other2dStatus(listIn) {
   for (const e of list) for (const r of e.refs) if (!have.has(r.id)) missing.push(r);
   const done = (e) => (e.file ? haveFiles.has(e.file) : e.ids.length > 0 && e.ids.every((s) => have.has(s)));
   const refs = [...new Map(list.flatMap((e) => e.refs).map((r) => [r.id, r])).values()];
-  return { list, have, haveFiles, total: new Set(ids).size + files.length, ready: list.filter(done).length, refs, missing };
+  const unknown = (await staticsList()).filter((s) => !s.url && !haveFiles.has(s.path)).length;
+  return { list, have, haveFiles, total: new Set(ids).size + files.length, unknown, ready: list.filter(done).length, refs, missing };
 }
 
 const ITEM_CAT_LABEL = { item: 'アイテム', weapon: '武器', armor: '防具', grimoire: '教典', stone: '石', equipweapon: '装備武器', aura: 'オーラ', other: 'その他' };

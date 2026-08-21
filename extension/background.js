@@ -1,9 +1,26 @@
 import { CFG } from './config.js';
+import { parseOrigin } from './data/origin.js';
 const GAME_RE = /:\/\/play\.games\.dmm\.(co\.jp|com)\/game\/tenkeiprdx/i;
 const AUTO_STOP_DELAY = 3000;
 const SELF_PREFIX = chrome.runtime.getURL('');
 
 const attached = { tabs: new Set(), childTargets: new Set() };
+const observed = { assets: '', statics: '' };
+
+function noteOrigin(url) {
+  const p = parseOrigin(url);
+  const assets = p.assets || observed.assets;
+  const statics = p.statics || observed.statics;
+  if (assets === observed.assets && statics === observed.statics) return;
+  observed.assets = assets;
+  observed.statics = statics;
+  chrome.storage.local.get('origin').then((o) => {
+    const cur = o.origin || {};
+    const next = { assets: assets || cur.assets || null, statics: statics || cur.statics || null };
+    if (next.assets === (cur.assets || null) && next.statics === (cur.statics || null)) return;
+    chrome.storage.local.set({ origin: { ...next, from: 'observed', at: Date.now() } });
+  });
+}
 
 let restoring = null;
 function restoreAttached() {
@@ -164,12 +181,7 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
   const req = params.request;
   const url = req && req.url;
   if (!url) return;
-  const am = url.match(/^(https:\/\/cdne-paripari-prod\.tenkei-paradox\.com\/production\/production\d+-[0-9a-f-]+)\//i);
-  if (am) {
-    chrome.storage.local.get(['assetRoot', 'assetRootEnv']).then((o) => {
-      if (!o.assetRootEnv && !o.assetRoot) chrome.storage.local.set({ assetRoot: am[1] });
-    });
-  }
+  noteOrigin(url);
   if (!req.headers || !CFG.targetHosts.some((h) => url.includes(h))) return;
   const auth = req.headers.Authorization || req.headers.authorization;
   if (!auth || !/^Bearer /.test(auth)) return;

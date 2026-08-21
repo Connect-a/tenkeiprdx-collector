@@ -478,12 +478,22 @@
 }
 
 .bk-phase {
-  margin-left: 8px;
+  margin-right: 4px;
   padding: 1px 8px;
   border-radius: 6px;
   font-size: 11px;
   background: #322e42;
   color: #c8b6ff;
+}
+
+.bk-line .dlspin {
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.bk-phase.running {
+  background: #23402c;
+  color: #8fe0a6;
 }
 
 .bk-phase.done {
@@ -501,9 +511,16 @@
   color: #a7a2bd;
 }
 
+.charhead-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 #charHead h2 {
   font-size: 19px;
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 #charHead .note {

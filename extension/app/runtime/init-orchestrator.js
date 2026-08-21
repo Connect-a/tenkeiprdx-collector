@@ -34,26 +34,28 @@ import { resumeBulkIfWaitingForConnection } from './bulk-resume.js';
 import { registerPanels } from './panel-state.js';
 import { audioScene } from './audio-scene.js';
 import { settings } from '../../core/settings.js';
+import { resolveOrigin, ensureOriginAlive } from '../../data/origin.js';
 import { CFG } from '../../config.js';
-const REATTACH_WAIT_MS = 3000;
 let connPollTimer = null;
 
 export async function init() {
   try {
-    await Promise.race([chrome.runtime.sendMessage({ cmd: 'reattach' }), new Promise((r) => setTimeout(r, REATTACH_WAIT_MS))]);
+    Promise.resolve(chrome.runtime.sendMessage({ cmd: 'reattach' })).catch(() => {});
   } catch (e) {}
   showVersionAndCheckUpdate();
   updateConn();
   if (!connPollTimer) connPollTimer = setInterval(updateConn, 30000);
 
   try {
-    const o = await chrome.storage.local.get([SK.email, SK.assetRootEnv, SK.assetRoot, SK.assetRootManual]);
+    const o = await chrome.storage.local.get(SK.email);
+    await ensureOriginAlive();
+    const origin = await resolveOrigin();
     const email = getById('email');
     if (email && o[SK.email]) email.value = o[SK.email];
     const cdnBase = getById('cdnBase');
     if (cdnBase) {
-      cdnBase.value = o[SK.assetRootManual] || '';
-      cdnBase.placeholder = o[SK.assetRootEnv] || o[SK.assetRoot] || CFG.assetRootDefault;
+      cdnBase.value = origin.manual || '';
+      cdnBase.placeholder = (await resolveOrigin({ ignoreManual: true })).assets;
     }
   } catch (e) {}
 
@@ -67,6 +69,7 @@ export async function init() {
 
   await settings.load();
   for (const id of ['voiceMode', 'imageFlipY', 'show3d', 'showSpine', 'masterVolume', 'playerName']) settings.bind(getById(id), id);
+  document.body.classList.toggle('sbcollapsed', !!settings.get('sidebarCollapsed'));
   const masterVol = () => settings.get('masterVolume');
 
   const homeBgm = {};
@@ -127,7 +130,7 @@ export async function init() {
   const panels = [letterPanel, audioPanel, imagePanel, storyPanel, otherPanel, homePanel, itemPanel, other2dPanel, monsterPanel];
 
   try {
-    await refreshLists();
+    await refreshLists(undefined, { deferScan: true });
   } catch (e) {
     console.error('[tp] 初期索引取得に失敗(続行)', e);
   }

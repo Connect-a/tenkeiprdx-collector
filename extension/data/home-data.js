@@ -2,6 +2,7 @@ import { DIRS } from '../core/constants.js';
 import { toPath } from '../core/paths.js';
 import { assetRefs } from './asset-refs.js';
 import { localInventory } from './inventory.js';
+import { resolveOrigin } from './origin.js';
 import { assetStore } from './asset-store.js';
 import { ensureIndexes } from './index-store.js';
 
@@ -59,7 +60,7 @@ export async function homeData() {
     otherBgm: otherBgmList(x).map(withBgm).map(withIcon),
     background,
     profileIcon,
-    staticsBase: x.meta.staticsBase || null,
+    staticsBase: (await resolveOrigin()).statics,
   };
 }
 
@@ -118,9 +119,10 @@ export async function homeAssetStatus(dataIn) {
   try {
     const data = dataIn || (await homeData());
     const r = await lookupHome(data);
-    return { have: r.have, total: r.total };
+    const unknown = data.staticsBase ? 0 : [...r.refs.comic].filter((p) => !r.hasComic(String(p).replace(/^comic\//, '').replace(/\.dds$/, ''))).length;
+    return { have: r.have, total: r.total, unknown };
   } catch (e) {
-    return { have: 0, total: 0 };
+    return { have: 0, total: 0, unknown: 0 };
   }
 }
 

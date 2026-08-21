@@ -9,23 +9,40 @@ const { apiFetchBytes } = networkClient;
 const { decodeUserBytes } = unityDecode;
 const { b64ToBytes, num } = utilHelpers;
 
+const errText = (e) => (e && e.message ? e.message : String(e));
+
 let _userState = null;
 async function parseUserState() {
   if (_userState) return _userState;
-  const state = { levels: new Map(), paidUnlocked: new Set(), clearedNodes: new Set(), loaded: false };
+  const state = { levels: new Map(), paidUnlocked: new Set(), clearedNodes: new Set(), openEpisodes: new Set(), loaded: false, error: null };
   let bytes = null;
+  let from = '';
+  const tried = [];
   try {
     const b64 = await idbStore.get(SK.userRaw);
-    if (b64) bytes = b64ToBytes(b64);
-  } catch (e) {}
+    if (b64) {
+      bytes = b64ToBytes(b64);
+      from = 'idb';
+    }
+  } catch (e) {
+    tried.push('idb: ' + errText(e));
+  }
   if (!bytes) {
     try {
       const d = await fileStore.getDir(DIRS.master, { create: false });
       const f = d && (await fileStore.readUnder(d, 'user.bin'));
-      if (f) bytes = new Uint8Array(await f.arrayBuffer());
-    } catch (e) {}
+      if (f) {
+        bytes = new Uint8Array(await f.arrayBuffer());
+        from = 'file';
+      }
+    } catch (e) {
+      tried.push('file: ' + errText(e));
+    }
   }
-  if (!bytes) return state;
+  if (!bytes) {
+    state.error = { reason: 'missing', message: 'user.bin が見つかりません', detail: tried.join(' / ') };
+    return state;
+  }
   try {
     (function walk(x, depth) {
       if (depth > 4 || !Array.isArray(x)) return;
@@ -34,28 +51,41 @@ async function parseUserState() {
         if (tag === 3) state.levels.set(String(num(x[1][1])), num(x[1][2]) || 0);
         else if (tag === 146) state.paidUnlocked.add(String(num(x[1][1])));
         else if (tag === 22) state.clearedNodes.add(String(num(x[1][1])));
+        else if (tag === 34) state.openEpisodes.add(String(num(x[1][1])));
       }
       for (const e of x) walk(e, depth + 1);
     })(decodeUserBytes(bytes), 0);
-    state.loaded = true;
-    _userState = state;
   } catch (e) {
-    console.warn('[tp] userState の解析に失敗', e);
+    state.error = { reason: 'parse', message: errText(e), detail: `from=${from} bytes=${bytes.length}` };
+    return state;
   }
+  if (!state.levels.size) {
+    state.error = { reason: 'empty', message: '所持キャラの情報が取り出せませんでした', detail: `from=${from} bytes=${bytes.length}` };
+    return state;
+  }
+  state.loaded = true;
+  _userState = state;
   return state;
 }
 async function ownedLevels() {
   return (await parseUserState()).levels;
 }
-const unlockedCount = (level) => (CFG.storyUnlockLevels || []).reduce((n, req) => n + ((level || 0) >= req ? 1 : 0), 0);
 async function unlockedPaidSet() {
   return (await parseUserState()).paidUnlocked;
 }
 async function clearedNodeSet() {
   return (await parseUserState()).clearedNodes;
 }
+async function openEpisodeSet() {
+  return (await parseUserState()).openEpisodes;
+}
 async function userLoaded() {
   return (await parseUserState()).loaded;
+}
+async function userIssue() {
+  const s = await parseUserState();
+  if (s.loaded) return null;
+  return s.error || { reason: 'unknown', message: '解放状態を読み取れませんでした', detail: '' };
 }
 
 async function refreshUserViaApi() {
@@ -78,4 +108,4 @@ async function refreshUserViaApi() {
   return { ok: true, owned: (await ownedLevels()).size };
 }
 
-export const userStateService = { ownedLevels, unlockedCount, unlockedPaidSet, clearedNodeSet, userLoaded, refreshUserViaApi };
+export const userStateService = { ownedLevels, unlockedPaidSet, clearedNodeSet, openEpisodeSet, userLoaded, userIssue, refreshUserViaApi };

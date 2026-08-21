@@ -61,7 +61,6 @@ function renderEpisodes(m) {
     return;
   }
 
-  const epRows = [];
   let curChapter = m.chapter || null;
   for (const ep of eps) {
     if (ep.chapter && ep.chapter !== curChapter) {
@@ -71,18 +70,16 @@ function renderEpisodes(m) {
     const naLabel = ep.gate === 'locked' ? (m.rosterKind === 'main' || m.rosterKind === 'event' ? '未クリア' : '未解放') : '未取得';
     const row = el('div', {
       class: 'eprow' + (ep.have !== 'none' ? '' : ' na'),
+      data: { epid: String(episodeIdOf(ep)) },
       html: html`<span class="lbl">${ep.label || ''}</span><span class="ti"></span><span class="epid">#${episodeIdOf(ep)}</span
         ><span class="vc">${ep.have !== 'none' ? ep.lineCount + '行' + (ep.voiced ? ' / 音声' + ep.voiced : '') + (ep.have === 'partial' ? ' / 続き未取得' : '') : naLabel}</span>`,
     });
     row.querySelector('.ti').textContent = ep.title || '';
     if (ep.have !== 'none') {
       row.addEventListener('click', () => {
-        epRows.forEach((x) => x.classList.remove('sel'));
-        row.classList.add('sel');
         const storyPanel = getStoryPanel();
         if (storyPanel) storyPanel.playEpisode(ep);
       });
-      epRows.push(row);
     }
     box.appendChild(row);
   }
@@ -119,11 +116,11 @@ export async function openCharacter(folderKey) {
 
   const eps = m.episodes || [];
   const avail = eps.filter((e) => e.have !== 'none').length;
-  getById('charHead').innerHTML = html`<h2>${raw(chip(m.rosterKind))} ${nameFix(characterMeta.displayName(m) || folderKey)} <span class="hint">#${folderKey}</span></h2>
-    <div class="headrow">
-      <span class="note"><span class="dim">取得 ${avail}/${eps.length}話${m.builtAt ? '・DL ' + new Date(m.builtAt).toLocaleString('ja-JP') : ''}</span></span>
-      <button class="btn xs" id="reDl">再DL</button>
-    </div>`;
+  getById('charHead').innerHTML = html`<div class="charhead-top">
+    <h2>${raw(chip(m.rosterKind))} ${nameFix(characterMeta.displayName(m) || folderKey)} <span class="hint">#${folderKey}</span></h2>
+    <button class="btn xs" id="reDl">再DL</button>
+    <span class="note"><span class="dim">取得 ${avail}/${eps.length}話${m.builtAt ? '・DL ' + new Date(m.builtAt).toLocaleString('ja-JP') : ''}</span></span>
+  </div>`;
 
   getById('reDl').addEventListener('click', () => runDownload(String(folderKey), getById('reDl')));
 
@@ -131,7 +128,20 @@ export async function openCharacter(folderKey) {
   resetLineSearch();
   renderVoiceGallery();
   applyKindTabs(m.rosterKind);
-  loadEpisodesDeferred(String(folderKey));
+
+  const key = playerState.viewKey();
+  if (imagePanel && imagePanel.visualsReady) await imagePanel.visualsReady();
+  if (playerState.viewKey() !== key) return;
+  ensureEpisodes(String(folderKey));
+}
+
+let _epLoad = null;
+
+export function ensureEpisodes(folderKey) {
+  const key = String(folderKey || playerState.viewKey() || '');
+  if (!key) return null;
+  if (!_epLoad || _epLoad.key !== key) _epLoad = { key, p: loadEpisodesDeferred(key) };
+  return _epLoad.p;
 }
 
 function renderRoutingWarning(m) {

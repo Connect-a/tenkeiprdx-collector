@@ -26,6 +26,25 @@ export function mk(tag, cls, parent, text) {
   return node;
 }
 
+export function filterBox(props, onInput) {
+  const wrap = el('div', 'stillfilter-wrap');
+  const input = el('input', Object.assign({ class: 'stillfilter', type: 'text' }, props || {}));
+  const clear = el('button', { class: 'stillfilter-clear', type: 'button', text: '✕', title: 'クリア', style: { display: 'none' } });
+  const run = () => {
+    onInput(input.value.trim().toLowerCase());
+    clear.style.display = input.value ? '' : 'none';
+  };
+  input.addEventListener('input', run);
+  clear.addEventListener('click', () => {
+    input.value = '';
+    run();
+    input.focus();
+  });
+  wrap.appendChild(input);
+  wrap.appendChild(clear);
+  return { wrap, input };
+}
+
 export function append(parent, children) {
   if (children == null) return parent;
   if (typeof children === 'string' || typeof children === 'number') parent.textContent = String(children);

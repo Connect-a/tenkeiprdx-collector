@@ -98,7 +98,7 @@ export function createItemPanel(deps) {
     const shown = _items.filter((it) => src.get(it)).length;
     const noIcon = _items.filter((it) => !it.rel).length;
     const needShared = _items.filter((it) => it.rel && !src.get(it)).length;
-    getById('rostercount').textContent = `アイテム ${n}件 / アイコン表示 ${shown}件` + (noIcon ? ` / アイコン未収録 ${noIcon}件` : '');
+    getById('rostercount').textContent = `${shown} / ${n}`;
 
     grid.innerHTML = '';
     if (needShared) grid.appendChild(sharedDlBar(needShared));

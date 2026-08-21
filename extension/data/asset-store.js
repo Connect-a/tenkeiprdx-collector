@@ -2,8 +2,11 @@ import { fileStore } from '../core/fsdir.js';
 import { relKey } from '../core/paths.js';
 import { platformsFor } from '../core/asset-route.js';
 import { subFor, dirOfPrefix, fileHead } from '../core/placement.js';
+import { utilHelpers } from '../core/util.js';
 import { networkClient } from './network.js';
 import { ensureIndexes } from './index-store.js';
+
+const LIST_CONC = 16;
 
 const idOf = relKey;
 const dirOf = (d, create) => (typeof d === 'string' ? fileStore.getDir(d, { create: !!create }) : Promise.resolve(d));
@@ -30,8 +33,7 @@ export async function readAsset(dir, rel, place) {
   if (!d) return null;
   const p = await locate(d, rel, place);
   if (!p) return null;
-  const f = await fileStore.readUnder(d, p);
-  return f ? new Uint8Array(await f.arrayBuffer()) : null;
+  return fileStore.readBytesUnder(d, p);
 }
 
 export async function hasAsset(dir, rel, place) {
@@ -54,10 +56,11 @@ export async function presentIds(dir, items) {
       byDir.get(key).push({ row, name: fileHead(c.path), path: c.path });
     }
   }
-  for (const [sub, list] of byDir) {
-    const names = new Set(await fileStore.listUnder(d, sub));
-    for (const x of list) if (!x.row.path && names.has(x.name)) x.row.path = x.path;
-  }
+  const groups = [...byDir.entries()];
+  const listed = await utilHelpers.pool(groups, LIST_CONC, async ([sub]) => new Set(await fileStore.listUnder(d, sub)));
+  groups.forEach(([, list], i) => {
+    for (const x of list) if (!x.row.path && listed[i].has(x.name)) x.row.path = x.path;
+  });
   const short = new Set();
   for (const r of rows) if (!r.path) short.add(r.id);
   for (const r of rows) if (r.path && !short.has(r.id) && !have.has(r.id)) have.set(r.id, r.path);

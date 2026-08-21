@@ -5,10 +5,15 @@ import { failureReport, failureSummary, hasFailures } from '../../core/failure-r
 const STATE_KEY = SK.bulkState;
 const FAIL_LIMIT = 5;
 const GD_INTERVAL_SEC = 3;
+const FLUSH_MS = 2000;
 const DL_INTERVAL_SEC = 180;
+
+const RUNNER_ID = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+const OWNER_STALE_MS = 90000;
 
 const isActive = (phase) => phase === 'running';
 const isActiveState = () => !!_state && _state.phase === 'running';
+const ownedByOther = (st) => !!st && !!st.owner && st.owner !== RUNNER_ID && Date.now() - (st.beat || 0) < OWNER_STALE_MS;
 
 let _state = null;
 let _stopReq = false;
@@ -26,6 +31,10 @@ let _flushTimer = null,
   _flushPending = false;
 function flush(force) {
   if (!_state) return;
+  if (_running) {
+    _state.owner = RUNNER_ID;
+    _state.beat = Date.now();
+  }
   if (force) {
     if (_flushTimer) {
       clearTimeout(_flushTimer);
@@ -50,7 +59,7 @@ function flush(force) {
       _flushPending = false;
       flush();
     }
-  }, 500);
+  }, FLUSH_MS);
 }
 
 function stats(items) {
@@ -155,7 +164,6 @@ function onEvent(ev) {
     it.assetCats = cp.assetCategories || 0;
     it.cast = cp.castResolved || 0;
     const rep = failureReport({ ...r, missingVoices: (r.missingVoices || []).length ? r.missingVoices : new Array(cp.missingVoices || 0).fill('(詳細なし)') });
-    it.report = rep;
     it.missing = rep.counts.missing;
     it.fails = rep.counts.fails;
     it.missingVoices = rep.counts.missingVoices;
@@ -199,7 +207,19 @@ function onEvent(ev) {
   flush();
 }
 
+async function ownershipLost() {
+  const st = await loadState();
+  if (!st) return false;
+  if (!isActive(st.phase)) return true;
+  return !!st.owner && st.owner !== RUNNER_ID && st.owner < RUNNER_ID && Date.now() - (st.beat || 0) < OWNER_STALE_MS;
+}
+
 async function sleepUntil(ms) {
+  if (await ownershipLost()) {
+    _stopReq = true;
+    wakeAll();
+    return;
+  }
   const end = Date.now() + ms;
   while (!_stopReq && isActiveState() && Date.now() < end) await sleepCancelable(end - Date.now());
 }
@@ -288,6 +308,8 @@ async function start(items, opts) {
   opts = opts || {};
   if (_state && isActive(_state.phase)) return { ok: false, reason: 'active' };
   if (!items || !items.length) return { ok: false, reason: 'empty' };
+  const stored = await loadState();
+  if (stored && isActive(stored.phase) && ownedByOther(stored)) return { ok: false, reason: 'active' };
   const overwrite = !!opts.overwrite;
   let have = new Set();
   if (!overwrite) {
@@ -297,6 +319,8 @@ async function start(items, opts) {
   }
   _state = {
     phase: 'running',
+    owner: RUNNER_ID,
+    beat: Date.now(),
     gdIntervalSec: opts.gdIntervalSec || GD_INTERVAL_SEC,
     dlIntervalSec: opts.dlIntervalSec || DL_INTERVAL_SEC,
     overwrite,
@@ -344,7 +368,7 @@ async function stop() {
 async function resume() {
   if (_running) return;
   const st = await loadState();
-  if (st && isActive(st.phase)) {
+  if (st && isActive(st.phase) && !ownedByOther(st)) {
     _state = st;
     _stopReq = false;
     runPipelines();
@@ -355,6 +379,7 @@ async function resumeAfterReconnect() {
   if (_running) return false;
   const st = _state || (await loadState());
   if (!st || st.phase !== 'error' || !st.tokenError) return false;
+  if (ownedByOther(st)) return false;
   st.phase = 'running';
   st.tokenError = false;
   st.lastError = '';

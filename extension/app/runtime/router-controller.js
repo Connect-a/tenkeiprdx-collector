@@ -6,6 +6,7 @@ import { openCharacter } from '../views/detail-view.js';
 import { showDownloadPrompt } from '../views/download-ui.js';
 import { toast } from '../ui/notifier.js';
 import { rosterModel } from '../views/roster-ui.js';
+import { pendingScan, beginScan } from './state-refresh.js';
 
 let appliedRoute = null;
 
@@ -47,7 +48,12 @@ export function navTo(rosterKind, id, opts) {
 async function openById(id) {
   const sid = String(id || '');
   if (!sid) return false;
-  if (playerState.dl.some((z) => String(z.folderKey) === sid)) {
+  const known = () => playerState.dl.some((z) => String(z.folderKey) === sid);
+  if (!known()) {
+    const scan = pendingScan() || beginScan();
+    if (scan) await scan;
+  }
+  if (known()) {
     await openCharacter(sid);
     return true;
   }

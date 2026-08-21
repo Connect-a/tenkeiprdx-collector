@@ -1,18 +1,12 @@
 import { utilHelpers } from '../core/util.js';
 import { SK } from '../core/constants.js';
 import { routeFor, routeUrl } from '../core/asset-route.js';
-import { CFG } from '../config.js';
+import { resolveOrigin, fallbackBases } from './origin.js';
 const sleep = utilHelpers.sleep;
 const bytesToB64 = utilHelpers.bytesToB64;
 
-async function assetRoot() {
-  const o = await chrome.storage.local.get([SK.assetRootManual, SK.assetRootEnv, SK.assetRoot]);
-  return (o[SK.assetRootManual] || o[SK.assetRootEnv] || o[SK.assetRoot] || CFG.assetRootDefault || '').replace(/\/+$/, '');
-}
-async function assetRootAuto() {
-  const o = await chrome.storage.local.get([SK.assetRootEnv, SK.assetRoot]);
-  return (o[SK.assetRootEnv] || o[SK.assetRoot] || CFG.assetRootDefault || '').replace(/\/+$/, '');
-}
+const assetRoot = async () => (await resolveOrigin()).assets;
+const assetRootAuto = async () => (await resolveOrigin({ ignoreManual: true })).assets;
 
 const RETRY_DELAYS = [5000, 15000];
 async function fetchUrl(url, take) {
@@ -51,6 +45,30 @@ async function fetchBytes(url) {
   return r.status === 'ok' ? { status: 'ok', bytes: r.value } : r;
 }
 
+const FALLBACK_GENS = 3;
+const FALLBACK_GIVEUP = 20;
+const fb = { hit: 0, tried: 0, streak: 0, off: false };
+
+async function fetchFromOtherGenerations(base, cands, take) {
+  if (fb.off) return null;
+  const others = (await fallbackBases(base)).slice(0, FALLBACK_GENS);
+  for (const b of others) {
+    for (const c of cands) {
+      const r = await fetchUrl(routeUrl(b, c), (res) => (take || toBytes)(res, c));
+      if (r.status === 'ok') {
+        fb.hit++;
+        fb.streak = 0;
+        return { ...r, platform: c.platform, rel: c.rel, viaBase: b };
+      }
+      if (r.status === 'error') break;
+    }
+  }
+  fb.tried++;
+  fb.streak++;
+  if (fb.streak >= FALLBACK_GIVEUP) fb.off = true;
+  return null;
+}
+
 async function fetchAsset(base, rel, altRel, take) {
   const cands = routeFor(rel, altRel);
   let sawMissing = false;
@@ -61,8 +79,14 @@ async function fetchAsset(base, rel, altRel, take) {
     sawMissing = true;
   }
   const last = cands[cands.length - 1];
+  if (sawMissing) {
+    const alt = await fetchFromOtherGenerations(base, cands, take);
+    if (alt) return alt;
+  }
   return { status: sawMissing ? 'missing' : 'error', platform: last && last.platform, rel: last && last.rel };
 }
+
+const fallbackStats = () => ({ ...fb });
 
 async function fetchBytesRaw(url) {
   const r = await fetchBytes(url);
@@ -101,4 +125,4 @@ async function apiFetchBytes(url, method, { withStatus } = {}) {
   }
 }
 
-export const networkClient = { fetchAsset, assetRoot, assetRootAuto, fetchBytes, fetchBytesRaw, apiFetchBytes };
+export const networkClient = { fetchAsset, assetRoot, assetRootAuto, fetchBytes, fetchBytesRaw, apiFetchBytes, fallbackStats };
