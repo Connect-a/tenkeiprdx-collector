@@ -1,8 +1,30 @@
-export const DIRS = { shared: '_共有リソース', home: '_ホーム', master: '_マスタ', other: '_その他3D', monster: '_モンスター' };
+export const DIRS = { shared: '_共有リソース', home: '_ホーム', master: '_マスタ', other: '_その他3D', monster: '_モンスター', verify: '_検証', cache: '_キャッシュ', save: '_拡張機能のセーブデータ' };
 
 export const FOLDER_PARENTS = { character: '_キャラ', main: '_メインシナリオ', event: '_イベントシナリオ', special: '_特別シナリオ' };
 
 export const OTHER_EPISODE_SUBTYPE = 'その他エピソード';
+
+export const XPOS_CATEGORIES = [
+  [1, '\u6b63\u5e38\u4f4d'],
+  [2, '\u9a0e\u4e57\u4f4d'],
+  [4, '\u7acb\u4f4d'],
+  [8, '\u5074\u4f4d'],
+  [16, '\u5ea7\u4f4d'],
+  [32, '\u7acb\u3061\u30d0\u30c3\u30af'],
+  [64, '69'],
+  [128, '\u5f8c\u80cc\u4f4d'],
+  [256, '\u30d1\u30a4\u30ba\u30ea'],
+  [512, '\u624b\u30b3\u30ad'],
+  [1024, '\u8db3\u30b3\u30ad'],
+  [2048, '\u30d5\u30a7\u30e9'],
+  [4096, '\u30aa\u30ca\u30cb\u30fc'],
+  [8192, '\u30af\u30f3\u30cb'],
+  [16384, '\u624b\u30de\u30f3'],
+  [32768, '\u30d0\u30a4\u30d6'],
+  [65536, '\u305d\u306e\u4ed6'],
+];
+
+export const xposNames = (mask) => XPOS_CATEGORIES.filter(([bit]) => (mask || 0) & bit).map(([, name]) => name);
 
 export const DEFAULT_PLAYER_NAME = 'おーじ';
 
@@ -60,6 +82,7 @@ export const SK = {
   missingScenes: 'missingScenes',
   binlistUrl: 'binlistUrl',
   binlistScenes: 'binlistScenes',
+  exFavorites: 'exFavorites',
   email: 'email',
   bulkState: 'bulkState',
   scenarioSettings: 'scenarioSettings',

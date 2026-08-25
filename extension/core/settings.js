@@ -19,6 +19,16 @@ const DEFS = {
   stillGroupOther: { key: 'stillGroupOther', def: 1, type: 'num', min: 0, max: 1 },
   stillBackImgHidden: { key: 'stillBackImgHidden', def: false, type: 'bool' },
   sidebarCollapsed: { key: 'sidebarCollapsed', def: false, type: 'bool' },
+  rosterOwn: { key: 'rosterOwn', def: 'all', values: ['all', 'owned', 'unowned'] },
+  rosterGroup: { key: 'rosterGroup', def: '', type: 'text', max: 24 },
+  rosterRank: { key: 'rosterRank', def: '', type: 'text', max: 8 },
+  rosterSearch: { key: 'rosterSearch', def: '', type: 'text', max: 40 },
+  rosterSort: { key: 'rosterSort', def: 'name', values: ['name', 'id', 'b', 'w', 'h'] },
+  rosterSortAsc: { key: 'rosterSortAsc', def: true, type: 'bool' },
+  rosterXpos: { key: 'rosterXpos', def: 0, type: 'num', min: 0, max: 131071 },
+  exMode: { key: 'exMode', def: false, type: 'bool' },
+  exFavOnly: { key: 'exFavOnly', def: false, type: 'bool' },
+  exThumbCache: { key: 'exThumbCache', def: false, type: 'bool' },
 };
 
 const state = {};

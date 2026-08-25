@@ -1,6 +1,7 @@
 import { assetAcquirer } from './acquire-assemble.js';
+import { bgSleep } from '../../core/bgtimer.js';
 
-const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const defaultSleep = bgSleep;
 const NO_WAIT_ASSET_MAX = 5;
 
 async function run(targets, opts) {

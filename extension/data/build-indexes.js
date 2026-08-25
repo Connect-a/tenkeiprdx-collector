@@ -1,6 +1,6 @@
 import { OTHER_EPISODE_SUBTYPE } from '../core/constants.js';
 import { utilHelpers } from '../core/util.js';
-import { toRel, APP_DIR, APP_PREFIX } from '../core/paths.js';
+import { toRel, APP_DIR, APP_PREFIX, bundleName } from '../core/paths.js';
 const num = utilHelpers.num;
 const str = (x) => (typeof x === 'string' && x.trim() ? x : undefined);
 const int = (x) => (typeof x === 'number' ? x : typeof x === 'bigint' ? Number(x) : undefined);
@@ -52,7 +52,7 @@ const ITEM_TABLES = {
 
 const MAIN_EVENT_TYPES = new Set([1, 24, 25]);
 const SPECIAL_SUBTYPE = { 0: 'エクストラエピソード', 1: 'イベントエピソード', 2: 'スペシャルエピソード' };
-const DEFERRED_TABLES = [33, 20, 145, 36, 168];
+const DEFERRED_TABLES = [33, 20, 145, 36, 168, 17];
 
 const bgmKey = (b) => String(b).replace(/_(loop|intro)$/, '');
 const byOrder = (a, b) => (a.order || 0) - (b.order || 0);
@@ -141,10 +141,20 @@ const TABLE_HANDLERS = {
     const cat = idStr(p[40]);
     const nm = str(p[3]);
     if (cat && cat !== '0' && nm) (acc.weaponCatChars[cat] || (acc.weaponCatChars[cat] = new Set())).add(nm);
+    const sk = [];
+    for (const e of Array.isArray(p[33]) ? p[33] : []) {
+      const sid = e && e[3] != null ? String(int(e[3])) : null;
+      if (sid) sk.push({ skillId: sid, lv: int(e[1]) || 0, type: int(e[2]) || 0 });
+    }
+    if (sk.length) acc.charSkills[String(num(p[0]))] = sk;
   },
   154(p, acc) {
     const nm = str(p[1]);
     if (nm) acc.weaponCatName[String(num(p[0]))] = nm;
+  },
+  103(p, acc) {
+    const nm = str(p[4]);
+    if (nm) acc.gachaNames[String(num(p[0]))] = nm;
   },
   144(p, acc) {
     const id = String(num(p[0]));
@@ -178,7 +188,14 @@ const TABLE_HANDLERS = {
     for (const k of [num(p[1]), num(p[1]) + ':' + (int(p[4]) || 0)]) (acc.questThumbSets[k] || (acc.questThumbSets[k] = new Set())).add(th);
   },
   32(p, acc) {
-    acc.sceneMeta[num(p[0])] = { label: p[1], title: p[2], binIds: [...(p[8] || []), ...(p[9] || [])].map((x) => String(num(x))) };
+    const bgList = Array.isArray(p[10]) ? p[10] : [];
+    acc.sceneMeta[num(p[0])] = {
+      label: p[1],
+      title: p[2],
+      xpos: int(p[15]) || 0,
+      thumb: bgList.find((n) => typeof n === 'string' && /_still_01$/.test(n)) || null,
+      binIds: [...(p[8] || []), ...(p[9] || [])].map((x) => String(num(x))),
+    };
     const imgs = [...(Array.isArray(p[10]) ? p[10] : []), ...(Array.isArray(p[11]) ? p[11] : [])].filter((x) => typeof x === 'string' && x);
     if (imgs.length) acc.sceneImages[String(num(p[0]))] = imgs;
     if (Array.isArray(p[10])) for (const b of p[10]) if (typeof b === 'string' && b) acc.sceneBgNames.add(b);
@@ -272,6 +289,7 @@ function handleItemTable(t, p, acc) {
 function collectRecords(recs) {
   const acc = {
     characters: {},
+    charSkills: {},
     sceneMeta: {},
     sceneBgNames: new Set(),
     sceneImages: {},
@@ -289,6 +307,7 @@ function collectRecords(recs) {
     equipStoneOwner: {},
     weaponCatName: {},
     weaponCatChars: {},
+    gachaNames: {},
     questThumbSets: {},
     bgm: { eventCtx: {}, storyBest: {}, useCount: {} },
     deferred: {},
@@ -319,7 +338,15 @@ function attachCharacterEpisodes(acc, binIdsOf) {
     const sc = acc.sceneMeta[num(p[1])] || {};
     if (!acc.characters[base]) acc.characters[base] = { name: '(不明)', title: '' };
     const c = acc.characters[base];
-    (c.episodes || (c.episodes = [])).push({ episodeId: String(num(p[0])), order: num(p[2]), label: sc.label || null, title: sc.title || null, sceneBinIds: binIdsOf(num(p[1])) });
+    (c.episodes || (c.episodes = [])).push({
+      episodeId: String(num(p[0])),
+      order: num(p[2]),
+      label: sc.label || null,
+      title: sc.title || null,
+      xpos: sc.xpos || 0,
+      thumb: sc.thumb || null,
+      sceneBinIds: binIdsOf(num(p[1])),
+    });
   }
   for (const [id, c] of Object.entries(acc.characters)) {
     c.id = Number(id);
@@ -496,6 +523,19 @@ function buildSharedImageNames(acc) {
     .sort();
 }
 
+function buildSkillMaster(acc) {
+  const referenced = new Set();
+  for (const list of Object.values(acc.charSkills || {})) for (const s of list) referenced.add(s.skillId);
+  const skillMaster = {};
+  for (const p of acc.deferred[17] || []) {
+    const sid = p && p[0] != null ? String(int(p[0])) : null;
+    if (!sid || !referenced.has(sid) || skillMaster[sid]) continue;
+    const effects = Array.isArray(p[14]) ? p[14].map((x) => str(x)).filter(Boolean) : [];
+    skillMaster[sid] = { name: str(p[1]) || '', desc: str(p[2]) || '', effects };
+  }
+  return skillMaster;
+}
+
 function masterIndexes(recs) {
   const acc = collectRecords(recs);
   const binIdsOf = (sceneId) => {
@@ -520,8 +560,24 @@ function masterIndexes(recs) {
   }
   attachWeaponVariants(acc);
 
+  const skillMaster = buildSkillMaster(acc);
+  const effectUse = {};
+  for (const list of Object.values(acc.charSkills || {})) {
+    const seen = new Set();
+    for (const s of list) {
+      const sk = skillMaster[s.skillId];
+      if (!sk) continue;
+      for (const e of sk.effects) seen.add(e);
+    }
+    for (const e of seen) effectUse[e] = (effectUse[e] || 0) + 1;
+  }
+  const sharedEffects = Object.keys(effectUse).filter((e) => effectUse[e] > 1);
+
   return {
     characters: acc.characters,
+    charSkills: acc.charSkills,
+    skillMaster,
+    sharedEffects,
     questIndex,
     eventIndex,
     homeIndex,
@@ -534,6 +590,7 @@ function masterIndexes(recs) {
     bgmContext: buildBgmContext(acc.bgm),
     itemMaster: acc.itemMaster,
     missionGroups: acc.missionGroups,
+    gachaNames: acc.gachaNames,
     equipWeapons: acc.equipWeapons,
     sceneBgNames: [...acc.sceneBgNames],
     sharedImageNames: buildSharedImageNames(acc),
@@ -589,6 +646,7 @@ const SHARED_KEEP = [
   (r) => /^eventpages_/.test(r),
   (r) => /^exchangeassets_assets_exchangeassets\//.test(r),
   (r) => /^loginbonus_assets_loginbonus\//.test(r),
+  (r) => /^systemvoice_assets_/.test(r),
 ];
 
 const CAT_PREFIX = /^([a-z0-9()]+_assets_[a-z0-9()]+)\//;
@@ -596,6 +654,13 @@ const HERO_MARK = [/^3dmodels_assets_3dmodels\/(\d{8})_/, /^spines_assets_spines
 const ICON_CAT = /^(charactericons|charactericonslight|battlecharactersicons|monstericons)_assets_[a-z0-9]+\/(\d+)_[0-9a-f]{32}\.bundle$/;
 const VFX_DL_RE = /^(vfx_assets_vfx\/|vfxmaterials_assets_vfxmaterials\/|vfxtextureassets_assets_assets\/|vfxmaterialassets_assets_)/;
 const MISSION_UI_RE = /^uispritesassets_assets_missionsprites_[0-9a-f]{16,}\.bundle$/;
+const UI_SPRITE_RE = /^uispritesassets_assets_[a-z0-9]+sprites_[0-9a-f]{16,}\.bundle$/;
+const UI_PANEL_RE = /^uicomponentspartsassets_assets_[a-z0-9]*panel.*_[0-9a-f]{16,}\.bundle$/i;
+const WORLDMAP_RE = /^worldmapassets_assets_assets\/.*\/worldmap_\d+_[a-z0-9]+\.png_[0-9a-f]{16,}\.bundle$/i;
+const MINIGAME_RE = /^minigames_(?:assets|scenes)_/i;
+const GACHA_BG_RE = /^backgrounds_assets_backgrounds\/bg_gacha_\d+_[0-9a-f]{16,}\.bundle$/i;
+const GACHA_ANY_RE = /gacha/i;
+const BATTLEFIELD_RE = /^(?:battlefieldsassets_scenes_battlefields|obstacleassets_assets_obstacles)\//i;
 
 const SCENE_ASSET_RULES = [
   [/^backgrounds_assets_backgrounds\/(.+)_[0-9a-f]{32}\.bundle$/, (n) => n],
@@ -752,6 +817,16 @@ function buildThumbIndexes(rels) {
   return { episodeThumbsByEvent, episodeThumbsByChapter, questThumbs, questThumbRel, eventBanners };
 }
 
+function buildVfxNameMap(rels, catRe) {
+  const map = {};
+  for (const rel of rels) {
+    if (!catRe.test(rel)) continue;
+    const n = bundleName(rel).toLowerCase();
+    if (!map[n]) map[n] = rel;
+  }
+  return map;
+}
+
 function catalogIndexes(internalIds) {
   const rels = new Set();
   for (const id of internalIds) {
@@ -769,6 +844,16 @@ function catalogIndexes(internalIds) {
     sharedIndex,
     vfxAllRels: [...rels].filter((rel) => VFX_DL_RE.test(rel)).sort(),
     missionUiRels: [...rels].filter((rel) => MISSION_UI_RE.test(rel)).sort(),
+    uiSpriteRels: [...rels].filter((rel) => UI_SPRITE_RE.test(rel) && !MISSION_UI_RE.test(rel)).sort(),
+    uiPanelRels: [...rels].filter((rel) => UI_PANEL_RE.test(rel)).sort(),
+    worldMapRels: [...rels].filter((rel) => WORLDMAP_RE.test(rel)).sort(),
+    miniGameRels: [...rels].filter((rel) => MINIGAME_RE.test(rel)).sort(),
+    battleFieldRels: [...rels].filter((rel) => BATTLEFIELD_RE.test(rel)).sort(),
+    gachaBgRels: [...rels].filter((rel) => GACHA_BG_RE.test(rel)).sort(),
+    systemVoiceRel: [...rels].filter((rel) => /^systemvoice_assets_/.test(rel)).sort()[0] || null,
+    gachaExtraRels: [...rels].filter((rel) => GACHA_ANY_RE.test(rel) && !GACHA_BG_RE.test(rel) && !VFX_DL_RE.test(rel) && !SHARED_KEEP.some((fn) => fn(rel.replace(APP_PREFIX, '')))).sort(),
+    vfxByName: buildVfxNameMap(rels, /^vfx_assets_vfx\//),
+    vfxseByName: buildVfxNameMap(rels, /^vfxse_assets_vfxse\//),
     builtinRels: [...rels].filter((rel) => APP_PREFIX.test(rel)).sort(),
     otherModelIds: buildOtherModelIds(rels),
     globalAssets: buildGlobalAssets(rels),
@@ -914,6 +999,9 @@ function other2dRels(master, assets) {
     const cats = other3dIds.has(id) ? ['spine', 'spinelight'] : ['spine', 'spinelight', 'icon', 'iconlight', 'battleicon', 'monstericon'];
     for (const cat of cats) for (const rel of a[cat] || []) out.push(rel);
   }
+  for (const rel of assets.uiSpriteRels || []) out.push(rel);
+  for (const rel of assets.uiPanelRels || []) out.push(rel);
+  for (const rel of assets.worldMapRels || []) out.push(rel);
   return out;
 }
 
@@ -947,7 +1035,10 @@ function orphanMiscRels(master, assets) {
   for (const [id, rel] of Object.entries(assets.chibiIndex || {})) if (!chibiUsed.has(String(id))) out.push(rel);
   const bgNames = new Set(master.sceneBgNames || []);
   for (const e of (master.homeIndex && master.homeIndex.background) || []) if (e.bg) bgNames.add(e.bg);
-  for (const e of sceneIllust) { if (e.still) bgNames.add(e.still); if (e.stillAdult) bgNames.add(e.stillAdult); }
+  for (const e of sceneIllust) {
+    if (e.still) bgNames.add(e.still);
+    if (e.stillAdult) bgNames.add(e.stillAdult);
+  }
   for (const [name, sub] of Object.entries(assets.sceneAssetIndex || {})) if (/^bg_eventstill_/.test(name) && !bgNames.has(name)) out.push(sub);
   return out;
 }
@@ -979,7 +1070,10 @@ function strayCardImageRels(master, assets) {
   const out = [];
   for (const [key, rels] of Object.entries(assets.eventBanners || {})) if (!usedKeys.has(String(key))) for (const rel of rels) out.push(rel);
   const cardThumbs = new Set();
-  for (const nm of Object.values(master.questThumbsByEvent || {}).flat()) { const rel = (assets.questThumbRel || {})[nm]; if (rel) cardThumbs.add(rel); }
+  for (const nm of Object.values(master.questThumbsByEvent || {}).flat()) {
+    const rel = (assets.questThumbRel || {})[nm];
+    if (rel) cardThumbs.add(rel);
+  }
   for (const arr of Object.values(assets.episodeThumbsByEvent || {})) for (const rel of arr) cardThumbs.add(rel);
   for (const arr of Object.values(assets.episodeThumbsByChapter || {})) for (const rel of arr) cardThumbs.add(rel);
   for (const q of assets.questThumbs || []) if (!cardThumbs.has(q.rel)) out.push(q.rel);
@@ -1011,6 +1105,47 @@ function itemIconOwnerCounts(characters) {
   for (const det of Object.values(characters || {})) for (const ic of (det && det.itemIconIds) || []) out[ic] = (out[ic] || 0) + 1;
   return out;
 }
+function charSkillEffects(master, assets, charId) {
+  const skills = (master.charSkills || {})[String(charId)] || [];
+  const sm = master.skillMaster || {};
+  const shared = new Set(master.sharedEffects || []);
+  const vfxByName = assets.vfxByName || {};
+  const vfxseByName = assets.vfxseByName || {};
+  const seen = new Set();
+  const unique = [];
+  const sharedOut = [];
+  for (const s of skills) {
+    const sk = sm[s.skillId];
+    if (!sk) continue;
+    for (const eff of sk.effects) {
+      if (seen.has(eff)) continue;
+      seen.add(eff);
+      const low = eff.toLowerCase();
+      const entry = { effect: eff, skillId: s.skillId, skillName: sk.name, vfxRel: vfxByName[low] || null, seRel: vfxseByName[low] || null };
+      (shared.has(eff) ? sharedOut : unique).push(entry);
+    }
+  }
+  return { unique, shared: sharedOut };
+}
+
+function skillFxSplit(master, assets) {
+  const uniqueRels = new Set();
+  const sharedRels = new Set();
+  for (const charId of Object.keys(master.charSkills || {})) {
+    const e = charSkillEffects(master, assets, charId);
+    for (const x of e.unique) {
+      if (x.vfxRel) uniqueRels.add(x.vfxRel);
+      if (x.seRel) uniqueRels.add(x.seRel);
+    }
+    for (const x of e.shared) {
+      if (x.vfxRel) sharedRels.add(x.vfxRel);
+      if (x.seRel) sharedRels.add(x.seRel);
+    }
+  }
+  for (const rel of sharedRels) uniqueRels.delete(rel);
+  return { uniqueRels, sharedRels: [...sharedRels].sort() };
+}
+
 function compose({ recs, catalogIds, catalogObjs }) {
   const master = masterIndexes(recs || []);
   const assets = catalogIndexes(catalogIds || []);
@@ -1046,11 +1181,32 @@ function compose({ recs, catalogIds, catalogObjs }) {
     const rel = assets.itemIndex[id];
     if (rel) itemRels.push(rel);
   }
+  const skillFx = skillFxSplit(master, assets);
+  assets.skillFxSharedRels = skillFx.sharedRels;
+  assets.skillFxUniqueRels = [...skillFx.uniqueRels].sort();
   const extra = [...itemRels, ...other2dRels(master, assets), ...orphanIconRels(master, assets), ...orphanMiscRels(master, assets), ...strayCardImageRels(master, assets)];
   if (extra.length) assets.sharedIndex = [...new Set([...(assets.sharedIndex || []), ...extra])].sort();
   return { master, assets, modelDeps: cd.deps, modelFolder: cd.folder, matVariation: cd.matVar };
 }
 
-const api = { masterIndexes, catalogIndexes, catalogDeps, compose, itemIconOwners, itemIconOwnerCounts, unlistedItemIconIds, awakenItemIds, isAwakenOwner, ownedAwakenItemIds, other2dRels, orphanIconRels, orphanMiscRels, strayCardImageRels, ITEM_TABLES };
+const api = {
+  masterIndexes,
+  catalogIndexes,
+  catalogDeps,
+  compose,
+  charSkillEffects,
+  skillFxSplit,
+  itemIconOwners,
+  itemIconOwnerCounts,
+  unlistedItemIconIds,
+  awakenItemIds,
+  isAwakenOwner,
+  ownedAwakenItemIds,
+  other2dRels,
+  orphanIconRels,
+  orphanMiscRels,
+  strayCardImageRels,
+  ITEM_TABLES,
+};
 export const buildIndexes = api;
 if (typeof module !== 'undefined' && module.exports) module.exports = api;

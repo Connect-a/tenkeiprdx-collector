@@ -5,7 +5,7 @@ import { AFFILIATION_NAMES, RARITY_NAMES } from '../core/constants.js';
 const groupName = (d) => AFFILIATION_NAMES[d && d.groupId] || '';
 const rankName = (d) => RARITY_NAMES[d && d.rankId] || '';
 
-const episodeRef = (e) => ({ episodeId: e.episodeId, order: e.order, label: e.label, title: e.title, sceneBinIds: e.sceneBinIds });
+const episodeRef = (e) => ({ episodeId: e.episodeId, order: e.order, label: e.label, title: e.title, xpos: e.xpos || 0, thumb: e.thumb || null, sceneBinIds: e.sceneBinIds });
 
 function buildFolderMeta(x) {
   const folderMeta = {};
@@ -19,6 +19,7 @@ function buildFolderMeta(x) {
       title: c.title,
       group: groupName(c),
       rank: rankName(c),
+      bwh: c.bwh,
       attachmentColors: c.attachmentColors,
       episodes: c.episodes.map(episodeRef),
     };

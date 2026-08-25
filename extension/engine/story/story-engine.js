@@ -807,6 +807,7 @@ function create(opts) {
       fx.clearLines();
       fx.clearEye();
       fx.clearVfx();
+      fx.dispose();
       if (ST.stage) ST.stage.dispose();
       audio.dispose();
     },

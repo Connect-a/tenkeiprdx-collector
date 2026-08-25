@@ -1,0 +1,318 @@
+.vwbody {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.vw-buggy {
+  color: #ff6b7a;
+  font-size: 12px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.vw-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 12px;
+}
+.vw-tab {
+  background: #2a2f3a;
+  color: #cfd6e4;
+  border: 1px solid #3a4152;
+  border-radius: 6px;
+  padding: 4px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.vw-tab.active {
+  background: #3d4a63;
+  color: #fff;
+  border-color: #5a6d90;
+}
+
+.vw-need {
+  margin: auto;
+  text-align: center;
+}
+
+.vw-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.vw-side {
+  width: 240px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #333a48;
+  min-height: 0;
+  padding: 6px;
+  gap: 6px;
+}
+.vw-pickhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: #9aa4b6;
+}
+.vw-pickcount.full {
+  color: #ffb3c0;
+}
+.vw-picklist {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.vw-pickrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.vw-pickrow:hover {
+  background: #2c323e;
+}
+.vw-pickrow.on {
+  background: #35507a;
+  color: #fff;
+}
+.vw-pickrow.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.vw-pickid {
+  color: #7c8798;
+  font-size: 11px;
+}
+
+.vw-stagewrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.vw-fieldbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #333a48;
+  flex-wrap: wrap;
+}
+.vw-lbl {
+  font-size: 12px;
+  color: #9aa4b6;
+}
+.vw-stagebox {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+.vw-stage {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: #14171d;
+}
+.vw-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(20, 23, 29, 0.55);
+  color: #cfd6e4;
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 5;
+}
+.vw-busy .dlspin {
+  width: 16px;
+  height: 16px;
+  border-width: 3px;
+}
+.vw-canvas,
+.vw-bg2d {
+  position: absolute;
+  inset: 0;
+}
+.vw-bg2d {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.vw-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.vw-ctrls {
+  flex: none;
+  max-height: 34vh;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid #333a48;
+}
+.vw-card {
+  border: 1px solid #3a4152;
+  border-radius: 6px;
+  padding: 6px 10px;
+  width: 560px;
+  max-width: 100%;
+  background: #1c2029;
+}
+.vw-cardhd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.vw-cardhd .vw-cardid {
+  margin-right: auto;
+}
+.vw-off {
+  background: none;
+  border: none;
+  color: #7c8798;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  align-self: flex-start;
+}
+.vw-off:hover {
+  color: #ffb3c0;
+}
+.vw-cardname {
+  font-size: 13px;
+  color: #e6ebf3;
+}
+.vw-cardid {
+  font-size: 11px;
+  color: #7c8798;
+}
+.vw-cardbody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vw-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.vw-row > .vw-ctl {
+  flex: 1;
+  min-width: 0;
+}
+.vw-pause {
+  flex: none;
+  width: 34px;
+  padding: 2px 0;
+  text-align: center;
+}
+.vw-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 14px;
+  align-items: center;
+}
+.vw-ctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vw-ctl-lbl {
+  font-size: 11px;
+  color: #9aa4b6;
+  width: 52px;
+  flex: none;
+}
+.vw-ctl select {
+  flex: 1;
+  min-width: 0;
+}
+.vw-range {
+  flex: 1;
+  min-width: 90px;
+}
+
+.vw-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.vw-modalbox {
+  background: #1c2029;
+  border: 1px solid #3a4152;
+  border-radius: 8px;
+  min-width: 320px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.vw-modalhd {
+  padding: 8px 12px;
+  border-bottom: 1px solid #333a48;
+  color: #e6ebf3;
+}
+.vw-modalbody {
+  padding: 10px 12px;
+  overflow-y: auto;
+}
+.vw-modalft {
+  padding: 8px 12px;
+  border-top: 1px solid #333a48;
+  text-align: right;
+}
+.vw-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vw-loadrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.vw-kinds {
+  display: flex;
+  gap: 3px;
+}
+.vw-kind {
+  background: #2a2f3a;
+  color: #9aa4b6;
+  border: 1px solid #3a4152;
+  border-radius: 5px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.vw-kind.active {
+  background: #3d4a63;
+  color: #fff;
+  border-color: #5a6d90;
+}

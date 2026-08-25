@@ -8,6 +8,8 @@ import { guardRenderer } from './gl-manager.js';
 import { DIRS } from '../../core/constants.js';
 import { utilHelpers } from '../../core/util.js';
 import { el, append } from '../../core/dom.js';
+import { buildGroupedVisPanel } from '../../core/vis-panel.js';
+import { createPartControl } from './model-parts.js';
 import * as THREE_NS from '../../vendor/three.module.js';
 const { sharedBgTexture, setSharedBgFromRgba, buildTextureMap, MOUTH_EXPRESSIONS, remapMouthUV, makeDataTexture, buildPostPass, buildThreeSkeleton, mat4FromBindpose, buildThreeClip } = model3dLib;
 
@@ -295,6 +297,8 @@ function createPlayback(T, st, deps) {
   return { playClip, restPose };
 }
 
+const EMPTY_FIXED = new Set();
+
 function createExpression(T, st, deps) {
   const { mouthGeoms, morphObjs, weaponObjs, objBySmr, attachBase, fbx, remapMouthUV, exprBase } = deps;
   const applyMouthCell = (col, row) => {
@@ -329,6 +333,7 @@ function createExpression(T, st, deps) {
     if (dur > 0) t = ((t % dur) + dur) % dur;
     const isLoop = st.action.loop === T.LoopRepeat;
     let faceDriven = false;
+    const fixed = st.exprFixed || EMPTY_FIXED;
     if (!st.exprFix) {
       const byTarget = new Map();
       let mouthDriven = false;
@@ -351,7 +356,7 @@ function createExpression(T, st, deps) {
         const baseMap = mt.feature === 'face' ? fbx.faceBaseValues : mt.feature === 'brow' ? fbx.browBaseValues : null;
         const bv = baseMap && baseMap[clip.name];
         if (bv) for (let i = 0; i < infl.length && i < bv.length; i++) infl[i] = (bv[i] || 0) / 100;
-        if (drivenFeat.has(mt.feature)) {
+        if (drivenFeat.has(mt.feature) && !fixed.has(mt.feature)) {
           const dict = mt.obj.morphTargetDictionary || {};
           for (const [tg, evs] of byTarget) {
             const w = evalBlend(evs, t, isLoop);
@@ -361,7 +366,7 @@ function createExpression(T, st, deps) {
           }
         }
       }
-      if (mouthDriven && mouthGeoms.length) {
+      if (mouthDriven && mouthGeoms.length && !fixed.has('mouth')) {
         let idx = null;
         for (const e of clip.events) {
           if (e.time > t) break;
@@ -369,7 +374,7 @@ function createExpression(T, st, deps) {
         }
         if (idx != null) applyMouthIndex(idx);
       }
-      faceDriven = drivenFeat.has('face');
+      faceDriven = drivenFeat.has('face') && !fixed.has('face');
     }
     if (!st.attachFix) {
       if (weaponObjs.length) {
@@ -479,7 +484,7 @@ function addCheckbox(parent, labelText, extraClass, checked, onChange) {
 }
 
 function buildControls(st, deps) {
-  const { bar, hostEl, clips, mouthGeoms, morphObjs, mouthAtlasTex, model, fbx, meshGroups, options, exprBase, playClip, restPose, applyMouthIndex } = deps;
+  const { bar, hostEl, clips, mouthGeoms, morphObjs, mouthAtlasTex, model, fbx, meshGroups, options, exprBase, playClip, restPose, applyMouthIndex, postPass } = deps;
   const addBreak = () => bar.appendChild(el('div', 'model3d-break'));
   const addGroup = () => {
     const g = el('span', 'model3d-group');
@@ -488,32 +493,40 @@ function buildControls(st, deps) {
   };
 
   if (clips.length) {
-    const gMotion = addGroup();
     const prefer = clips.findIndex((c) => /^idle$/i.test(c.name));
     const defIdx = prefer >= 0 ? prefer : 0;
-    st.clipSelect = addSelect(
-      gMotion,
-      'モーション',
-      [...clips.map((c, i) => [i, `${c.name} (${c.duration.toFixed(1)}s)`]), [POSE_VALUE, '⊂二二二( ^ω^)二⊃ブーン']],
-      defIdx,
-      (v) => {
-        if (v === POSE_VALUE) return restPose();
-        const idx = Number(v);
-        playClip(idx);
-        const mv = options.motionVoice;
-        if (mv && mv.enabled && clips[idx]) mv.onMotion(clips[idx].name);
-      },
-    );
-    st.playBtn = addIconButton(gMotion, '⏸', null, (btn) => {
-      if (!st.action) return;
-      st.playing = !st.playing;
-      st.action.paused = !st.playing;
-      btn.textContent = st.playing ? '⏸' : '▶';
-    });
-    addSelect(gMotion, '速度', SPEED_OPTIONS, '1', (v) => {
-      st.playSpeed = Number(v) || 1;
-      if (st.mixer) st.mixer.timeScale = st.playSpeed;
-    });
+    if (!options.hidePlaybackUI) {
+      const gMotion = addGroup();
+      st.clipSelect = addSelect(
+        gMotion,
+        'モーション',
+        [...clips.map((c, i) => [i, `${c.name} (${c.duration.toFixed(1)}s)`]), [POSE_VALUE, '⊂二二二( ^ω^)二⊃ブーン']],
+        defIdx,
+        (v) => {
+          if (v === POSE_VALUE) {
+            restPose();
+            if (options.onClip) options.onClip(POSE_VALUE);
+            return;
+          }
+          const idx = Number(v);
+          playClip(idx);
+          const mv = options.motionVoice;
+          if (mv && mv.enabled && clips[idx]) mv.onMotion(clips[idx].name);
+          if (options.onClip && clips[idx]) options.onClip(clips[idx].name);
+        },
+      );
+      st.playBtn = addIconButton(gMotion, '⏸', null, (btn) => {
+        if (!st.action) return;
+        st.playing = !st.playing;
+        st.action.paused = !st.playing;
+        btn.textContent = st.playing ? '⏸' : '▶';
+      });
+      addSelect(gMotion, '速度', SPEED_OPTIONS, '1', (v) => {
+        st.playSpeed = Number(v) || 1;
+        if (st.mixer) st.mixer.timeScale = st.playSpeed;
+        if (options.onSpeed) options.onSpeed(st.playSpeed);
+      });
+    }
     playClip(defIdx);
   }
 
@@ -536,15 +549,15 @@ function buildControls(st, deps) {
     else if (!usedMouth.includes(defMouth)) usedMouth.unshift(defMouth);
     const apply = () => {
       st.mouthCellKey = '';
+      if (sel.value === '') {
+        fixedFeat.delete('mouth');
+        applyMouthIndex(defMouth);
+        return;
+      }
+      fixedFeat.add('mouth');
       applyMouthIndex(Number(sel.value));
     };
-    const sel = addSelect(
-      exprCtrlWrap,
-      '口',
-      usedMouth.map((i) => [i, i]),
-      defMouth,
-      apply,
-    );
+    const sel = addSelect(exprCtrlWrap, '口', [['', '-'], ...usedMouth.map((i) => [i, i])], '', apply);
     shuffleTargets.push({ sel, apply });
   }
 
@@ -561,6 +574,7 @@ function buildControls(st, deps) {
         }
     }
   };
+  const fixedFeat = st.exprFixed || (st.exprFixed = new Set());
   const addExprSelector = (feature, labelText) => {
     const bases = [];
     for (const mt of morphObjs) {
@@ -571,8 +585,12 @@ function buildControls(st, deps) {
       }
     }
     if (!bases.length) return;
-    const apply = () => applyExpr(feature, sel.value);
-    const sel = addSelect(exprCtrlWrap, labelText, [['', '0'], ...bases.map((b, i) => [b, i + 1])], '', apply);
+    const apply = () => {
+      if (sel.value === '') fixedFeat.delete(feature);
+      else fixedFeat.add(feature);
+      applyExpr(feature, sel.value);
+    };
+    const sel = addSelect(exprCtrlWrap, labelText, [['', '-'], ...bases.map((b, i) => [b, i + 1])], '', apply);
     shuffleTargets.push({ sel, apply });
   };
   addExprSelector('face', '目');
@@ -596,6 +614,10 @@ function buildControls(st, deps) {
     if (hasAura) addSelect(gAura, 'オーラ', [['', 'なし'], ...aura.list.map((a) => [a.rel, a.label])], aura.current || '', (v) => aura.onChange(v), '（バグあり）');
     if (voice) addCheckbox(gAura, 'ボイス再生', null, !!voice.enabled, (on) => voice.onToggle(on));
   }
+  if (postPass && typeof postPass.setBloom === 'function') {
+    const gB = addGroup();
+    addCheckbox(gB, 'Bloom', null, !!postPass.bloomDefaultOn, (on) => postPass.setBloom(on));
+  }
 
   addBreak();
 
@@ -618,7 +640,13 @@ function buildControls(st, deps) {
       if (o.__outline) o.__outline.visible = o.visible;
     });
   const addVisToggle = (labelText, objs) =>
-    addCheckbox(decoCtrlWrap, labelText, null, objs.some((o) => o.visible), (on) => setVisible(objs, () => on));
+    addCheckbox(
+      decoCtrlWrap,
+      labelText,
+      null,
+      objs.some((o) => o.visible),
+      (on) => setVisible(objs, () => on),
+    );
   const addVisSelect = (labelText, objs) => {
     const first = objs.findIndex((o) => o.visible);
     const entries = [['', 'なし'], ...objs.map((o, i) => [i, (o.__emOverride ? '★発光 ' : '') + (o.name || '#' + (i + 1))]), ['*', 'すべて']];
@@ -651,17 +679,7 @@ function buildControls(st, deps) {
     sync();
   };
   if (exprCtrlWrap.childNodes.length || decoCtrlWrap.childNodes.length) addBreak();
-  if (exprCtrlWrap.childNodes.length)
-    addOverrideToggle(
-      '表情上書き',
-      exprCtrlWrap,
-      (v) => {
-        st.exprFix = v;
-      },
-      () => {
-        for (const t of shuffleTargets) t.apply();
-      },
-    );
+  if (exprCtrlWrap.childNodes.length) addGroup().appendChild(exprCtrlWrap);
   if (decoCtrlWrap.childNodes.length)
     addOverrideToggle(
       '装飾上書き',
@@ -751,6 +769,10 @@ function buildCharacterMeshes(T, st, deps) {
   };
   const mouthGeoms = [];
   const morphObjs = [];
+  const partTargets = [];
+  const boneNameByHash = new Map();
+  if (model.avatar && model.avatar.tos) for (const [h, p] of model.avatar.tos) boneNameByHash.set(h >>> 0, String(p).split('/').pop());
+  const boneName = (h) => boneNameByHash.get(h >>> 0) || 'bone' + (h >>> 0);
 
   const root = new T.Group();
   scene.add(root);
@@ -913,6 +935,7 @@ function buildCharacterMeshes(T, st, deps) {
         obj.__outline = ol;
         (meshGroups[cat] || (meshGroups[cat] = [])).push(ol);
       }
+      if (cat === 'base' && objSkeleton) partTargets.push({ obj, outline: ol, unityMesh, mats, boneName });
     }
     added++;
     stats.meshes++;
@@ -1043,7 +1066,7 @@ function buildCharacterMeshes(T, st, deps) {
       }
     }
   }
-  return { root, skelBones, radius, center, box, meshGroups, mouthGeoms, morphObjs, objBySmr, attachBase, weaponObjs, weaponRigs, stats, added };
+  return { root, skelBones, radius, center, box, meshGroups, mouthGeoms, morphObjs, objBySmr, attachBase, weaponObjs, weaponRigs, stats, added, partTargets };
 }
 
 function render(hostEl, model, materialBundle, opt) {
@@ -1058,6 +1081,7 @@ function render(hostEl, model, materialBundle, opt) {
     playing: true,
     curClip: null,
     exprFix: false,
+    exprFixed: new Set(),
     attachFix: false,
     playSpeed: 1,
     mouthExprIdx: 0,
@@ -1139,6 +1163,8 @@ function render(hostEl, model, materialBundle, opt) {
     return { ok: false, reason: 'no-renderable-unityMesh' };
   }
   const { root, skelBones, radius, center, box, meshGroups, mouthGeoms, morphObjs, objBySmr, attachBase, weaponObjs, weaponRigs, stats } = built;
+  // 深度プリパスの床面を足元(bbox最小Y)に置く＝床から立ち上る soft-particle オーラの床際フェード用(box確定後に設定)。
+  if (postPass && postPass.setFloorY && box && isFinite(box.min.y)) postPass.setFloorY(box.min.y);
 
   const state = { yaw: ((fbx.rotationOverrideY || 0) * Math.PI) / 180, pitch: 0.05, dist: radius * 2.2, target: center.clone() };
   camera.near = Math.max(0.01, radius / 1000);
@@ -1190,10 +1216,47 @@ function render(hostEl, model, materialBundle, opt) {
     playClip,
     restPose,
     applyMouthIndex,
+    postPass,
   });
 
+  let partCtl = null;
+  if (!options.hidePartsUI && (built.partTargets || []).length) {
+    const panel = el('div', { class: 'spine-vispanel m3d-partspanel', style: { display: 'none' } });
+    const btn = el('button', {
+      class: 'btn xs m3d-partsbtn active',
+      text: '表示制御',
+      title: 'ボーン単位で部品を半透明／非表示にします',
+      on: {
+        click: () => {
+          if (panel.style.display !== 'none') {
+            panel.style.display = 'none';
+            btn.classList.add('active');
+            return;
+          }
+          if (!partCtl) {
+            partCtl = createPartControl(THREE_NS, built.partTargets);
+            if (!partCtl.available) {
+              panel.textContent = '（この模型は部位に分けられません）';
+            } else {
+              buildGroupedVisPanel(panel, {
+                groups: partCtl.groups,
+                alphaOf: (n) => partCtl.alphaOf(n),
+                onSet: (list, a) => partCtl.set(list, a),
+                onResetAll: () => partCtl.resetAll(),
+              });
+            }
+          }
+          panel.style.display = '';
+          btn.classList.remove('active');
+        },
+      },
+    });
+    append(hostEl, [btn, panel]);
+  }
+
   let auraFx = null;
-  const buildAura = (bytes, texByMatPid, ignoreGate) => {
+  // オーラは常に loop サブツリー(定常状態=玉/リング)を表示する必要があるため animGate は常に無視する。
+  const buildAura = (bytes, texByMatPid) => {
     if (auraFx) {
       try {
         root.remove(auraFx.group);
@@ -1203,14 +1266,14 @@ function render(hostEl, model, materialBundle, opt) {
     }
     if (bytes && auraRenderer) {
       try {
-        auraFx = auraRenderer.createAuraParticles(bytes, { texByMatPid: texByMatPid || null, ignoreGate: !!ignoreGate });
+        auraFx = auraRenderer.createAuraParticles(bytes, { texByMatPid: texByMatPid || null, ignoreGate: true });
         if (auraFx) root.add(auraFx.group);
       } catch (e) {
         console.warn('[tp] オーラの描画に失敗', e);
       }
     }
   };
-  buildAura(options.auraBytes, options.auraTexMap, options.auraRenderer && options.auraRenderer.raw);
+  buildAura(options.auraBytes, options.auraTexMap);
   const resize = () => {
     const w = canvasWrap.clientWidth,
       h = canvasWrap.clientHeight;
@@ -1335,11 +1398,13 @@ function render(hostEl, model, materialBundle, opt) {
           rig.mixer.update(dt);
         }
         const faceDriven = applyClipExpr();
-        updateBlink(dt, faceDriven || st.exprFix);
+        updateBlink(dt, faceDriven || (st.exprFixed && st.exprFixed.has('face')));
       }
       if (auraFx) auraFx.update(dt);
       if (!glLost) {
-        if (postPass) postPass.render(scene, camera);
+        // オーラに soft-particle(靄/メテオ)があればシーン深度プリパスを実行して供給する。
+        const needDepth = auraFx && auraFx.setDepthTexture;
+        if (postPass) postPass.render(scene, camera, needDepth ? auraFx.group : null, needDepth ? (tex) => auraFx.setDepthTexture(tex) : null);
         else renderer.render(scene, camera);
       }
     }
@@ -1372,6 +1437,7 @@ function render(hostEl, model, materialBundle, opt) {
       } catch (e) {}
     }
     glGuard.dispose();
+    if (partCtl) partCtl.dispose();
     matFactory.dispose();
     if (mouthAtlasTex) mouthAtlasTex.dispose();
     root.traverse((o) => {
@@ -1381,7 +1447,33 @@ function render(hostEl, model, materialBundle, opt) {
   };
   selfDispose = dispose;
 
-  return { ok: true, stats, animated: clips.length > 0, clipNames: clips.map((c) => c.name), bbox: { min: box.min.toArray(), max: box.max.toArray() }, dispose, setAura: (bytes, texByMatPid, ignoreGate) => buildAura(bytes, texByMatPid, ignoreGate) };
+  const setClip = (name) => {
+    if (name === POSE_VALUE) {
+      playback.restPose();
+      if (st.clipSelect) st.clipSelect.value = POSE_VALUE;
+      return;
+    }
+    const i = clips.findIndex((c) => c.name === name);
+    if (i >= 0) {
+      playback.playClip(i);
+      if (st.clipSelect) st.clipSelect.value = String(i);
+    }
+  };
+  const setSpeed = (v) => {
+    st.playSpeed = Number(v) || 1;
+    if (st.mixer) st.mixer.timeScale = st.playSpeed;
+  };
+  return {
+    ok: true,
+    stats,
+    animated: clips.length > 0,
+    clipNames: clips.map((c) => c.name),
+    bbox: { min: box.min.toArray(), max: box.max.toArray() },
+    dispose,
+    setClip,
+    setSpeed,
+    setAura: (bytes, texByMatPid) => buildAura(bytes, texByMatPid),
+  };
 }
 
 function disposeModel3d(m) {
@@ -1393,4 +1485,148 @@ function disposeModel3d(m) {
   return null;
 }
 
-export const model3dRenderer = { render, disposeModel3d };
+function buildInstance(model, materialBundle, opt) {
+  const options = opt || {};
+  const st = {
+    mixer: null,
+    action: null,
+    playing: true,
+    curClip: null,
+    exprFix: false,
+    exprFixed: new Set(),
+    attachFix: false,
+    playSpeed: 1,
+    mouthExprIdx: 0,
+    mouthCellKey: '',
+    blinkClock: 0,
+    blinkNext: 2.5,
+  };
+  const skinnable = !!(model.avatar && model.avatar.count && model.meshes.some((m) => m.skinIndex && m.boneNameHashes));
+  const texMap = buildTextureMap(materialBundle || { materials: [], textures: [] });
+  const meshByPath = new Map(model.meshes.map((m) => [m.pathID, m]));
+  const modelMatByPath = new Map((model.materials || []).map((m) => [m.pathID, m]));
+  const mouthMatOverride = (model.fbx && model.fbx.mouthMaterialOverride) || 0;
+  const mouthVariant = (options.mouthAtlas && options.mouthAtlas.variants && options.mouthAtlas.variants[mouthMatOverride]) || options.mouthAtlas;
+  const mouthAtlasTex = mouthVariant && mouthVariant.rgba ? makeDataTexture(mouthVariant) : null;
+  const matFactory = createMaterialFactory(THREE_NS, { texMap, TOON_LIGHT: [0.2962, 0.5, 0.8138], mouthAtlasTex });
+  const exprBase = (n) => String(n || '').replace(/_[RL]$/, '');
+  const fbx = (model && model.fbx) || {};
+  const holder = new THREE_NS.Group();
+  const built = buildCharacterMeshes(THREE_NS, st, { model, meshByPath, modelMatByPath, getMat: matFactory.getMat, texMap, mouthAtlasTex, skinnable, fbx, options, scene: holder });
+  if (!built.added) {
+    matFactory.dispose();
+    if (mouthAtlasTex) mouthAtlasTex.dispose();
+    return { ok: false, reason: 'no-renderable-unityMesh' };
+  }
+  const { root, skelBones, radius, center, box, morphObjs, mouthGeoms, objBySmr, attachBase, weaponObjs, weaponRigs } = built;
+  const clips = skinnable && model.clips && model.clips.length ? model.clips : [];
+  const validBones = new Set(((model.avatar && model.avatar.hashes) || []).map((h) => h >>> 0));
+  const clipCache = new Map();
+  const getThreeClip = (i) => {
+    if (!clipCache.has(i)) clipCache.set(i, buildThreeClip(clips[i], 60, validBones));
+    return clipCache.get(i);
+  };
+  const playback = createPlayback(THREE_NS, st, { getThreeClip, clips, root, skelBones, model, weaponRigs });
+  const expr = createExpression(THREE_NS, st, { mouthGeoms, morphObjs, weaponObjs, objBySmr, attachBase, fbx, remapMouthUV, exprBase });
+  const defaultMouth = fbx.defaultMouthId > 0 ? fbx.defaultMouthId : 6;
+  if (mouthGeoms.length) expr.applyMouthIndex(defaultMouth);
+
+  const basesOf = (feature) => {
+    const out = [];
+    for (const mt of morphObjs) {
+      if (mt.feature !== feature) continue;
+      for (const nm in mt.obj.morphTargetDictionary || {}) {
+        const b = exprBase(nm);
+        if (!out.includes(b)) out.push(b);
+      }
+    }
+    return out;
+  };
+  const applyExpr = (feature, base) => {
+    for (const mt of morphObjs) {
+      if (mt.feature !== feature) continue;
+      const infl = mt.obj.morphTargetInfluences;
+      const dict = mt.obj.morphTargetDictionary || {};
+      if (!infl) continue;
+      for (let i = 0; i < infl.length; i++) infl[i] = 0;
+      if (base) for (const nm in dict) if (exprBase(nm) === base) infl[dict[nm]] = 1;
+    }
+    if (base) st.exprFixed.add(feature);
+    else st.exprFixed.delete(feature);
+  };
+  const mouths = mouthGeoms.length
+    ? [...new Set([defaultMouth, ...(model.clips || []).flatMap((c) => (c.events || []).filter((e) => e.type === 'mouth').map((e) => e.index))])].filter((i) => i >= 1 && i <= 25).sort((a, b) => a - b)
+    : [];
+  const clipNames = clips.map((c) => c.name);
+  if (clipNames.length) {
+    const pref = clipNames.findIndex((n) => /^idle$/i.test(n));
+    playback.playClip(pref >= 0 ? pref : 0);
+  }
+
+  return {
+    ok: true,
+    root,
+    box,
+    center,
+    radius,
+    defaultRotY: ((fbx.rotationOverrideY || 0) * Math.PI) / 180,
+    clipNames,
+    mouths,
+    faces: basesOf('face'),
+    brows: basesOf('brow'),
+    setClip(name) {
+      const i = clipNames.indexOf(name);
+      if (i < 0) {
+        if (st.curClip) playback.restPose();
+        return;
+      }
+      if (st.curClip === clips[i]) return;
+      playback.playClip(i);
+    },
+    setSpeed(v) {
+      const n = Number(v);
+      st.playSpeed = n > 0 ? n : 1;
+      if (st.mixer) st.mixer.timeScale = st.playSpeed;
+    },
+    setPaused(on) {
+      st.playing = !on;
+      if (st.action) st.action.paused = !!on;
+      for (const rig of weaponRigs) if (rig.cur) rig.cur.paused = !!on;
+    },
+    setMouth(i) {
+      st.mouthCellKey = '';
+      if (i == null || i === '') {
+        st.exprFixed.delete('mouth');
+        expr.applyMouthIndex(defaultMouth);
+        return;
+      }
+      st.exprFixed.add('mouth');
+      expr.applyMouthIndex(Number(i) || defaultMouth);
+    },
+    get paused() {
+      return !st.playing;
+    },
+    setFace: (base) => applyExpr('face', base),
+    setBrow: (base) => applyExpr('brow', base),
+    update(dt) {
+      if (!st.mixer || !st.playing || !st.action) return;
+      st.mixer.update(dt);
+      for (const rig of weaponRigs) {
+        rig.mixer.timeScale = st.playSpeed;
+        rig.mixer.update(dt);
+      }
+      const faceDriven = expr.applyClipExpr();
+      expr.updateBlink(dt, faceDriven || st.exprFixed.has('face'));
+    },
+    dispose() {
+      if (root.parent) root.parent.remove(root);
+      matFactory.dispose();
+      if (mouthAtlasTex) mouthAtlasTex.dispose();
+      root.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+      });
+    },
+  };
+}
+
+export const model3dRenderer = { render, disposeModel3d, buildInstance };

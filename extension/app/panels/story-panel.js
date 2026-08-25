@@ -1,6 +1,7 @@
 import { settings } from '../../core/settings.js';
 import { DEFAULT_PLAYER_NAME } from '../../core/constants.js';
 import { el, filterBox } from '../../core/dom.js';
+import { applyVisFilter, syncPartsBtn } from '../../core/vis-panel.js';
 import { episodeIdOf } from '../../data/character-meta.js';
 
 let storyHud = null;
@@ -183,21 +184,6 @@ export function createStoryPanel(deps) {
   const setRadioGroup = (root, a) => {
     root.querySelectorAll('.stillradios input[value="' + a + '"]').forEach((r) => (r.checked = true));
   };
-  const applyStillFilter = (host, q) => {
-    const on = !!q;
-    host.querySelectorAll('.stillgrp').forEach((wrap) => {
-      const parts = wrap.querySelector('.stillparts');
-      let any = false;
-      wrap.querySelectorAll('.stillpart-row').forEach((row) => {
-        const nm = (row.querySelector('.stillpart-lbl').textContent || '').toLowerCase();
-        const m = !on || nm.includes(q);
-        row.style.display = m ? '' : 'none';
-        if (m && on) any = true;
-      });
-      if (parts) parts.style.display = on ? (any ? '' : 'none') : 'none';
-      wrap.style.display = on && !any ? 'none' : '';
-    });
-  };
   const scrollStillIntoView = () => {
     requestAnimationFrame(() => {
       const m = getById('main');
@@ -303,7 +289,7 @@ export function createStoryPanel(deps) {
       ]),
     );
     const body = el('div', 'stillbody');
-    const fb = filterBox({ placeholder: '部品名でフィルタ（入力すると部品を表示）…' }, (q) => applyStillFilter(host, q));
+    const fb = filterBox({ placeholder: '部品名でフィルタ（入力すると部品を表示）…' }, (q) => applyVisFilter(host, q));
     body.appendChild(fb.wrap);
     const setNames = (g, names, a, wrap) => {
       setGroupAlpha(g, a);
@@ -320,7 +306,10 @@ export function createStoryPanel(deps) {
       const parts = el('div', { class: 'stillparts', style: { display: 'none' } });
       const grad = stillRadios(groupAlpha(g), (a) => setNames(g, names, a, wrap));
       const exp = el('button', { class: 'btn xs', text: '部品' });
-      exp.addEventListener('click', () => (parts.style.display = parts.style.display === 'none' ? '' : 'none'));
+      exp.addEventListener('click', () => {
+        parts.style.display = parts.style.display === 'none' ? '' : 'none';
+        syncPartsBtn(wrap);
+      });
       const grow = el('div', 'stillgrp-row', [el('span', { class: 'stillgrp-lbl', text: g + '（' + names.length + '）' }), grad, exp]);
       grow.addEventListener('click', (e) => {
         if (e.target.closest('.stillradios') || e.target.closest('button')) return;
@@ -351,6 +340,7 @@ export function createStoryPanel(deps) {
         parts.appendChild(prow);
       }
       wrap.appendChild(parts);
+      syncPartsBtn(wrap);
       body.appendChild(wrap);
     }
     host.appendChild(body);

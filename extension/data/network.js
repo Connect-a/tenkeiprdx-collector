@@ -2,16 +2,64 @@ import { utilHelpers } from '../core/util.js';
 import { SK } from '../core/constants.js';
 import { routeFor, routeUrl } from '../core/asset-route.js';
 import { resolveOrigin, fallbackBases } from './origin.js';
-const sleep = utilHelpers.sleep;
+import { bgSleep, bgTimeout } from '../core/bgtimer.js';
+const sleep = bgSleep;
 const bytesToB64 = utilHelpers.bytesToB64;
 
 const assetRoot = async () => (await resolveOrigin()).assets;
 const assetRootAuto = async () => (await resolveOrigin({ ignoreManual: true })).assets;
 
 const RETRY_DELAYS = [5000, 15000];
+const API_TIMEOUT_MS = 60000;
+const DIST_TIMEOUT_MS = 20000;
+const OFFLINE_POLL_MS = 3000;
+const OFFLINE_MAX_MS = 1800000;
+const offlineSubs = new Set();
+let offlineGate = null;
+const isOffline = () => globalThis.navigator && navigator.onLine === false;
+const notifyOffline = (on) => {
+  for (const fn of [...offlineSubs]) {
+    try {
+      fn(on);
+    } catch (e) {}
+  }
+};
+
+function waitOnline() {
+  if (offlineGate) return offlineGate;
+  offlineGate = new Promise((resolve) => {
+    const started = Date.now();
+    let cancelPoll = null;
+    const done = (ok) => {
+      if (cancelPoll) cancelPoll();
+      globalThis.removeEventListener('online', onOnline);
+      offlineGate = null;
+      notifyOffline(false);
+      resolve(ok);
+    };
+    const onOnline = () => done(true);
+    globalThis.addEventListener('online', onOnline);
+    const poll = () => {
+      if (!isOffline()) return done(true);
+      if (Date.now() - started >= OFFLINE_MAX_MS) return done(false);
+      cancelPoll = bgTimeout(OFFLINE_POLL_MS, poll);
+    };
+    cancelPoll = bgTimeout(OFFLINE_POLL_MS, poll);
+  });
+  notifyOffline(true);
+  return offlineGate;
+}
+
+async function waitIfOffline() {
+  if (!isOffline()) return false;
+  return await waitOnline();
+}
+
+const OFFLINE_WAITS_MAX = 2;
 async function fetchUrl(url, take) {
   let saw404 = false,
-    sawError = false;
+    sawError = false,
+    offlineWaits = 0;
   for (let round = 0; round <= RETRY_DELAYS.length; round++) {
     let retriable = false;
     try {
@@ -34,6 +82,12 @@ async function fetchUrl(url, take) {
       retriable = true;
     }
     if (!retriable) break;
+    if (offlineWaits < OFFLINE_WAITS_MAX && (await waitIfOffline())) {
+      offlineWaits++;
+      sawError = false;
+      round--;
+      continue;
+    }
     if (round < RETRY_DELAYS.length) await sleep(RETRY_DELAYS[round]);
   }
   return saw404 && !sawError ? { status: 'missing' } : { status: 'error', retriable: sawError };
@@ -94,7 +148,7 @@ async function fetchBytesRaw(url) {
   return null;
 }
 
-async function apiFetchBytes(url, method, { withStatus } = {}) {
+async function apiFetchBytes(url, method, { withStatus, rating } = {}) {
   const st = await chrome.storage.local.get([SK.apiAuth, SK.apiAuthBad]);
   const auth = st[SK.apiAuth];
   const expired = auth && auth.exp && Math.floor(Date.now() / 1000) >= auth.exp;
@@ -105,9 +159,9 @@ async function apiFetchBytes(url, method, { withStatus } = {}) {
   }
   const headers = { Accept: 'application/vnd.msgpack', Authorization: auth.authorization };
   for (const k of ['X-Platform', 'X-Device', 'x-client-version', 'x-masterdata-version']) if (auth[k]) headers[k] = auth[k];
-  headers['X-Rating'] = 'r18';
+  headers['X-Rating'] = rating || 'r18';
   try {
-    const r = await fetch(url, { method: method || 'GET', headers, credentials: 'include', cache: 'no-store' });
+    const r = await fetch(url, { method: method || 'GET', headers, credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
     if (r.status === 401 || r.status === 403) {
       try {
         await chrome.storage.local.set({ [SK.apiAuthBad]: auth.authorization });
@@ -125,4 +179,29 @@ async function apiFetchBytes(url, method, { withStatus } = {}) {
   }
 }
 
-export const networkClient = { fetchAsset, assetRoot, assetRootAuto, fetchBytes, fetchBytesRaw, apiFetchBytes, fallbackStats };
+let distOff = false;
+const resetDistGate = () => {
+  distOff = false;
+};
+async function distFetchBytes(url) {
+  if (distOff) return null;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(DIST_TIMEOUT_MS) });
+    if (res.status === 401 || res.status === 403) {
+      distOff = true;
+      return null;
+    }
+    if (!res.ok) return null;
+    if (/json/i.test(res.headers.get('content-type') || '')) return null;
+    return new Uint8Array(await res.arrayBuffer());
+  } catch (e) {
+    return null;
+  }
+}
+
+const subscribeOffline = (fn) => {
+  offlineSubs.add(fn);
+  return () => offlineSubs.delete(fn);
+};
+
+export const networkClient = { fetchAsset, assetRoot, assetRootAuto, fetchBytes, fetchBytesRaw, apiFetchBytes, distFetchBytes, resetDistGate, fallbackStats, isOffline, subscribeOffline };

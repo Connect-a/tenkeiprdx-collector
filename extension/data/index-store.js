@@ -256,7 +256,10 @@ async function fetchCatalogs(base, prog) {
     try {
       const j = JSON.parse(r.txt);
       for (const x of j.m_InternalIds || []) {
-        const m = String(x).split('\\').join('/').match(/^PariPari(?:Public)?Remote\/(.+)$/);
+        const m = String(x)
+          .split('\\')
+          .join('/')
+          .match(/^PariPari(?:Public)?Remote\/(.+)$/);
         if (m) altRel[relKey(m[1])] = m[1];
       }
       altOk++;
@@ -330,6 +333,8 @@ async function readCache(strict) {
   return null;
 }
 
+const NEWER_KEYS = ['miniGameRels', 'battleFieldRels', 'skillFxSharedRels', 'skillFxUniqueRels', 'worldMapRels', 'uiSpriteRels', 'uiPanelRels', 'gachaBgRels', 'gachaExtraRels', 'systemVoiceRel'];
+
 export async function ensureIndexes(progress) {
   if (_indexes) return _indexes;
   if (_building) return _building;
@@ -342,6 +347,7 @@ export async function ensureIndexes(progress) {
       cached.assets.chibiIndex &&
       cached.assets.altRel &&
       Object.keys(cached.assets.altRel).length &&
+      NEWER_KEYS.every((k) => cached.assets[k] !== undefined) &&
       cached.meta.builtVersion === extVersion() &&
       (!cached.meta.builtAssetRoot || cached.meta.builtAssetRoot === curBase)
     ) {

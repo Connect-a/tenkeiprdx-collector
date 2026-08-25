@@ -10,10 +10,11 @@ import { toast } from '../ui/notifier.js';
 import { failureGroups } from '../../core/failure-report.js';
 import { isSingleDlActive as getSingleDlActive } from './download-ui.js';
 import { ensureUserState } from '../runtime/user-state-guard.js';
-import { rescanAll } from '../runtime/state-refresh.js';
+import { rescanAll, pendingScan, lastScanAt } from '../runtime/state-refresh.js';
 import { networkClient } from '../../data/network.js';
 
 const DL_INTERVALS = [30, 60, 180];
+const SCAN_FRESH_MS = 5 * 60 * 1000;
 const bulkOpts = { unlockedMode: 'only', overwrite: false, includeUnowned: false, dlIntervalSec: 180 };
 const QUEST_KINDS = new Set(['main', 'event']);
 const UNLOCK_LABELS = {
@@ -22,7 +23,35 @@ const UNLOCK_LABELS = {
 };
 const PHASE_LABEL = { running: '実行中', done: '完了', stopped: '停止', error: 'エラー' };
 let _bulkTick = null;
+let _starting = false;
+let _startCancelled = false;
 let _latestBulkMissingSummary = null;
+
+async function storyCompleteKeys() {
+  try {
+    await pendingScan();
+  } catch (e) {}
+  const at = lastScanAt();
+  if (!at || Date.now() - at > SCAN_FRESH_MS) return null;
+  const arr = Array.isArray(playerState.dl) ? playerState.dl : [];
+  return arr.filter((x) => x && x.counts && x.counts.total > 0 && x.counts.have >= x.counts.total).map((x) => String(x.folderKey));
+}
+
+function setStartingUi(on) {
+  _starting = on;
+  const startBtn = getById('bulkStart'),
+    stopBtn = getById('bulkStop'),
+    clearBtn = getById('bulkClear');
+  if (!startBtn) return;
+  startBtn.disabled = on;
+  if (on) {
+    startBtn.innerHTML = '<span class="dlspin"></span>準備中…';
+    if (stopBtn) stopBtn.style.display = '';
+    if (clearBtn) clearBtn.style.display = 'none';
+  } else {
+    startBtn.textContent = '開始';
+  }
+}
 const assetStatusText = (it) =>
   it.status === 'skipped'
     ? it.skipReason === 'story-missing'
@@ -156,28 +185,42 @@ export function closeBulk() {
   getById('bulkModal').style.display = 'none';
 }
 
+export async function stopBulk() {
+  if (_starting) _startCancelled = true;
+  await bulkDownloader.stop();
+}
+
 export async function startBulk() {
+  if (_starting) return;
   if (getSingleDlActive()) {
     toast('個別ダウンロードの実行中は一括ダウンロードができません。', 'err');
     return;
   }
-  if (!(await ensureUserState({ onDemand: true }))) return;
-  const list = playerState._bulkCandidates || (await collectBulkCandidates());
-  if (!list.length) {
-    toast('対象が0件です', 'err');
-    return;
+  _startCancelled = false;
+  setStartingUi(true);
+  let r = null;
+  try {
+    if (!(await ensureUserState({ onDemand: true }))) return;
+    const list = playerState._bulkCandidates || (await collectBulkCandidates());
+    if (!list.length) {
+      toast('対象が0件です', 'err');
+      return;
+    }
+    const root = fileStore && fileStore.supported ? await fileStore.ensure() : null;
+    if (!root) {
+      toast('先に保存先フォルダを選んでください', 'err');
+      return;
+    }
+    const have = bulkOpts.overwrite ? null : await storyCompleteKeys();
+    r = _startCancelled ? { ok: false, reason: 'stopped' } : await bulkDownloader.start(list, { overwrite: bulkOpts.overwrite, dlIntervalSec: bulkOpts.dlIntervalSec || 180, have });
+  } finally {
+    setStartingUi(false);
+    await renderBulkCard();
   }
-  const root = fileStore && fileStore.supported ? await fileStore.ensure() : null;
-  if (!root) {
-    toast('先に保存先フォルダを選んでください', 'err');
-    return;
-  }
-  const r = await bulkDownloader.start(list, { overwrite: bulkOpts.overwrite, dlIntervalSec: bulkOpts.dlIntervalSec || 180 });
   if (!r.ok) {
-    toast(r.reason === 'active' ? '既に実行中です' : '開始できませんでした', 'err');
-    return;
+    if (r.reason === 'stopped') toast('開始前に停止しました');
+    else toast(r.reason === 'active' ? '既に実行中です' : '開始できませんでした', 'err');
   }
-  await renderBulkCard();
 }
 
 let _bulkFailureButtons = null;
@@ -305,6 +348,17 @@ function createBulkRow(it) {
   return tr;
 }
 
+function cardParts(card) {
+  let head = card.querySelector('.bk-head');
+  if (!head) {
+    card.textContent = '';
+    head = el('div', { class: 'bk-line bk-head', html: '<span class="dlspin"></span><span class="bk-phase"></span><span class="bk-count"></span>' });
+    card.appendChild(head);
+    card.appendChild(el('div', 'bk-rest'));
+  }
+  return { spin: head.querySelector('.dlspin'), phase: head.querySelector('.bk-phase'), count: head.querySelector('.bk-count'), rest: card.querySelector('.bk-rest') };
+}
+
 export async function renderBulkCard() {
   const st = await bulkDownloader.getState();
   const card = getById('bulkCard'),
@@ -315,25 +369,30 @@ export async function renderBulkCard() {
   if (!st) {
     card.style.display = 'none';
     startBtn.style.display = '';
-    stopBtn.style.display = 'none';
+    stopBtn.style.display = _starting ? '' : 'none';
     if (clearBtn) clearBtn.style.display = 'none';
     tbody.innerHTML = '';
     await renderBulkFailures(null);
     return;
   }
   const active = bulkDownloader.isActive(st.phase);
+  const busy = active || _starting;
   const s = bulkDownloader.stats(st.items);
   const gd = st.gd || { total: 0, done: 0, failed: 0 };
   startBtn.style.display = active ? 'none' : '';
-  startBtn.disabled = false;
-  stopBtn.style.display = active ? '' : 'none';
-  if (clearBtn) clearBtn.style.display = active ? 'none' : '';
+  startBtn.disabled = _starting;
+  stopBtn.style.display = busy ? '' : 'none';
+  if (clearBtn) clearBtn.style.display = busy ? 'none' : '';
   await renderBulkFailures(st);
   card.style.display = '';
 
+  const parts = cardParts(card);
+  parts.spin.style.display = active ? '' : 'none';
+  parts.phase.className = 'bk-phase ' + st.phase;
+  parts.phase.textContent = PHASE_LABEL[st.phase] || '';
+  parts.count.textContent = ` ${s.processed}/${s.total}${s.running ? '（DL中' + s.running + '）' : ''}`;
+
   const rows = [];
-  const badge = `${active ? '<span class="dlspin"></span>' : ''}<span class="bk-phase ${st.phase}">${PHASE_LABEL[st.phase] || ''}</span>`;
-  rows.push(`<div class="bk-line">${badge} ${s.processed}/${s.total}${s.running ? '（DL中' + s.running + '）' : ''}</div>`);
   rows.push(
     `<div class="bk-line dim">ストーリー情報 ${gd.done}/${gd.total}${gd.failed ? '（失敗' + gd.failed + '）' : ''}｜本文・画像・音声 取得済み${s.done} / スキップ${s.skipped} / 失敗${s.failed}</div>`,
   );
@@ -353,7 +412,7 @@ export async function renderBulkCard() {
   if (fbs && (fbs.hit || fbs.off)) rows.push(`<div class="bk-line dim">旧世代から救済 ${fbs.hit}件${fbs.off ? '（効果が無いため打ち切り）' : ''}</div>`);
   if (st.phase === 'error' && st.lastError) rows.push(html`<div class="bk-line err">エラー: ${st.lastError}</div>`);
   if (st.tokenError) rows.push(`<div class="bk-line err">トークンが切れているためシナリオのDLができません。ゲームと再接続してください。</div>`);
-  card.innerHTML = rows.join('');
+  parts.rest.innerHTML = rows.join('');
 
   const existingRows = Array.from(tbody.querySelectorAll('tr'));
   const existingMap = new Map(existingRows.map((r) => [r.dataset.itemId, r]));

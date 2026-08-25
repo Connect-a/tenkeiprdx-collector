@@ -21,10 +21,11 @@ async function altRelMap() {
 
 const diskPaths = (rel, place) => platformsFor(rel).map((platform) => ({ platform, path: subFor(place, rel, platform) }));
 
-export async function locate(dir, rel, place) {
+export async function locate(dir, rel, place, opts) {
   const d = await dirOf(dir, false);
   if (!d) return null;
-  for (const c of diskPaths(rel, place)) if (await fileStore.exists(d, c.path)) return c.path;
+  const checkSize = !(opts && opts.fast);
+  for (const c of diskPaths(rel, place)) if (await fileStore.exists(d, c.path, { checkSize })) return c.path;
   return null;
 }
 
@@ -40,7 +41,8 @@ export async function hasAsset(dir, rel, place) {
   return !!(await locate(dir, rel, place));
 }
 
-export async function presentIds(dir, items) {
+export async function presentIds(dir, items, opts) {
+  const nonEmpty = !!(opts && opts.nonEmpty);
   const have = new Map();
   const d = await dirOf(dir, false);
   if (!d) return have;
@@ -57,7 +59,7 @@ export async function presentIds(dir, items) {
     }
   }
   const groups = [...byDir.entries()];
-  const listed = await utilHelpers.pool(groups, LIST_CONC, async ([sub]) => new Set(await fileStore.listUnder(d, sub)));
+  const listed = await utilHelpers.pool(groups, LIST_CONC, async ([sub]) => new Set(await fileStore.listUnder(d, sub, { nonEmpty })));
   groups.forEach(([, list], i) => {
     for (const x of list) if (!x.row.path && listed[i].has(x.name)) x.row.path = x.path;
   });
@@ -85,7 +87,7 @@ export async function acquireAsset(dir, rel, opts) {
   const o = opts || {};
   const id = idOf(rel);
   if (!o.overwrite) {
-    const p = await locate(dir, rel, o.place);
+    const p = await locate(dir, rel, o.place, { fast: !!o.fast });
     if (p) return { status: 'skip', path: p, id };
   }
   const cands = diskPaths(rel, o.place);

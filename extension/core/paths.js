@@ -14,4 +14,5 @@ export const relKey = (rel) => String(rel).replace(/_[0-9a-f]{16,}\.bundle$/i, '
 export const APP_DIR = 'WebGL/StreamingAssets/aa/WebGL/';
 export const APP_REL = /^WebGL\/StreamingAssets\/aa\//;
 export const APP_PREFIX = /^WebGL\/StreamingAssets\/aa\/WebGL\//;
-export const assetUrlOn = (base, platform, rel) => (APP_REL.test(rel) ? `${base}/${rel}` : `${base}/${PLATFORM_DIR[platform]}/${rel}`);
+const urlSafeRel = (rel) => String(rel).replace(/#/g, '%23').replace(/\?/g, '%3F');
+export const assetUrlOn = (base, platform, rel) => (APP_REL.test(rel) ? `${base}/${urlSafeRel(rel)}` : `${base}/${PLATFORM_DIR[platform]}/${urlSafeRel(rel)}`);

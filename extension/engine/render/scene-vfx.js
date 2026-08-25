@@ -1,65 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
 import * as TQ from '../../vendor/three.quarks.esm.js';
 import { vfxParse } from './vfx-parse.js';
+import { proceduralTex } from './vfx-tex.js';
 
-let _softRadial = null;
-function softRadialTex() {
-  if (_softRadial) return _softRadial;
-  const S = 64, cv = document.createElement('canvas');
-  cv.width = S; cv.height = S;
-  const g = cv.getContext('2d');
-  const grd = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  grd.addColorStop(0, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.5, 'rgba(255,255,255,0.45)');
-  grd.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, S, S);
-  _softRadial = new THREE.CanvasTexture(cv);
-  _softRadial.needsUpdate = true;
-  return _softRadial;
-}
-
-const _procCache = new Map();
-function proceduralTex(proc) {
-  if (!proc || !proc.shader) return softRadialTex();
-  const sh = proc.shader, v = proc.vec1 || {};
-  const Vf = v['Vector1_f0683063f9b44121bff83e626fd4632a'];
-  const V1 = v['Vector1_1'];
-  const V9 = v['Vector1_9e0b82cda8e244118777bca7e52af518'];
-  let fnR = null, fnUV = null;
-  if (sh === 'Shader Graphs/CircleHole_add') {
-    const vf = Vf != null ? Vf : 1, v1 = V1 != null ? V1 : 13, v9 = V9 != null ? V9 : 100;
-    fnR = (r) => { const a = 2 * r * vf; return Math.max(0, Math.min(1, Math.pow(a, v1) * (1 - Math.pow(a, v9)))); };
-  } else if (/Circle_nomal_GF/.test(sh)) {
-    const vf = Vf != null ? Vf : 1, v9 = V9 != null ? V9 : 30;
-    fnR = (r) => Math.max(0, Math.min(1, 1 - Math.pow(2 * r * vf, v9)));
-  } else if (/enemy_fire/.test(sh)) {
-    fnR = (r) => Math.max(0, 1 - Math.pow(2.08 * r, 1.22));
-  } else if (sh === 'Shader Graphs/SoftSmokeNormal') {
-    fnUV = (ux, uy) => { const x = ux * (1 - ux) * uy * (1 - uy); return Math.max(0, Math.min(1, (Math.pow(Math.max(1e-6, x), 0.38) - 0.2176) * 13.63 + 0.2176)); };
-  } else if (/MagLine/.test(sh)) {
-    fnUV = (ux, uy) => {
-      const d1 = Math.hypot(ux - 0.5, uy), d2 = Math.hypot(ux - 0.5, uy - 1), d3 = Math.hypot(ux - 0.5, uy - 0.5);
-      const a1 = 1 - Math.pow(1.4 * d1, 20), a2 = 1 - Math.pow(1.4 * d2, 20);
-      const u12 = a1 * a2;
-      const glow = Math.max(0, 0.59 * (1 - Math.pow(1.94 * d3, 0.57)));
-      return Math.max(0, Math.min(1, 0.69 * Math.max(u12, glow) + 0.31 * u12));
-    };
-  }
-  if (!fnR && !fnUV) return softRadialTex();
-  const key = sh + '|' + JSON.stringify(v);
-  if (_procCache.has(key)) return _procCache.get(key);
-  const S = 128, data = new Uint8Array(S * S * 4);
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const ux = (x + 0.5) / S, uy = (y + 0.5) / S;
-    const a = fnUV ? fnUV(ux, uy) : fnR(Math.hypot(ux - 0.5, uy - 0.5));
-    const i = (y * S + x) * 4; data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = Math.round(a * 255);
-  }
-  const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
-  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.needsUpdate = true;
-  _procCache.set(key, tex);
-  return tex;
-}
 
 function keyframesToBezier(keys, scalar) {
   const curves = [];
@@ -274,11 +217,21 @@ function makeLocalQuad(sys, texByMatPid) {
 
 function makeMaterial(entry) {
   const tex = entry && entry.tex ? entry.tex : proceduralTex(entry && entry.proc);
-  const additive = (entry && entry.blend ? entry.blend : 'add') === 'add';
+  const blend = entry && entry.blend ? entry.blend : 'add';
+  if (blend === 'opaque') {
+    return new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: false,
+      alphaTest: entry && entry.cutoff != null ? entry.cutoff : 0.5,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.DoubleSide,
+    });
+  }
   return new THREE.MeshBasicMaterial({
     map: tex,
     transparent: true,
-    blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    blending: blend === 'add' ? THREE.AdditiveBlending : THREE.NormalBlending,
     depthWrite: false,
     depthTest: true,
     side: THREE.DoubleSide,
@@ -373,7 +326,7 @@ class RandomizeDir {
   frameUpdate() {}
 }
 
-function buildParams(sys, texByMatPid, loop) {
+function buildParams(sys, texByMatPid, loop, geoResolver) {
   const ps = sys.ps || {};
   const init = ps.InitialModule || {},
     em = ps.EmissionModule || {},
@@ -454,7 +407,31 @@ function buildParams(sys, texByMatPid, loop) {
       lengthFactor: Number(sys.lengthScale != null ? sys.lengthScale : 2),
     };
   }
+  if (renderMode === TQ.RenderMode.Mesh) {
+    const geo = sys.meshPid && geoResolver ? geoResolver(sys.meshPid) : null;
+    if (geo) params.instancingGeometry = geo;
+  }
   return params;
+}
+
+// Unity euler(ZXY度) → quaternion。vfx-aura と同じ Qy*Qx*Qz 合成(オーラで検証済の順序)。
+const _SV_AXX = new THREE.Vector3(1, 0, 0), _SV_AXY = new THREE.Vector3(0, 1, 0), _SV_AXZ = new THREE.Vector3(0, 0, 1);
+const _svqx = new THREE.Quaternion(), _svqy = new THREE.Quaternion(), _svqz = new THREE.Quaternion();
+function svUnityEulerQuat(out, ex, ey, ez) {
+  const d = Math.PI / 180;
+  _svqx.setFromAxisAngle(_SV_AXX, ex * d);
+  _svqy.setFromAxisAngle(_SV_AXY, ey * d);
+  _svqz.setFromAxisAngle(_SV_AXZ, ez * d);
+  return out.copy(_svqy).multiply(_svqx).multiply(_svqz);
+}
+function svSampleKeys(keys, t) {
+  if (t <= keys[0][0]) return keys[0][1];
+  if (t >= keys[keys.length - 1][0]) return keys[keys.length - 1][1];
+  let lo = 0, hi = keys.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (keys[m][0] <= t) lo = m; else hi = m; }
+  const a = keys[lo], b = keys[hi];
+  const u = b[0] > a[0] ? (t - a[0]) / (b[0] - a[0]) : 0;
+  return a[1] + (b[1] - a[1]) * u;
 }
 
 function createSceneVfx(bytes, opt) {
@@ -462,15 +439,56 @@ function createSceneVfx(bytes, opt) {
   if (!data || !data.systems || !data.systems.length) return null;
   const texByMatPid = (opt && opt.texByMatPid) || null;
   const loop = !!(opt && opt.loop);
+  const meshByPid = data.meshByPid || {};
+  // animGate: prefab で m_IsActive=false のスキル専用要素、および Animator で never-active な path は描かない
+  // (vfx-aura と同型)。全system同時発火で「隠れているはずの要素」が出るのを防ぐ。scenario battle VFX は
+  // Animator/transform カーブを持たないので gate/spin は no-op(無影響)。
+  const gate = data.animGate;
+  const gInactive = (gate && gate.inactive) || [];
+  const gEmission = new Map((gate && gate.emission) || []);
+  const gDefaultActive = new Set((gate && gate.defaultActive) || []);
+  const goHidden = (sys) => sys.goActive === false && !gDefaultActive.has(sys.path);
+  const gateHidden = (p) => {
+    if (!p) return false;
+    if (gInactive.some((ip) => p === ip || p.startsWith(ip + '/'))) return true;
+    for (const [ep, ev] of gEmission) if (ev <= 1e-4 && (p === ep || p.startsWith(ep + '/'))) return true;
+    return false;
+  };
+  const spinNodes = new Map();
+  const geoCache = new Map();
+  const geoResolver = (pid) => {
+    const k = String(pid);
+    if (geoCache.has(k)) return geoCache.get(k);
+    const md = meshByPid[k];
+    let g = null;
+    if (md && md.positions && md.positions.length) {
+      g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(md.positions, 3));
+      if (md.uv) g.setAttribute('uv', new THREE.BufferAttribute(md.uv, 2));
+      if (md.normals) g.setAttribute('normal', new THREE.BufferAttribute(md.normals, 3));
+      if (md.indices) g.setIndex(new THREE.BufferAttribute(md.indices, 1));
+    }
+    geoCache.set(k, g);
+    return g;
+  };
   const group = new THREE.Group();
   const batch = new TQ.BatchedRenderer();
   group.add(batch);
+  // Transform euler アニメ(周回スピン)ノード。子systemは localPos/localRot で配下に置き node を回す。
+  for (const a of data.transformAnims || []) {
+    const node = new THREE.Group();
+    const np = a.nodeWorldPos || { x: 0, y: 0, z: 0 };
+    node.position.set(np.x || 0, np.y || 0, np.z || 0);
+    group.add(node);
+    spinNodes.set(a.path, { node, anim: a, t: 0 });
+  }
   const systems = [];
   const clawAnims = [];
   const delayed = [];
   const psByObjPid = new Map();
   for (const sys of data.systems) {
     if ((sys.renderMode | 0) === 5) continue;
+    if (gateHidden(sys.path) || goHidden(sys)) continue; // never-active / m_IsActive=false は描かない
     if (isLocalMesh(sys)) {
       try {
         const cm = makeLocalQuad(sys, texByMatPid);
@@ -481,7 +499,7 @@ function createSceneVfx(bytes, opt) {
     }
     let ps;
     try {
-      ps = new TQ.ParticleSystem(buildParams(sys, texByMatPid, loop));
+      ps = new TQ.ParticleSystem(buildParams(sys, texByMatPid, loop, geoResolver));
     } catch (e) {
       continue;
     }
@@ -495,8 +513,10 @@ function createSceneVfx(bytes, opt) {
       delayed.push({ ps, delay: psDelay });
     }
     const e = ps.emitter;
-    const p = sys.pos || { x: 0, y: 0, z: 0 },
-      r = sys.rot || { x: 0, y: 0, z: 0, w: 1 },
+    // 周回スピン親がある系はそのノードの local 系に置く(localPos/localRot)。無ければ world 直置き。
+    const spin = sys.animParent ? spinNodes.get(sys.animParent) : null;
+    const p = (spin && sys.localPos) ? sys.localPos : (sys.pos || { x: 0, y: 0, z: 0 }),
+      r = (spin && sys.localRot) ? sys.localRot : (sys.rot || { x: 0, y: 0, z: 0, w: 1 }),
       s = sys.scale || { x: 1, y: 1, z: 1 };
     e.position.set(p.x || 0, p.y || 0, p.z || 0);
     e.quaternion.set(r.x || 0, r.y || 0, r.z || 0, r.w == null ? 1 : r.w);
@@ -509,7 +529,7 @@ function createSceneVfx(bytes, opt) {
     }
     e.scale.set(s.x || 1, s.y || 1, s.z || 1);
     e.name = sys.name || '';
-    group.add(e);
+    (spin ? spin.node : group).add(e);
     systems.push(ps);
     if (sys.objPid) psByObjPid.set(String(sys.objPid), ps);
   }
@@ -526,6 +546,33 @@ function createSceneVfx(bytes, opt) {
       } catch (err) {}
     }
   }
+  let bounds = null;
+  {
+    const xs = [], ys = [], zs = [];
+    for (const sys of data.systems) {
+      const p = sys.pos || { x: 0, y: 0, z: 0 };
+      xs.push(p.x || 0); ys.push(p.y || 0); zs.push(p.z || 0);
+    }
+    if (xs.length) {
+      xs.sort((a, b) => a - b); ys.sort((a, b) => a - b); zs.sort((a, b) => a - b);
+      const q = (arr, t) => arr[Math.max(0, Math.min(arr.length - 1, Math.round((arr.length - 1) * t)))];
+      const cx = (q(xs, 0.1) + q(xs, 0.9)) / 2, cy = (q(ys, 0.1) + q(ys, 0.9)) / 2, cz = (q(zs, 0.1) + q(zs, 0.9)) / 2;
+      const rad = Math.max(Math.abs(q(xs, 0.9) - cx), Math.abs(q(ys, 0.9) - cy), Math.abs(q(zs, 0.9) - cz));
+      const radius = Math.max(1.2, Math.min(6, rad + 1.2));
+      bounds = { cx, cy: Math.max(cy, 0.6), cz, radius };
+    }
+  }
+  const advanceSpins = (dt) => {
+    for (const sp of spinNodes.values()) {
+      const a = sp.anim;
+      const dur = a.dur > 0.01 ? a.dur : 10;
+      sp.t = (sp.t + dt) % dur;
+      const val = a.keys && a.keys.length ? svSampleKeys(a.keys, sp.t) : a.from + (a.to - a.from) * (sp.t / dur);
+      const es = a.eulerStatic || [0, 0, 0];
+      svUnityEulerQuat(sp.node.quaternion, a.axis === 0 ? val : es[0], a.axis === 1 ? val : es[1], a.axis === 2 ? val : es[2]);
+    }
+  };
+  advanceSpins(0);
   let elapsed = 0;
   return {
     group,
@@ -534,10 +581,18 @@ function createSceneVfx(bytes, opt) {
       for (const d of delayed) {
         if (!d.started && elapsed >= d.delay) { d.started = true; try { d.ps.play(); } catch (e) {} }
       }
+      if (spinNodes.size) advanceSpins(dt);
       try {
         batch.update(dt);
       } catch (e) {}
       for (const c of clawAnims) { try { c.update(dt); } catch (e) {} }
+    },
+    bounds,
+    liveCount: () => {
+      let n = 0;
+      for (const ps of systems) n += ps.particleNum || 0;
+      for (const c of clawAnims) if (c.mesh && c.mesh.visible) n++;
+      return n;
     },
     dispose: () => {
       try {
@@ -577,23 +632,55 @@ const COPY_FRAG = 'uniform sampler2D t; varying vec2 vUv; void main(){ gl_FragCo
 const GLOW_FRAG = 'uniform sampler2D t; uniform float intensity; varying vec2 vUv;\n' +
   'void main(){ vec4 c = texture2D(t,vUv); gl_FragColor = vec4(c.rgb*intensity, c.a*intensity); }';
 
-function createOverlay(canvas) {
+function createOverlay(canvas, opt0) {
+  const orbit = !!(opt0 && opt0.orbit);
+  const stage = !!(opt0 && opt0.stage);
+  const zoom0 = opt0 && Number(opt0.zoom) > 0 ? Number(opt0.zoom) : 1;
+  const bgColor = opt0 && opt0.bg != null ? opt0.bg : 0x1b1f29;
   let renderer = null,
     scene = null,
     camera = null,
     raf = 0,
     fx = null,
+    pivot = null,
+    grid = null,
+    oYaw = 0,
+    oPitch = 0,
+    oZoom = zoom0,
+    oPanX = 0,
+    oPanY = 0,
+    sYaw = 0.5,
+    sPitch = 0.28,
+    sDist = 7,
+    sTarget = null,
+    userAdjusted = false,
     curW = 1136,
     curH = 640,
     bloom = null,
     _glHooked = false,
     _origRandom = null;
+  const applyOrbit = () => {
+    if (pivot) {
+      pivot.rotation.set(oPitch, oYaw, 0);
+      pivot.scale.setScalar(oZoom);
+    }
+  };
+  const applyPan = () => {
+    if (canvas) canvas.style.transform = `translate(${oPanX}px, ${oPanY}px)`;
+  };
+  const placeStageCamera = () => {
+    if (!stage || !camera || !sTarget) return;
+    const cp = Math.cos(sPitch),
+      sp = Math.sin(sPitch);
+    camera.position.set(sTarget.x + sDist * cp * Math.sin(sYaw), sTarget.y + sDist * sp, sTarget.z + sDist * cp * Math.cos(sYaw));
+    camera.lookAt(sTarget);
+  };
   function ensureBloom(w, h) {
     const opt = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, depthBuffer: false };
     const fw = Math.max(2, w | 0), fh = Math.max(2, h | 0), hw = Math.max(1, fw >> 1), hh = Math.max(1, fh >> 1);
     if (bloom && bloom.fw === fw && bloom.fh === fh) return bloom;
     if (bloom) { try { bloom.rtScene.dispose(); bloom.rtA.dispose(); bloom.rtB.dispose(); } catch (e) {} }
-    const rtScene = new THREE.WebGLRenderTarget(fw, fh, { ...opt, type: THREE.HalfFloatType });
+    const rtScene = new THREE.WebGLRenderTarget(fw, fh, { ...opt, type: THREE.HalfFloatType, depthBuffer: true });
     const rtA = new THREE.WebGLRenderTarget(hw, hh, opt), rtB = new THREE.WebGLRenderTarget(hw, hh, opt);
     if (!bloom) {
       const fsScene = new THREE.Scene(), fsCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -608,13 +695,14 @@ function createOverlay(canvas) {
     bloom.rtScene = rtScene; bloom.rtA = rtA; bloom.rtB = rtB; bloom.fw = fw; bloom.fh = fh; bloom.hw = hw; bloom.hh = hh;
     return bloom;
   }
-  function renderBloom() {
+  function renderBloom(opaqueBg) {
     const pr = renderer.getPixelRatio();
     const b = ensureBloom(curW * pr, curH * pr);
     const drawFs = (mat) => { b.fsQuad.material = mat; renderer.render(b.fsScene, b.fsCam); };
     const prevAuto = renderer.autoClear;
     renderer.autoClear = false;
-    renderer.setClearColor(0x000000, 0);
+    if (opaqueBg != null) renderer.setClearColor(opaqueBg, 1);
+    else renderer.setClearColor(0x000000, 0);
     renderer.setRenderTarget(b.rtScene); renderer.clear(); renderer.render(scene, camera);
     b.threshMat.uniforms.t.value = b.rtScene.texture;
     renderer.setRenderTarget(b.rtA); renderer.clear(); drawFs(b.threshMat);
@@ -622,7 +710,9 @@ function createOverlay(canvas) {
     renderer.setRenderTarget(b.rtB); renderer.clear(); drawFs(b.blurMat);
     b.blurMat.uniforms.t.value = b.rtB.texture; b.blurMat.uniforms.dir.value.set(0, 2.5 / b.hh);
     renderer.setRenderTarget(b.rtA); renderer.clear(); drawFs(b.blurMat);
-    renderer.setRenderTarget(null); renderer.clear();
+    renderer.setRenderTarget(null);
+    if (opaqueBg != null) { renderer.setClearColor(opaqueBg, 1); renderer.clear(); }
+    else renderer.clear();
     b.copyMat.uniforms.t.value = b.rtScene.texture; drawFs(b.copyMat);
     b.glowMat.uniforms.t.value = b.rtA.texture; drawFs(b.glowMat);
     renderer.autoClear = prevAuto;
@@ -680,13 +770,50 @@ function createOverlay(canvas) {
     raf = 0;
     if (fx) {
       try {
-        scene.remove(fx.group);
+        if (pivot) scene.remove(pivot);
+        else scene.remove(fx.group);
         fx.dispose();
       } catch (e) {}
       fx = null;
+      pivot = null;
     }
     if (renderer) renderer.clear();
     seedOff();
+  }
+  // WebGL コンテキスト/RenderTarget/GridHelper を明示解放する。これが無いとセルやキャラを渡り歩くたびに
+  // WebGLRenderer が積み上がり Chrome の同時コンテキスト上限(~16)を超えて古い方が失われ 3D表示が壊れる。
+  function dispose() {
+    stop();
+    if (bloom) {
+      try {
+        bloom.rtScene && bloom.rtScene.dispose();
+        bloom.rtA && bloom.rtA.dispose();
+        bloom.rtB && bloom.rtB.dispose();
+        bloom.threshMat && bloom.threshMat.dispose();
+        bloom.blurMat && bloom.blurMat.dispose();
+        bloom.copyMat && bloom.copyMat.dispose();
+        bloom.glowMat && bloom.glowMat.dispose();
+        bloom.fsQuad && bloom.fsQuad.geometry && bloom.fsQuad.geometry.dispose();
+      } catch (e) {}
+      bloom = null;
+    }
+    if (grid) {
+      try {
+        scene && scene.remove(grid);
+        grid.geometry && grid.geometry.dispose();
+        grid.material && grid.material.dispose();
+      } catch (e) {}
+      grid = null;
+    }
+    if (renderer) {
+      try {
+        renderer.dispose();
+        renderer.forceContextLoss();
+      } catch (e) {}
+      renderer = null;
+    }
+    scene = null;
+    camera = null;
   }
   function play(bytes, texByMatPid, durMs, opt) {
     if (!bytes || !ensure()) return;
@@ -700,17 +827,51 @@ function createOverlay(canvas) {
     const deterministicSeed = !(opt && opt.deterministicSeed === false);
     if (deterministicSeed) seedOn();
     const loop = !!(opt && opt.loop);
-    fx = createSceneVfx(bytes, { texByMatPid, loop });
-    if (!fx) return;
-    camera = makeRealCamera();
-    scene.add(fx.group);
+    const onEnd = opt && typeof opt.onEnd === 'function' ? opt.onEnd : null;
+    if (stage) {
+      camera = new THREE.PerspectiveCamera(38, w / (h || 1) || 1.6, 0.05, 2000);
+      sTarget = sTarget || new THREE.Vector3(0, 1, 0);
+      if (!grid) {
+        grid = new THREE.GridHelper(12, 24, 0x5a6274, 0x2c313e);
+        if (grid.material) {
+          grid.material.transparent = true;
+          grid.material.opacity = 0.6;
+        }
+        scene.add(grid);
+      }
+    } else {
+      camera = makeRealCamera();
+      if (orbit) {
+        pivot = new THREE.Group();
+        scene.add(pivot);
+        applyOrbit();
+      }
+    }
+    const mount = (g) => { if (orbit && pivot) pivot.add(g); else scene.add(g); };
+    const buildFx = () => { fx = createSceneVfx(bytes, { texByMatPid, loop }); if (fx) mount(fx.group); return fx; };
+    if (!buildFx()) return;
+    if (stage) {
+      if (!userAdjusted && fx.bounds) {
+        sTarget.set(fx.bounds.cx, fx.bounds.cy, fx.bounds.cz);
+        const fovR = 38 * Math.PI / 180;
+        sDist = Math.max(4, Math.min(22, (fx.bounds.radius * 1.5) / Math.tan(fovR / 2)));
+      }
+      placeStageCamera();
+    }
+    const rebuildFx = () => {
+      try { if (orbit && pivot) pivot.remove(fx.group); else scene.remove(fx.group); fx.dispose(); } catch (e) {}
+      buildFx();
+    };
     const speed = opt && Number(opt.speed) > 0 ? Number(opt.speed) : 1;
     const STEP = 1000 / 60;
     let prev = performance.now(),
       acc = 0,
-      simMs = 0;
+      simMs = 0,
+      started = false,
+      idleMs = 0;
     const step = (t) => {
-      acc += (t - prev) * speed;
+      const realDt = t - prev;
+      acc += realDt * speed;
       prev = t;
       let guard = 0;
       try {
@@ -720,21 +881,101 @@ function createOverlay(canvas) {
           acc -= STEP;
           simMs += STEP;
         }
-        renderBloom();
+        if (stage) {
+          placeStageCamera();
+          renderBloom(bgColor);
+        } else {
+          renderBloom();
+        }
       } catch (e) {
         try { renderer.setRenderTarget(null); } catch (e2) {}
         stop();
+        if (onEnd) try { onEnd(); } catch (e3) {}
         return;
       }
-      if (!loop && simMs >= (durMs || 1500)) {
+      if (loop) {
+        const live = fx.liveCount ? fx.liveCount() : 1;
+        if (live > 0) { started = true; idleMs = 0; }
+        else if (started) { idleMs += realDt; if (idleMs > 350) { rebuildFx(); started = false; idleMs = 0; } }
+      } else if (simMs >= (durMs || 1500)) {
         stop();
+        if (onEnd) try { onEnd(); } catch (e2) {}
         return;
       }
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
   }
-  return { play, stop };
+  if ((orbit || stage) && canvas) {
+    let mode = 0,
+      lx = 0,
+      ly = 0;
+    canvas.style.touchAction = 'none';
+    canvas.style.cursor = 'grab';
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('pointerdown', (e) => {
+      lx = e.clientX;
+      ly = e.clientY;
+      mode = e.button === 2 || e.button === 1 ? 2 : 1;
+      canvas.style.cursor = mode === 2 ? 'move' : 'grabbing';
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch (er) {}
+    });
+    const end = () => {
+      mode = 0;
+      canvas.style.cursor = 'grab';
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('pointermove', (e) => {
+      if (!mode) return;
+      const dx = e.clientX - lx;
+      const dy = e.clientY - ly;
+      lx = e.clientX;
+      ly = e.clientY;
+      if (stage) {
+        userAdjusted = true;
+        if (mode === 2) {
+          const k = sDist * 0.0018;
+          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+          const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+          sTarget.addScaledVector(right, -dx * k);
+          sTarget.addScaledVector(up, dy * k);
+        } else {
+          sYaw -= dx * 0.01;
+          sPitch += dy * 0.01;
+          sPitch = Math.max(-1.5, Math.min(1.5, sPitch));
+        }
+        placeStageCamera();
+      } else if (mode === 2) {
+        oPanX += dx;
+        oPanY += dy;
+        applyPan();
+      } else {
+        oYaw += dx * 0.01;
+        oPitch += dy * 0.01;
+        oPitch = Math.max(-1.4, Math.min(1.4, oPitch));
+        applyOrbit();
+      }
+    });
+    canvas.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        if (stage) {
+          userAdjusted = true;
+          sDist = Math.max(0.5, Math.min(60, sDist * (e.deltaY < 0 ? 1 / 1.12 : 1.12)));
+          placeStageCamera();
+        } else {
+          oZoom = Math.max(0.3, Math.min(8, oZoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+          applyOrbit();
+        }
+      },
+      { passive: false },
+    );
+  }
+  return { play, stop, dispose };
 }
 
 export const sceneVfx = { createSceneVfx, createOverlay };

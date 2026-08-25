@@ -1,6 +1,6 @@
 import { el, getById } from '../../core/dom.js';
 
-const ROSTER_CONTROLS = ['rosterSearch', 'rosterOwn', 'rosterGroup', 'rosterRank', 'bulkOpen', 'sharedDl'];
+const ROSTER_CONTROLS = ['rosterSearch', 'rosterOwn', 'rosterGroup', 'rosterRank', 'bulkOpen', 'sharedDl', 'rosterSortLbl', 'rosterSort', 'rosterSortDescLabel', 'exModeLabel', 'exFilterRow'];
 
 export function hideRosterControls({ keepSearch } = {}) {
   for (const id of ROSTER_CONTROLS) {
@@ -25,11 +25,7 @@ export function clearView(viewId, placeholder) {
 }
 
 export function entryCard({ name, note, ready, onClick }) {
-  return el('div', { class: 'rcard' + (ready ? '' : ' un'), on: { click: onClick } }, [
-    el('span', `rdot ${ready ? 'own' : 'noown'}`),
-    el('span', 'rnm', name),
-    el('span', 'rlv', note || ''),
-  ]);
+  return el('div', { class: 'rcard' + (ready ? '' : ' un'), on: { click: onClick } }, [el('span', `rdot ${ready ? 'own' : 'noown'}`), el('span', 'rnm', name), el('span', 'rlv', note || '')]);
 }
 
 export function viewHeader(text, list, cur, open) {

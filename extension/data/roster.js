@@ -49,6 +49,7 @@ function buildRosterItem(folderKey, meta, ctx) {
     },
     owned,
     level,
+    bwh: meta.bwh || null,
     hasDownload: !!dl,
     dl,
   };

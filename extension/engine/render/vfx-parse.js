@@ -38,6 +38,77 @@ function streamedPeakValues(dataArr) {
   return out;
 }
 
+// streamed clip の各 lane の 実キーフレーム時間範囲での first/last/min/max を返す(アニメ軸/範囲判定用)。
+function streamedLaneTrack(dataArr) {
+  const out = new Map();
+  if (!Array.isArray(dataArr) && !ArrayBuffer.isView(dataArr)) return out;
+  const u = Uint32Array.from(Array.from(dataArr, (x) => Number(x) >>> 0));
+  const f = new Float32Array(u.buffer);
+  let p = 0, guard = 0;
+  while (p < u.length && guard++ < 8192) {
+    const time = f[p++];
+    const numKeys = u[p++];
+    if (numKeys < 0 || numKeys > 256 || p + numKeys * 5 > u.length) break;
+    for (let k = 0; k < numKeys; k++) {
+      const index = u[p];
+      const val = f[p + 4];
+      p += 5;
+      if (!Number.isFinite(time) || time < -1e6 || time > 1e6) continue;
+      let s = out.get(index);
+      if (!s) { s = { first: val, last: val, min: val, max: val, tFirst: time, tLast: time }; out.set(index, s); }
+      else { s.last = val; s.tLast = time; if (val < s.min) s.min = val; if (val > s.max) s.max = val; if (time < s.tFirst) { s.tFirst = time; s.first = val; } }
+    }
+  }
+  return out;
+}
+
+// streamed clip の各 lane の実キーフレーム列 [[t,v],...](時間昇順)を返す。
+function streamedLaneSeries(dataArr) {
+  const out = new Map();
+  if (!Array.isArray(dataArr) && !ArrayBuffer.isView(dataArr)) return out;
+  const u = Uint32Array.from(Array.from(dataArr, (x) => Number(x) >>> 0));
+  const f = new Float32Array(u.buffer);
+  let p = 0, guard = 0;
+  while (p < u.length && guard++ < 8192) {
+    const time = f[p++];
+    const numKeys = u[p++];
+    if (numKeys < 0 || numKeys > 256 || p + numKeys * 5 > u.length) break;
+    for (let k = 0; k < numKeys; k++) {
+      const index = u[p]; const val = f[p + 4]; p += 5;
+      if (!Number.isFinite(time) || time < -1e6 || time > 1e6) continue;
+      let a = out.get(index); if (!a) { a = []; out.set(index, a); }
+      a.push([time, val]);
+    }
+  }
+  for (const a of out.values()) a.sort((x, y) => x[0] - y[0]);
+  return out;
+}
+
+// Transform binding(typeID 4) の attribute→lane数。1=pos(3),2=quat(4),3=scale(3),4=euler(3)。他は1。
+function bindingLaneCount(b) {
+  if ((b.typeID | 0) === 4) {
+    const a = b.attribute >>> 0;
+    if (a === 2) return 4;
+    if (a === 1 || a === 3 || a === 4) return 3;
+  }
+  return 1;
+}
+
+// Unity 組込メッシュ(`Library/unity default resources`)の PathID → 種別。詳細は _research/aura-vfx-glsl-method.md。
+const UNITY_BUILTIN_MESH = { '10210': 'quad', '10209': 'plane', '10207': 'sphere', '10202': 'cube', '10206': 'cylinder', '10208': 'capsule' };
+function builtinMeshGeo(kind) {
+  if (kind === 'quad') {
+    return {
+      name: 'builtin_quad',
+      positions: new Float32Array([-0.5, -0.5, 0, 0.5, 0.5, 0, 0.5, -0.5, 0, -0.5, 0.5, 0]),
+      normals: new Float32Array([0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1]),
+      uv: new Float32Array([0, 0, 1, 1, 1, 0, 0, 1]),
+      indices: new Uint16Array([0, 1, 2, 1, 0, 3]),
+    };
+  }
+  return null;
+}
+
 function parseVfx(bytes) {
   let parsed, meta;
   try {
@@ -133,10 +204,12 @@ function parseVfx(bytes) {
     return q;
   };
   const goName = new Map();
+  const goActive = new Map(); // goId → m_IsActive(prefab既定)。既定非アクティブ(loop2等スキル専用要素)を idle で描かないため。
   for (const o of meta.objects)
     if (o.classID === 1) {
       const g = read(o);
       if (g && g.m_Name != null) goName.set(String(o.pathID), g.m_Name);
+      if (g) goActive.set(String(o.pathID), g.m_IsActive !== 0 && g.m_IsActive !== false);
     }
   const pathOf = (trPid) => {
     const parts = [];
@@ -151,6 +224,21 @@ function parseVfx(bytes) {
       cur = father;
     }
     return parts.join('/');
+  };
+  // system の Transform 親チェーンをたどり、途中の GameObject が1つでも m_IsActive=false なら inactive。
+  // (loop2 は自身が m_IsActive=false ＝ 既定で非表示。Animator が特定 state で activate するスキル専用要素。)
+  const effectiveActive = (trPid) => {
+    let cur = trPid, guard = 0;
+    while (cur && cur !== '0' && guard++ < 32) {
+      const tr = trByPath.get(cur);
+      if (!tr) break;
+      const goId = String(tr.m_GameObject && tr.m_GameObject.m_PathID);
+      if (goActive.has(goId) && goActive.get(goId) === false) return false;
+      const father = String(tr.m_Father && tr.m_Father.m_PathID);
+      if (!father || father === '0') break;
+      cur = father;
+    }
+    return true;
   };
   const hashToPath = new Map();
   for (const pid of trByPath.keys()) {
@@ -232,14 +320,79 @@ function parseVfx(bytes) {
         if ((boundStates.get(path) || 0) < N) continue;
         inactive.push(path);
       }
-      const emission = perState[Math.min(smd.m_DefaultState || 0, perState.length - 1)].emission;
-      if (!inactive.length && !emission.size) return null;
-      return { inactive, emission: [...emission.entries()] };
+      const dps = perState[Math.min(smd.m_DefaultState || 0, perState.length - 1)];
+      const emission = dps.emission;
+      // デフォルト(idle) state が明示 active 化する path。prefab で m_IsActive=false でも idle で有効化される要素を隠さないため。
+      const defaultActive = [...dps.active].filter(([, a]) => a).map(([p]) => p);
+      if (!inactive.length && !emission.size && !defaultActive.length) return null;
+      return { inactive, emission: [...emission.entries()], defaultActive };
     } catch (e) {
       return null;
     }
   };
   const animGate = parseAnimatorGate();
+  // Transform euler アニメ(周回スピン等)を clip から抽出。euler は 3レーン消費するので lane を会計する。
+  const parseTransformAnims = () => {
+    const anims = [];
+    try {
+      for (const o of meta.objects) {
+        if (o.classID !== 74) continue;
+        const clip = read(o);
+        if (!clip) continue;
+        const bindings = (clip.m_ClipBindingConstant && clip.m_ClipBindingConstant.genericBindings) || [];
+        const cd = clip.m_MuscleClip && clip.m_MuscleClip.m_Clip && (clip.m_MuscleClip.m_Clip.data || clip.m_MuscleClip.m_Clip);
+        const streamed = cd && cd.m_StreamedClip && cd.m_StreamedClip.data;
+        if (!streamed) continue;
+        const series = streamedLaneSeries(streamed);
+        const dur = (clip.m_MuscleClip && clip.m_MuscleClip.m_StopTime) || 0;
+        let lane = 0;
+        const D = (cd.m_DenseClip && cd.m_DenseClip.m_CurveCount) || 0;
+        const C = (cd.m_ConstantClip && cd.m_ConstantClip.data && cd.m_ConstantClip.data.length) || 0;
+        const S = Math.max(0, bindings.length - D - C);
+        for (let bi = 0; bi < bindings.length; bi++) {
+          const b = bindings[bi];
+          const n = bindingLaneCount(b);
+          if (bi < S) {
+            if ((b.typeID | 0) === 4 && (b.attribute >>> 0) === 4) { // Transform euler (Vector3)
+              const path = hashToPath.get(Number(b.path)) || hashToPath.get(b.path >>> 0) || '';
+              const eulerStatic = [0, 0, 0];
+              let animAxis = -1, keys = null;
+              for (let a = 0; a < 3; a++) {
+                const sr = series.get(lane + a);
+                if (!sr || !sr.length) continue;
+                eulerStatic[a] = sr[0][1];
+                let mn = Infinity, mx = -Infinity;
+                for (const kv of sr) { if (kv[1] < mn) mn = kv[1]; if (kv[1] > mx) mx = kv[1]; }
+                if (mx - mn > 1) { animAxis = a; keys = sr.map((kv) => [kv[0], kv[1]]); }
+              }
+              // 実キーフレーム列(keys)をそのまま再生する。線形0→360ではなく静止→急回転→静止の実カーブを保持。
+              if (animAxis >= 0) anims.push({ path, axis: animAxis, from: keys[0][1], to: keys[keys.length - 1][1], dur, eulerStatic, keys });
+            }
+            lane += n;
+          }
+        }
+      }
+    } catch (e) {}
+    return anims;
+  };
+  const transformAnims = parseTransformAnims();
+  const pathToTr = new Map();
+  for (const pid of trByPath.keys()) { const p = pathOf(pid); if (p) pathToTr.set(p, pid); }
+  const qConj = (q) => ({ x: -(q.x || 0), y: -(q.y || 0), z: -(q.z || 0), w: q.w == null ? 1 : q.w });
+  // アニメノード(周回する親)の静的 world 変換を求める。子systemはこのノードのローカル系に配置して親を回す。
+  for (const a of transformAnims) {
+    const pid = pathToTr.get(a.path);
+    a.nodeWorldPos = pid ? worldPos(pid) : { x: 0, y: 0, z: 0 };
+    a.nodeWorldRot = pid ? worldRot(pid) : { x: 0, y: 0, z: 0, w: 1 };
+  }
+  const findAnimParent = (sysPath) => {
+    let best = null;
+    for (const a of transformAnims) {
+      if (!a.path) continue;
+      if (sysPath === a.path || sysPath.startsWith(a.path + '/')) { if (!best || a.path.length > best.path.length) best = a; }
+    }
+    return best;
+  };
   const systems = [];
   for (const o of meta.objects) {
     if (o.classID !== 198) continue;
@@ -257,12 +410,38 @@ function parseVfx(bytes) {
       }
     }
     const matPid = rend && rend.m_Materials ? String((Array.isArray(rend.m_Materials) ? rend.m_Materials[0] : rend.m_Materials).m_PathID) : null;
+    let meshPid = null;
+    if (rend && (rend.m_RenderMode | 0) === 4 && rend.m_Mesh) {
+      const fid = rend.m_Mesh.m_FileID | 0;
+      const mp = String(rend.m_Mesh.m_PathID);
+      if (fid === 0) {
+        if (mp && mp !== '0') meshPid = mp;
+      } else {
+        const ext = (meta.externals || [])[fid - 1];
+        if (ext && /unity default resources/i.test(ext.pathName || '') && UNITY_BUILTIN_MESH[mp]) meshPid = 'builtin:' + mp;
+      }
+    }
+    const sysPath = trEnt ? pathOf(trEnt.pid) : '';
+    const wPos = trEnt ? worldPos(trEnt.pid) : { x: 0, y: 0, z: 0 };
+    const wRot = trEnt ? worldRot(trEnt.pid) : { x: 0, y: 0, z: 0, w: 1 };
+    const ap = findAnimParent(sysPath);
+    let animParent = null, localPos = null, localRot = null;
+    if (ap) {
+      const inv = qConj(ap.nodeWorldRot);
+      const rel = { x: wPos.x - ap.nodeWorldPos.x, y: wPos.y - ap.nodeWorldPos.y, z: wPos.z - ap.nodeWorldPos.z };
+      localPos = rotV(inv, rel);
+      localRot = quatMul(inv, wRot);
+      animParent = ap.path;
+    }
     systems.push({
       ps,
       objPid: String(o.pathID),
-      pos: trEnt ? worldPos(trEnt.pid) : { x: 0, y: 0, z: 0 },
-      rot: trEnt ? worldRot(trEnt.pid) : { x: 0, y: 0, z: 0, w: 1 },
+      pos: wPos,
+      rot: wRot,
       scale: trEnt ? worldScale(trEnt.pid) : { x: 1, y: 1, z: 1 },
+      animParent,
+      localPos,
+      localRot,
       moveWithTransform: ps.moveWithTransform == null ? null : Number(ps.moveWithTransform),
       moveWithCustomTransformPathID:
         ps.moveWithCustomTransform && ps.moveWithCustomTransform.m_PathID != null ? String(ps.moveWithCustomTransform.m_PathID) : '0',
@@ -273,22 +452,35 @@ function parseVfx(bytes) {
       velocityScale: rend && rend.m_VelocityScale != null ? rend.m_VelocityScale : 0,
       sortingOrder: rend ? rend.m_SortingOrder : 0,
       name: goName.get(goId) || '',
-      path: trEnt ? pathOf(trEnt.pid) : '',
+      path: sysPath,
+      goActive: trEnt ? effectiveActive(trEnt.pid) : true, // 既定非アクティブ(スキル専用等)は idle で描かない
       matPid,
+      meshPid,
     });
   }
   let meshGeo = null;
-  for (const o of meta.objects)
-    if (o.classID === 43) {
-      const mo = read(o);
-      if (mo && MESH_MOD && MESH_MOD.extractMeshGeometry) {
+  const meshByPid = {};
+  for (const s of systems) {
+    if (typeof s.meshPid === 'string' && s.meshPid.startsWith('builtin:') && !meshByPid[s.meshPid]) {
+      const g = builtinMeshGeo(UNITY_BUILTIN_MESH[s.meshPid.slice('builtin:'.length)]);
+      if (g) meshByPid[s.meshPid] = g;
+    }
+  }
+  if (MESH_MOD && MESH_MOD.extractMeshGeometry) {
+    for (const o of meta.objects)
+      if (o.classID === 43) {
+        const mo = read(o);
+        if (!mo) continue;
         try {
-          meshGeo = MESH_MOD.extractMeshGeometry(mo, meta.LE);
+          const g = MESH_MOD.extractMeshGeometry(mo, meta.LE);
+          if (g) {
+            meshByPid[String(o.pathID)] = g;
+            if (!meshGeo) meshGeo = g;
+          }
         } catch (e) {}
       }
-      break;
-    }
-  return { systems, meshGeo, unityVersion: meta.unityVersion, animGate };
+  }
+  return { systems, meshGeo, meshByPid, unityVersion: meta.unityVersion, animGate, transformAnims };
 }
 
 function resolveDeps(catalog, prefabRe) {
@@ -345,9 +537,28 @@ function resolveDeps(catalog, prefabRe) {
 function buildMaterialMap(T, depBundles) {
   const map = new Map();
   if (!MESH_MOD || !MESH_MOD.parseMaterialBundle) return map;
-  const mkTex = (t) => {
+  const alphaOpaqueCache = new Map();
+  const isAlphaOpaque = (t) => {
+    const k = String(t.pathID);
+    if (alphaOpaqueCache.has(k)) return alphaOpaqueCache.get(k);
+    const px = t.rgba, n = px.length / 4, step = Math.max(1, Math.floor(n / 4096));
+    let aMin = 255;
+    for (let i = 0; i < n; i += step) { const a = px[i * 4 + 3]; if (a < aMin) aMin = a; if (aMin < 24) break; }
+    const opaque = aMin > 200;
+    alphaOpaqueCache.set(k, opaque);
+    return opaque;
+  };
+  const mkTex = (t, lumAlpha) => {
     if (!t || !t.rgba) return null;
-    const tx = new T.DataTexture(t.rgba, t.width, t.height, T.RGBAFormat);
+    let data = t.rgba;
+    if (lumAlpha && isAlphaOpaque(t)) {
+      data = new Uint8Array(t.rgba);
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        data[i + 3] = Math.max(r, g, b);
+      }
+    }
+    const tx = new T.DataTexture(data, t.width, t.height, T.RGBAFormat);
     tx.needsUpdate = true;
     tx.minFilter = T.LinearFilter;
     tx.magFilter = T.LinearFilter;
@@ -357,6 +568,7 @@ function buildMaterialMap(T, depBundles) {
   const parsed = [];
   const texPool = new Map();
   const shaderNameByPid = {};
+  const shaderInfoByPid = {}; // pid → {name,dst,dynamic}。ブレンドをバンドル跨ぎで解決するため全バンドル分を統合する。
   for (const bytes of depBundles) {
     if (!bytes) continue;
     try {
@@ -365,14 +577,15 @@ function buildMaterialMap(T, depBundles) {
         texs = b.textures || [];
       parsed.push({ mats, texs });
       if (b.shaders) Object.assign(shaderNameByPid, b.shaders);
+      if (b.shaderInfo) Object.assign(shaderInfoByPid, b.shaderInfo);
       for (const t of texs) if (t.rgba && !texPool.has(String(t.pathID))) texPool.set(String(t.pathID), t);
     } catch (e) {}
   }
   const texCache = new Map();
-  const poolTex = (pid) => {
-    const k = String(pid);
+  const poolTex = (pid, lumAlpha) => {
+    const k = String(pid) + (lumAlpha ? '|L' : '');
     if (texCache.has(k)) return texCache.get(k);
-    const tx = texPool.has(k) ? mkTex(texPool.get(k)) : null;
+    const tx = texPool.has(String(pid)) ? mkTex(texPool.get(String(pid)), lumAlpha) : null;
     texCache.set(k, tx);
     return tx;
   };
@@ -381,13 +594,21 @@ function buildMaterialMap(T, depBundles) {
     if (texs.length === 1 && texs[0].rgba) onlyPid = String(texs[0].pathID);
     for (const m of mats) {
       if (map.has(String(m.pathID))) continue;
+      // ブレンドはバンドル跨ぎ統合した shaderInfo で再解決する(シェーダが別バンドルにあると
+      // parseMaterialBundle 単体では RenderState を見られず 'add' 既定に誤落下する＝leviathan等が
+      // alpha→additive で白飛びしていた)。統合情報で解けたらそれを優先。
+      const blend = MESH_MOD.resolveBlend(m, shaderInfoByPid) || m.blend || (m.dstBlend === 10 ? 'alpha' : 'add');
+      const lumAlpha = blend !== 'add';
       let tx = null;
-      if (m.mainTexPathID) tx = poolTex(m.mainTexPathID);
-      if (!tx && onlyPid) tx = poolTex(onlyPid);
-      const blend = m.blend || (m.dstBlend === 10 ? 'alpha' : 'add');
+      if (m.mainTexPathID) tx = poolTex(m.mainTexPathID, lumAlpha);
+      if (!tx && onlyPid) tx = poolTex(onlyPid, lumAlpha);
       const shaderName = m.shaderName || (m.shaderPathID ? shaderNameByPid[m.shaderPathID] || null : null);
-      const proc = tx ? null : { shader: shaderName, vec1: m.vec1 || {} };
-      map.set(String(m.pathID), { tex: tx || null, blend, solid: !m.mainTexPathID, tint: m.color || null, proc });
+      // proc に材質の全 prop(色/float/vec1)を載せ、実行時に実ゲームGLSLの uniform を各オーラ値で上書きできるようにする。
+      // テクスチャ付き材質でも proc(shader名/色)を持たせる: シェーダが baked game shader(サンプラ有=テクスチャを
+      // 実ゲーム通りに matcap/HSV 合成、サンプラ無=プロシージャルでテクスチャ無視)なら実GLSLで描くため。
+      // vfx-aura 側で resolveGameKey が解ければ game shader(tex を sampler にバインド)、解けなければ tex 素通し。
+      const proc = { shader: shaderName, vec1: m.vec1 || {}, colors: m.allColors || {}, floats: m.allFloats || {} };
+      map.set(String(m.pathID), { tex: tx || null, blend, solid: !m.mainTexPathID, tint: m.color || null, proc, cutoff: m.cutoff != null ? m.cutoff : null });
     }
   }
   return map;

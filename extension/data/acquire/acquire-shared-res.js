@@ -5,7 +5,13 @@ import { ensureIndexes } from '../index-store.js';
 import { runBulkDownload } from './acquire-bulk.js';
 const sharedIndex = async () => (await ensureIndexes()).assets.sharedIndex;
 const vfxAllRels = async () => (await ensureIndexes()).assets.vfxAllRels || [];
-const sharedResourceRels = async () => [...new Set([...(await sharedIndex()), ...(await vfxAllRels()), ...(await collectOrphanEventstillRels())])];
+const skillFxSharedRels = async () => (await ensureIndexes()).assets.skillFxSharedRels || [];
+const skillFxUniqueRels = async () => (await ensureIndexes()).assets.skillFxUniqueRels || [];
+const miniGameRels = async () => (await ensureIndexes()).assets.miniGameRels || [];
+const sharedResourceRels = async () => {
+  const unique = new Set(await skillFxUniqueRels());
+  return [...new Set([...(await sharedIndex()), ...(await vfxAllRels()), ...(await skillFxSharedRels()), ...(await miniGameRels()), ...(await collectOrphanEventstillRels())])].filter((rel) => !unique.has(rel));
+};
 
 async function collectOrphanEventstillRels() {
   const a = (await ensureIndexes()).assets;

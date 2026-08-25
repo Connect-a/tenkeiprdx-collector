@@ -1,6 +1,7 @@
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { texCodec } from '../../unity/texcodec.js';
 import { DIRS } from '../../core/constants.js';
+import { assetStore } from '../../data/asset-store.js';
 import { errText } from '../../core/messages.js';
 import { utilHelpers } from '../../core/util.js';
 import { voiceOut } from './voice-out.js';
@@ -59,25 +60,8 @@ export function createHomePanel(deps) {
     }
   }
 
-  function ddsToCanvas(bytes) {
-    if (!bytes || bytes.length < 128) return null;
-    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    if (dv.getUint32(0, true) !== 0x20534444) return null;
-    const height = dv.getUint32(12, true),
-      width = dv.getUint32(16, true);
-    const fourCC = String.fromCharCode(bytes[84], bytes[85], bytes[86], bytes[87]);
-    const data = bytes.subarray(128);
-    let rgba = null;
-    try {
-      if (fourCC === 'DXT5') rgba = texCodec.decodeDxt5Rgba(data, width, height);
-      else if (fourCC === 'DXT1') rgba = texCodec.decodeDXT1(data, width, height);
-    } catch (e) {}
-    if (!rgba || !width || !height) return null;
-    if (texCodec.flipRgbaY) rgba = texCodec.flipRgbaY(rgba, width, height);
-    return texCodec.renderRgbaToCanvas(rgba, width, height);
-  }
   function homeAssetToCanvas(sub, bytes) {
-    return /\.dds$/i.test(sub || '') ? ddsToCanvas(bytes) : illustBundleToCanvas(bytes);
+    return /\.dds$/i.test(sub || '') ? texCodec.decodeDdsCanvas(bytes) : illustBundleToCanvas(bytes);
   }
 
   async function renderHome() {
@@ -128,16 +112,71 @@ export function createHomePanel(deps) {
     const homeGot = SECTION_ORDER.reduce((n, section) => n + Math.min(_home.got[section].size, (data[section] || []).length), 0);
     getById('rostercount').textContent = `${homeGot} / ${homeTotal}`;
     if (homeGot < homeTotal) grid.appendChild(homeDownloadBar(data, homeTotal - homeGot));
-    grid.appendChild(el('div', 'homenav', SECTION_ORDER.map((section) => el('button', { class: 'homenavlink', text: `${HOME_SECTIONS[section].label} ${(data[section] || []).length}`, on: { click: () => goToSection(section) } }))));
+    grid.appendChild(
+      el(
+        'div',
+        'homenav',
+        SECTION_ORDER.map((section) => el('button', { class: 'homenavlink', text: `${HOME_SECTIONS[section].label} ${(data[section] || []).length}`, on: { click: () => goToSection(section) } })),
+      ),
+    );
 
     for (const section of SECTION_ORDER) {
       const list = data[section] || [];
       if (isBgm(section)) homeSectionBgm(grid, section, list, dl[section]);
       else homeSection(grid, section, list, dl[section]);
       if (section === 'comic' && !data.staticsBase) {
-        grid.appendChild(el('div', { class: 'note dim', style: { margin: '-6px 0 14px', wordBreak: 'break-all' }, text: '※1コマ漫画の配信元が分かりませんでした。ゲームと接続してからやり直してください。' }));
+        grid.appendChild(
+          el('div', { class: 'note dim', style: { margin: '-6px 0 14px', wordBreak: 'break-all' }, text: '※1コマ漫画の配信元が分かりませんでした。ゲームと接続してからやり直してください。' }),
+        );
       }
     }
+    await systemVoiceSection(grid);
+  }
+
+  async function systemVoiceSection(host) {
+    let rel = null;
+    try {
+      rel = (await collectionRepository.ensureIndexes()).assets.systemVoiceRel || null;
+    } catch (e) {}
+    let clips = [];
+    let bytes = null;
+    if (rel) {
+      try {
+        bytes = await assetStore.readAsset(DIRS.shared, rel);
+        if (bytes) clips = await unityDecode.extractVoiceClips(bytes);
+      } catch (e) {}
+    }
+    if (!clips.length) {
+      const why = !rel
+        ? '索引にシステムボイスがありません。「データ管理 → 索引を作り直す」を実行してください。'
+        : !bytes
+          ? '未取得です。サイドバーの「共有リソース」から取得できます。'
+          : '取得済みですが音声を取り出せませんでした。';
+      host.appendChild(el('div', 'rgroup', 'システムボイス'));
+      host.appendChild(el('div', { class: 'note dim', style: { margin: '0 0 14px' }, text: why }));
+      return;
+    }
+    host.appendChild(el('div', 'rgroup', `システムボイス（${clips.length}）`));
+    const no = (nm) => {
+      const m = String(nm).match(/(\d+)\s*$/);
+      return m ? parseInt(m[1], 10) : 0;
+    };
+    clips.sort((a, b) => no(a.name) - no(b.name) || (a.name > b.name ? 1 : -1));
+    const grid = el('div', 'voicegrid');
+    const cards = [];
+    for (const c of clips) {
+      const card = el('div', { class: 'voicecard', html: '<div class="voicecard-name"></div><div class="voicecard-id"></div>' });
+      card.querySelector('.voicecard-name').textContent = `No.${String(no(c.name)).padStart(3, '0')}`;
+      card.querySelector('.voicecard-id').textContent = c.name;
+      card.addEventListener('click', async () => {
+        cards.forEach((x) => x.classList.remove('playing'));
+        card.classList.add('playing');
+        voiceOut.play(await cachedAudioUrl(_homeVoiceUrls, 'sys_' + c.name, async () => c));
+      });
+      cards.push(card);
+      grid.appendChild(card);
+    }
+    host.appendChild(grid);
   }
 
   function homeDownloadBar(data, missing) {
@@ -292,7 +331,11 @@ export function createHomePanel(deps) {
   function homeBgmBtn(e, m) {
     const active = bgm.isCurrent(e.id);
     const icon = el('span', 'hbicon');
-    const btn = el('button', { class: 'homebgmbtn' + (active ? ' active' : '') + (m && m.audio ? '' : ' un') }, [icon, el('span', 'hbnote', bgm.glyph(active)), el('span', 'hbname', nameFix(e.name || e.id))]);
+    const btn = el('button', { class: 'homebgmbtn' + (active ? ' active' : '') + (m && m.audio ? '' : ' un') }, [
+      icon,
+      el('span', 'hbnote', bgm.glyph(active)),
+      el('span', 'hbname', nameFix(e.name || e.id)),
+    ]);
     if (m && m.icon) paintIcon(icon, m.icon, 'hbiconimg');
     if (m && m.audio) btn.addEventListener('click', () => bgm.toggle(e, m));
     else if (!e.audioResolvable) btn.title = 'ゲーム側にデータが見つかりません';
@@ -302,7 +345,13 @@ export function createHomePanel(deps) {
   function homeSectionBgm(grid, section, list, dlMap) {
     sectionHeader(grid, section);
     if (list.length && dlMap.size === 0) {
-      grid.appendChild(el('div', { class: 'note dim', style: { margin: '0 0 8px' }, text: '※BGMが未取得です。「ホームのリソースダウンロード」または共有リソースDLで取得してください（取得後クリックで再生。ストーリー再生と同じ音源を共有）。' }));
+      grid.appendChild(
+        el('div', {
+          class: 'note dim',
+          style: { margin: '0 0 8px' },
+          text: '※BGMが未取得です。「ホームのリソースダウンロード」または共有リソースDLで取得してください（取得後クリックで再生。ストーリー再生と同じ音源を共有）。',
+        }),
+      );
     }
     fillSection(grid, section, list, 'homebgmgrid', (e) => homeBgmBtn(e, dlMap.get(String(e.id))));
   }

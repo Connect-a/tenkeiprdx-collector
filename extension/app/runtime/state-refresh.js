@@ -10,9 +10,14 @@ import { ensureUserState } from './user-state-guard.js';
 
 let _scan = null;
 let _scanPending = false;
+let _scanAt = 0;
 
 export function pendingScan() {
   return _scan;
+}
+
+export function lastScanAt() {
+  return _scanAt;
 }
 
 export function beginScan() {
@@ -40,7 +45,10 @@ function startScan() {
   const startedAt = Date.now();
   _scan = collectionRepository
     .scanFolder()
-    .then((scanned) => mergeScanned(scanned, startedAt))
+    .then((scanned) => {
+      mergeScanned(scanned, startedAt);
+      _scanAt = Date.now();
+    })
     .catch((e) => {
       console.error('[tp] 状態更新に失敗', e);
     })
@@ -78,6 +86,7 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
         } catch (e) {}
         if (cached) {
           playerState.dl = cached;
+          _scanAt = 0;
           _scanPending = true;
         } else startScan().then(afterScan);
       } else {
@@ -85,6 +94,7 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
       }
     } else {
       playerState.dl = [];
+      _scanAt = 0;
     }
   }
 
