@@ -3,16 +3,23 @@ import { fileStore } from '../../core/fsdir.js';
 import { DIRS } from '../../core/constants.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
+import { texCodec } from '../../unity/texcodec.js';
 import { spineWeb } from '../../engine/story/spine-web.js';
 import { errText } from '../../core/messages.js';
 import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, groupHeading, downloadBar, errorRow } from '../ui/panel-shell.js';
 import { bundleName } from '../../core/paths.js';
 import { el } from '../../core/dom.js';
 
+const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha', 'gachaticket']);
+const isGacha = (e) => e.source === 'gacha' || e.source === 'gachaticket';
 const SECTIONS = [
   ['動画', (e) => !!e.file],
-  ['ストーリーキャラ', (e) => !e.file && e.source !== 'ui' && e.source !== 'mission'],
+  ['ガチャ', (e) => e.source === 'gacha'],
+  ['ガチャチケット', (e) => e.source === 'gachaticket'],
+  ['ストーリーキャラ', (e) => !e.file && !STORY_EXCLUDE.has(e.source)],
   ['アイコン', (e) => !e.file && e.source === 'ui'],
+  ['UIパネル', (e) => e.source === 'uipanel'],
+  ['ワールドマップ', (e) => e.source === 'worldmap'],
   ['パネルミッション', (e) => e.source === 'mission'],
 ];
 
@@ -34,7 +41,7 @@ export function createOther2dPanel(deps) {
   }
 
   let _haveFiles = new Set();
-  const ready = (e) => (e.file ? _haveFiles.has(e.file) : e.ids.some((s) => _have.has(s)));
+  const ready = (e) => (e.file ? _haveFiles.has(e.file) : e.parts ? e.parts.some((p) => (p.file ? _haveFiles.has(p.file) : _have.has(p.assetId))) : e.ids.some((s) => _have.has(s)));
   const readBundle = (rel) => assetStore.readAsset(DIRS.shared, rel);
 
   function dlBar(missing, count) {
@@ -50,6 +57,50 @@ export function createOther2dPanel(deps) {
         }
       },
     });
+  }
+
+  async function paintGacha(host, e) {
+    const grid = el('div', 'spine-grid stand one');
+    host.appendChild(grid);
+    let shown = 0;
+    for (const part of e.parts || []) {
+      const have = part.bgRel ? _have.has(part.assetId) : _haveFiles.has(part.file);
+      if (!have) continue;
+      shown++;
+      const cell = el('div', 'spine-cell', el('div', 'spine-cell-cap', part.label));
+      const node = part.bgRel ? await bundleCanvas(part) : await staticNode(part);
+      cell.appendChild(node || el('div', 'note', '取得済み（画像として表示できない種類です）'));
+      grid.appendChild(cell);
+    }
+    if (!shown) grid.appendChild(el('div', 'note', 'まだ取得していません（サイドバーの「ガチャ」から取得できます）。'));
+  }
+
+  async function bundleCanvas(part) {
+    try {
+      const bytes = await readBundle(part.bgRel);
+      const canvas = bytes && MESH_MOD && MESH_MOD.decodeTextureCanvas ? MESH_MOD.decodeTextureCanvas(bytes) : null;
+      if (canvas) canvas.className = 'statimage';
+      return canvas;
+    } catch (er) {
+      return null;
+    }
+  }
+
+  async function staticNode(part) {
+    const f = await fileStore.readUnder(await fileStore.getDir(DIRS.shared, { create: false }), part.file);
+    if (!f) return null;
+    if (part.video) {
+      const url = URL.createObjectURL(f);
+      _videoUrls.push(url);
+      return el('video', { class: 'statvideo', src: url, controls: true, loop: true, playsInline: true });
+    }
+    try {
+      const canvas = texCodec.decodeDdsCanvas(new Uint8Array(await f.arrayBuffer()));
+      if (canvas) canvas.className = 'statimage';
+      return canvas;
+    } catch (er) {
+      return null;
+    }
   }
 
   async function paintSpine(grid, id) {
@@ -119,15 +170,16 @@ export function createOther2dPanel(deps) {
     if (!host) return;
     disposePlayers();
     host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    host.innerHTML = spinnerHtml('立ち絵を読み込み中…');
+    host.innerHTML = spinnerHtml('読み込み中…');
     const rt = await visualRenderer.prepareSpineRuntime(host);
     if (!rt || !rt.ok) {
       host.innerHTML = '<div class="note" style="padding:8px">Spineランタイムを初期化できませんでした。</div>';
       return;
     }
     host.innerHTML = '';
-    host.appendChild(viewHeader(`#${e.id}${e.name ? '　' + nameFix(e.name) : ''}`, _ordered, e, openEntry));
+    host.appendChild(viewHeader(isGacha(e) ? nameFix(e.name) : `#${e.id}${e.name ? '　' + nameFix(e.name) : ''}`, _ordered, e, openEntry));
     if (e.file) return paintVideo(host, e);
+    if (e.parts) return paintGacha(host, e);
     await paintIcons(host, e.iconIds || []);
     const grid = el('div', 'spine-grid stand one');
     host.appendChild(grid);
@@ -135,7 +187,7 @@ export function createOther2dPanel(deps) {
     for (const id of e.spineIds || []) await paintSpine(grid, id);
   }
 
-  const card = (e) => entryCard({ name: e.name ? nameFix(e.name) : '#' + e.id, note: e.name ? '#' + e.id : '', ready: ready(e), onClick: () => openEntry(e) });
+  const card = (e) => entryCard({ name: e.name ? nameFix(e.name) : '#' + e.id, note: e.note != null ? e.note : e.name ? '#' + e.id : '', ready: ready(e), onClick: () => openEntry(e) });
 
   async function render() {
     const grid = getById('rosterGrid');
@@ -154,13 +206,13 @@ export function createOther2dPanel(deps) {
     _list = st.list;
     _have = st.have;
     _haveFiles = st.haveFiles || new Set();
-    getById('rostercount').textContent = `${st.ready} / ${_list.length}`;
+    getById('rostercount').textContent = `${st.ready} / ${_list.filter((e) => !isGacha(e)).length}`;
 
     grid.innerHTML = '';
-    const missing = _list.filter((e) => !ready(e)).flatMap((e) => e.refs.filter((r) => !_have.has(r.id)));
-    const missingFiles = _list.filter((e) => e.file && !_haveFiles.has(e.file)).length;
+    const missing = _list.filter((e) => !isGacha(e) && !ready(e)).flatMap((e) => e.refs.filter((r) => !_have.has(r.id)));
+    const missingFiles = _list.filter((e) => !isGacha(e) && e.file && !_haveFiles.has(e.file)).length;
     if (missing.length || missingFiles) grid.appendChild(dlBar(missing, missing.length + missingFiles));
-    const { listCol } = splitLayout(grid, 'other2dView', 'カードを選ぶとここに立ち絵表示');
+    const { listCol } = splitLayout(grid, 'other2dView', 'カードを選ぶとここに表示');
     _ordered = SECTIONS.flatMap(([, pick]) => _list.filter(pick));
     for (const [title, pick] of SECTIONS) {
       const items = _list.filter(pick);
@@ -172,7 +224,7 @@ export function createOther2dPanel(deps) {
 
   function reset() {
     disposePlayers();
-    clearView('other2dView', 'カードを選ぶとここに立ち絵表示');
+    clearView('other2dView', 'カードを選ぶとここに表示');
   }
 
   return { render, reset };

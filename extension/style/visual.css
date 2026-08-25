@@ -195,7 +195,7 @@
 }
 
 .spine-visbtn {
-  align-self: flex-start;
+  align-self: flex-end;
   margin-top: 4px;
 }
 
@@ -269,6 +269,116 @@
   min-width: 0;
 }
 
+.m3d-section {
+  border: 1px solid #2a2836;
+  border-radius: 6px;
+  margin-top: 8px;
+  background: #17151f;
+}
+.m3d-section > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #cdcbe0;
+  user-select: none;
+}
+.m3d-section[open] > summary {
+  border-bottom: 1px solid #2a2836;
+}
+.m3d-section > #weapon3dHost,
+.m3d-section > #skillfxHost {
+  padding: 8px;
+}
+.skillfx-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #cdcbe0;
+  cursor: pointer;
+  margin-bottom: 8px;
+  user-select: none;
+}
+.skillfx-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+@media (max-width: 700px) {
+  .skillfx-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.skillfx-cell {
+  border: 1px solid #2a2836;
+  border-radius: 6px;
+  padding: 6px;
+  min-width: 0;
+}
+.skillfx-cap {
+  font-size: 12px;
+  color: #cdcbe0;
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.skillfx-btnrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.skillfx-spin {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #3a3560;
+  border-top-color: #b9a4ff;
+  border-radius: 50%;
+  animation: tpspin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+.skillfx-stage {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+  background: #0e0c16;
+  border-radius: 4px;
+  touch-action: none;
+}
+.skillfx-stage:fullscreen {
+  height: 100vh;
+  background: #0e0c16;
+}
+.skillfx-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  transform-origin: center center;
+}
+.skillfx-field {
+  margin-bottom: 10px;
+}
+.skillfx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skillfx-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid #2a2836;
+  border-radius: 6px;
+}
+.skillfx-row .skillfx-cap {
+  margin-bottom: 0;
+  flex: 1 1 auto;
+}
+
 @media (max-width: 900px) {
   .otherlayout {
     flex-direction: column;
@@ -285,4 +395,13 @@
   .spine-grid.stand {
     grid-template-columns: 1fr;
   }
+}
+
+.m3d-partsbtn {
+  display: block;
+  margin: 6px 0 0 auto;
+}
+
+.m3d-partspanel {
+  max-height: 320px;
 }

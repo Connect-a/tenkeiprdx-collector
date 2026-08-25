@@ -3,6 +3,7 @@ import { assetStore } from './asset-store.js';
 import { PLACE, subFor } from '../core/placement.js';
 import { bundleName } from '../core/paths.js';
 import { staticsList } from './statics.js';
+import { gachaFileList } from './gacha.js';
 import { buildIndexes as BUILD_MOD } from './build-indexes.js';
 import { localInventory } from './inventory.js';
 import { ensureIndexes } from './index-store.js';
@@ -291,7 +292,10 @@ const BUILTIN_LABEL = {
   skilliconsprites: 'スキルアイコン',
   thingsiconsprites: 'アイテムアイコン',
 };
-const builtinName = (rel) => bundleName(rel).replace(/^builtin\([^)]*\)(\([^)]*\))?_assets_/, '').replace(/^builtin_assets_/, '');
+const builtinName = (rel) =>
+  bundleName(rel)
+    .replace(/^builtin\([^)]*\)(\([^)]*\))?_assets_/, '')
+    .replace(/^builtin_assets_/, '');
 
 function builtinEntries(x) {
   const out = [];
@@ -300,6 +304,49 @@ function builtinEntries(x) {
     if (!/sprites$/.test(key)) continue;
     const ref = { rel, id: assetStore.idOf(rel) };
     out.push({ id: 'ui_' + key, name: BUILTIN_LABEL[key] || key, source: 'ui', spine: null, spinelight: null, icon: rel, refs: [ref], ids: [ref.id], spineIds: [], iconIds: [ref.id] });
+  }
+  return out.sort((a, b) => (a.name > b.name ? 1 : -1));
+}
+
+const WORLDMAP_COUNTRY = {
+  peixe: 'ペイシェ',
+  pexie: 'ペイシェ',
+  generous: 'ジェネラスト',
+  generust: 'ジェネラスト',
+  hume: 'ヒューム',
+  quanty: 'クォンツィ',
+  qaunty: 'クォンツィ',
+  jahara: 'ジャハラ',
+  jahra: 'ジャハラ',
+  teisetu: 'テーセツ',
+  teisetsu: 'テーセツ',
+  linya: 'リーニャ',
+};
+
+function worldMapEntries(x) {
+  const out = [];
+  for (const rel of x.assets.worldMapRels || []) {
+    const m = bundleName(rel).match(/^worldmap_(\d+)_([a-z0-9]+)\.png$/i);
+    if (!m) continue;
+    const raw = m[2].toLowerCase();
+    const country = WORLDMAP_COUNTRY[raw] || WORLDMAP_COUNTRY[raw.replace(/\d+$/, '')] || null;
+    const suffix = raw.match(/(\d+)$/);
+    const name = (country || m[2]) + (suffix ? '（' + suffix[1] + '）' : '');
+    const ref = { rel, id: assetStore.idOf(rel) };
+    out.push({ id: 'worldmap_' + m[1], name: 'ワールドマップ ' + name, source: 'worldmap', spine: null, spinelight: null, icon: rel, refs: [ref], ids: [ref.id], spineIds: [], iconIds: [ref.id] });
+  }
+  return out.sort((a, b) => (a.id > b.id ? 1 : -1));
+}
+
+const UI_PANEL_KEEP = new Set(['miningpreparationpanel']);
+
+function uiPanelEntries(x) {
+  const out = [];
+  for (const rel of x.assets.uiPanelRels || []) {
+    const key = bundleName(rel).replace(/^uicomponentspartsassets_assets_/, '');
+    if (!UI_PANEL_KEEP.has(key)) continue;
+    const ref = { rel, id: assetStore.idOf(rel) };
+    out.push({ id: 'uipanel_' + key, name: key, source: 'uipanel', spine: rel, spinelight: null, icon: rel, refs: [ref], ids: [ref.id], spineIds: [ref.id], iconIds: [ref.id] });
   }
   return out.sort((a, b) => (a.name > b.name ? 1 : -1));
 }
@@ -340,6 +387,72 @@ function missionEntries(x) {
   return out;
 }
 
+async function gachaEntries(x) {
+  const gachaName = x.master.gachaNames || {};
+  const label = (id) => (gachaName[id] ? `${id}　${gachaName[id]}` : String(id));
+  const bgByGacha = new Map();
+  for (const rel of x.assets.gachaBgRels || []) {
+    const m = String(rel).match(/bg_gacha_(\d+)_/);
+    if (m) bgByGacha.set(m[1], rel);
+  }
+  const files = await gachaFileList();
+  const byId = new Map();
+  const pick = (id, source, name) => {
+    let e = byId.get(id);
+    if (!e) byId.set(id, (e = { id, name, note: '', source, refs: [], ids: [], spineIds: [], iconIds: [], spine: null, spinelight: null, icon: null, parts: [] }));
+    return e;
+  };
+  for (const [id, rel] of bgByGacha) {
+    const e = pick('gacha_' + id, 'gacha', label(id));
+    const ref = { rel, id: assetStore.idOf(rel) };
+    e.refs.push(ref);
+    e.ids.push(ref.id);
+    e.parts.push({ label: '背景', bgRel: rel, assetId: ref.id });
+  }
+  for (const f of files) {
+    if (f.kindKey === 'ticket') continue;
+    const e = pick('gacha_' + f.gachaId, 'gacha', label(f.gachaId));
+    e.parts.push({ label: f.kindLabel, file: f.path, video: f.kindKey === 'video' });
+  }
+  const out = [...byId.values()].sort((a, b) => Number(a.id.slice(6)) - Number(b.id.slice(6)));
+  const extra = x.assets.gachaExtraRels || [];
+  if (extra.length) {
+    const refs = extra.map((rel) => ({ rel, id: assetStore.idOf(rel) }));
+    out.unshift({
+      id: 'gacha_common',
+      name: `ガチャ共通素材（${extra.length}）`,
+      note: '',
+      source: 'gacha',
+      refs,
+      ids: refs.map((r) => r.id),
+      spineIds: [],
+      iconIds: [],
+      spine: null,
+      spinelight: null,
+      icon: null,
+      parts: refs.map((r) => ({ label: bundleName(r.rel), bgRel: r.rel, assetId: r.id })),
+    });
+  }
+  for (const f of files) {
+    if (f.kindKey !== 'ticket') continue;
+    out.push({
+      id: 'gachaticket_' + f.gachaId,
+      name: `${f.gachaId}　${f.name}`,
+      note: '',
+      source: 'gachaticket',
+      refs: [],
+      ids: [],
+      spineIds: [],
+      iconIds: [],
+      spine: null,
+      spinelight: null,
+      icon: null,
+      parts: [{ label: f.kindLabel, file: f.path }],
+    });
+  }
+  return out;
+}
+
 export async function other2dList() {
   const x = await ensureIndexes();
   const ai = x.assets.assetIndex || {};
@@ -373,8 +486,20 @@ export async function other2dList() {
       iconIds: iconRefs.map((r) => r.id),
     });
   }
-  const statics = (await staticsList()).map((s) => ({ id: s.key, name: s.name, source: s.kind, spine: null, spinelight: null, icon: null, refs: [], ids: [], spineIds: [], iconIds: [], file: s.path }));
-  return [...out.sort(byIdAsc), ...builtinEntries(x), ...missionEntries(x), ...statics];
+  const statics = (await staticsList()).map((s) => ({
+    id: s.key,
+    name: s.name,
+    source: s.kind,
+    spine: null,
+    spinelight: null,
+    icon: null,
+    refs: [],
+    ids: [],
+    spineIds: [],
+    iconIds: [],
+    file: s.path,
+  }));
+  return [...out.sort(byIdAsc), ...builtinEntries(x), ...uiPanelEntries(x), ...worldMapEntries(x), ...missionEntries(x), ...statics, ...(await gachaEntries(x))];
 }
 
 function other3dCoreRefs(entry) {
@@ -412,7 +537,10 @@ export async function other3dStatus(listIn) {
   const list = listIn || (await otherList());
   const refs = new Map();
   for (const e of list) for (const rel of other3dRefs(e)) refs.set(assetStore.idOf(rel), rel);
-  const have = await assetStore.presentIds(DIRS.other, [...refs.values()].map((rel) => ({ rel, place: PLACE.flat })));
+  const have = await assetStore.presentIds(
+    DIRS.other,
+    [...refs.values()].map((rel) => ({ rel, place: PLACE.flat })),
+  );
   return {
     list,
     have,
@@ -428,11 +556,15 @@ export async function monsterStatus(listIn) {
   const list = listIn || (await monsterList());
   const ids = new Set();
   const rels = [];
-  for (const e of list) for (const a of e.assets) {
-    ids.add(a.id);
-    rels.push(a);
-  }
-  const have = await assetStore.presentIds(DIRS.monster, rels.map((a) => ({ rel: a.rel, place: PLACE.owned(a) })));
+  for (const e of list)
+    for (const a of e.assets) {
+      ids.add(a.id);
+      rels.push(a);
+    }
+  const have = await assetStore.presentIds(
+    DIRS.monster,
+    rels.map((a) => ({ rel: a.rel, place: PLACE.owned(a) })),
+  );
   const missing = new Map();
   for (const e of list) for (const a of e.assets) if (!have.has(a.id)) missing.set(a.id, a);
   const byPath = new Map();
@@ -443,18 +575,25 @@ export async function monsterStatus(listIn) {
   return { list, have, monsters: list.length, ready: list.filter((e) => monsterReady(e, have)).length, total: ids.size, refs: [...byPath.values()], missing: [...missing.values()] };
 }
 
+export const isGachaEntry = (e) => e.source === 'gacha' || e.source === 'gachaticket';
+
 export async function other2dStatus(listIn) {
   const list = listIn || (await other2dList());
-  const ids = list.flatMap((e) => e.ids);
-  const have = await assetStore.presentIds(DIRS.shared, list.flatMap((e) => e.refs.map((r) => r.rel)));
-  const files = list.map((e) => e.file).filter(Boolean);
+  const core = list.filter((e) => !isGachaEntry(e));
+  const have = await assetStore.presentIds(
+    DIRS.shared,
+    list.flatMap((e) => e.refs.map((r) => r.rel)),
+  );
+  const files = [...new Set(list.flatMap((e) => [e.file, ...(e.parts || []).map((p) => p.file)]).filter(Boolean))];
   const haveFiles = files.length ? await localInventory.presentFiles(DIRS.shared, files) : new Set();
   const missing = [];
-  for (const e of list) for (const r of e.refs) if (!have.has(r.id)) missing.push(r);
+  for (const e of core) for (const r of e.refs) if (!have.has(r.id)) missing.push(r);
   const done = (e) => (e.file ? haveFiles.has(e.file) : e.ids.length > 0 && e.ids.every((s) => have.has(s)));
-  const refs = [...new Map(list.flatMap((e) => e.refs).map((r) => [r.id, r])).values()];
+  const refs = [...new Map(core.flatMap((e) => e.refs).map((r) => [r.id, r])).values()];
   const unknown = (await staticsList()).filter((s) => !s.url && !haveFiles.has(s.path)).length;
-  return { list, have, haveFiles, total: new Set(ids).size + files.length, unknown, ready: list.filter(done).length, refs, missing };
+  const coreIds = new Set(core.flatMap((e) => e.ids));
+  const coreFiles = core.map((e) => e.file).filter(Boolean);
+  return { list, have, haveFiles, total: coreIds.size + coreFiles.length, unknown, ready: core.filter(done).length, refs, missing };
 }
 
 const ITEM_CAT_LABEL = { item: 'アイテム', weapon: '武器', armor: '防具', grimoire: '教典', stone: '石', equipweapon: '装備武器', aura: 'オーラ', other: 'その他' };

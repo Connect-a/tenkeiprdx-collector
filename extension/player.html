@@ -64,7 +64,6 @@
       <a id="ghIssue" class="hdlink" href="#" target="_blank" rel="noopener" style="display: none">障害報告（GitHub）<span class="ext">↗</span></a>
     </header>
 
-
     <div class="layout">
       <aside class="sidebar">
         <div class="connbar">
@@ -166,6 +165,7 @@
               <button class="rf" data-roster-type="other">その他3D</button>
               <button class="rf" data-roster-type="item">アイテム</button>
               <button class="rf" data-roster-type="monster">モンスター</button>
+              <a class="rf rfviewer" href="viewer.html" target="_blank" rel="noopener" title="ビューワーを別タブで開きます。キャラを並べて動かせます">🎬 ビューワー</a>
             </div>
             <span class="rostercount" id="rostercount"></span>
           </div>
@@ -182,8 +182,27 @@
             <select id="rosterRank" class="rgsel">
               <option value="">ランクすべて</option>
             </select>
+            <span class="rgsel-lbl" id="rosterSortLbl">ソート</span>
+            <select id="rosterSort" class="rgsel" title="並び順">
+              <option value="name">名前順</option>
+              <option value="id">ID順</option>
+              <option value="b">バスト</option>
+              <option value="w">ウエスト</option>
+              <option value="h">ヒップ</option>
+            </select>
+            <label class="exmodelbl" id="rosterSortDescLabel" title="チェックで降順"><input type="checkbox" id="rosterSortDesc" /> 降順</label>
+            <label class="exmodelbl" id="exModeLabel" title="EXシナリオを1話ずつカードで探します"><input type="checkbox" id="exMode" /> EXシナリオ検索</label>
             <button class="btn sm primary rhright" id="sharedDl" title="物語の共通素材（背景/BGM/SE/フォント/演出）を _共有リソース/ へDL">共有リソースDL</button>
             <button class="btn sm bulkbtn" id="bulkOpen">一括ダウンロード（キャラ）</button>
+          </div>
+          <div class="rosterhead" id="exFilterRow" style="display: none">
+            <select id="rosterXpos" class="rgsel" title="EXシナリオの内容カテゴリで絞り込みます">
+              <option value="0">EXシナリオすべて</option>
+            </select>
+            <label class="exmodelbl" id="exFavLabel"><input type="checkbox" id="exFavOnly" /> お気に入りのみ</label>
+            <label class="exmodelbl" id="exCacheLabel" title="デコード済みの縮小画像を _キャッシュ/ に保存して次回から即表示します"
+              ><input type="checkbox" id="exCache" /> サムネをキャッシュする</label
+            >
           </div>
           <div id="bulkStatus" class="bulkstatus" style="display: none"></div>
           <pre id="sharedOut" class="statusout" style="display: none; margin: 0 0 8px"></pre>
@@ -228,7 +247,7 @@
                 <label><input type="checkbox" id="imageFlipY" checked />プレビュー上下反転</label>
                 <label><input type="checkbox" id="show3d" checked />3Dモデル表示</label>
                 <label><input type="checkbox" id="showSpine" checked />Spine表示</label>
-                <button class="btn xs" id="saveDecodedPack">デコード結果を保存（画像+ボイス）…</button>
+                <button class="btn xs" id="saveDecodedPack">デコード結果を保存（画像+ボイス）</button>
               </div>
               <div class="imgsplit">
                 <div class="imgsplit-left">
@@ -236,7 +255,14 @@
                 </div>
                 <div class="imgsplit-right">
                   <div id="model3dHost" class="model3dhost" style="display: none"></div>
-                  <div id="weapon3dHost" class="model3dhost" style="display: none"></div>
+                  <details id="dWeaponDeco" class="m3d-section" style="display: none">
+                    <summary>武器</summary>
+                    <div id="weapon3dHost" class="model3dhost"></div>
+                  </details>
+                  <details id="dSkillFx" class="m3d-section" style="display: none">
+                    <summary>スキルエフェクト<span class="model3d-warn">（バグあり）</span></summary>
+                    <div id="skillfxHost"></div>
+                  </details>
                   <div id="spineHost" class="spinehost" style="display: none"></div>
                 </div>
               </div>
@@ -270,7 +296,6 @@
                 <button class="btn xs" id="stageMax" style="margin-left: auto">⛶ 最大化</button>
               </div>
               <div class="stillpanel" id="stillPanel" style="display: none"></div>
-              <button class="btn stageexit" id="stageExit">⤢ 縮小</button>
             </section>
             <section id="voice" class="panel">
               <audio id="audio" class="voiceplayer" controls></audio>
@@ -363,7 +388,6 @@
             <summary class="note" id="bulkFailSummary">ボイス欠落ログ</summary>
             <div class="bulktablewrap"><div id="bulkFailList" class="bulkfaillist"></div></div>
           </details>
-
         </div>
       </div>
     </div>

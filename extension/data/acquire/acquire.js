@@ -9,6 +9,7 @@ import { userStateService } from '../user-state.js';
 import { utilHelpers } from '../../core/util.js';
 import { characterMeta } from '../character-meta.js';
 import { assetRefs } from '../asset-refs.js';
+import { buildIndexes } from '../build-indexes.js';
 import { ensureSharedSingletons } from './acquire-shared-res.js';
 import { CFG } from '../../config.js';
 import { fileNameOf } from '../../core/paths.js';
@@ -65,9 +66,9 @@ async function readSavedScenes(dir, episodes, { contents = true } = {}) {
     servedByEp = {},
     choiceGroupsByEp = {};
   if (!contents) return { sceneBytes, servedByEp, choiceGroupsByEp };
-  for (const ep of episodes) {
+  await pool(episodes, DL_CONC.decode, async (ep) => {
     const bytes = await fileStore.readBytesUnder(dir, `story/${ep.episodeId}/getDetails.bin`);
-    if (bytes) {
+    if (bytes && bytes.length) {
       const served = {};
       try {
         extractSceneUrls(bytes, served);
@@ -78,14 +79,14 @@ async function readSavedScenes(dir, episodes, { contents = true } = {}) {
         if (cg && Object.keys(cg).length) choiceGroupsByEp[ep.episodeId] = cg;
       } catch (e) {}
     } else servedByEp[ep.episodeId] = null;
-    for (const fn of await fileStore.listUnder(dir, `story/${ep.episodeId}`, { nonEmpty: true })) {
+    for (const fn of await fileStore.listUnder(dir, `story/${ep.episodeId}`)) {
       const m = fn.match(/^scene_(\d+)\.bin$/);
       if (m) {
         const b = await fileStore.readBytesUnder(dir, `story/${ep.episodeId}/${fn}`);
-        if (b) sceneBytes[m[1]] = b;
+        if (b && b.length && b[0] !== 0x7b) sceneBytes[m[1]] = b;
       }
     }
-  }
+  });
   return { sceneBytes, servedByEp, choiceGroupsByEp };
 }
 
@@ -118,6 +119,9 @@ async function planApiEpisodes(folderKey, opts) {
   return { apiType, episodes: eps, dir };
 }
 
+const SFW_RATING = 'normal';
+const SFW_EPISODE_IDS = new Set(['602600104', '602600105', '602600106', '602600201', '602600206']);
+
 function detailUrls(apiType, episodeId, subType) {
   if (apiType === 'Special') {
     const paid = `${CFG.apiBase}/api/Episodes/${episodeId}/getPaidEpisodeDetails`;
@@ -128,9 +132,10 @@ function detailUrls(apiType, episodeId, subType) {
 }
 
 async function apiFetchStory(dir, apiType, episodeId, subType, overwrite) {
+  const opts = SFW_EPISODE_IDS.has(String(episodeId)) ? { rating: SFW_RATING } : undefined;
   let b = null;
   for (const url of detailUrls(apiType, episodeId, subType)) {
-    b = await apiFetchBytes(url, 'POST');
+    b = await apiFetchBytes(url, 'POST', opts);
     if (b) break;
   }
   if (!b) return { ok: false, log: [] };
@@ -266,7 +271,7 @@ async function createAcquireContext(folderKey, meta0, opts) {
   const sess = dlSession.create({ overwrite });
   const baseUrl = await assetRoot();
   const grabAsset = async (targetDir, rel, place, label) => {
-    const spec = { base: baseUrl, label, place };
+    const spec = { base: baseUrl, label, place, fast: targetDir === dir };
     if (!download) return await assetStore.locate(targetDir, rel, place);
     const r = await sess.saveAsset(targetDir, rel, spec, '通信が不安定か、ゲーム側にデータが無い可能性があります');
     if (r.status === 'missing') missing.push(label || rel);
@@ -315,7 +320,19 @@ function planEpisodes(ctx, choiceGroupsByEp, gate, savedIds) {
   const orderedEpMetas = [];
   const work = [];
   for (const ep of ctx.meta0.episodes) {
-    const epMeta = { episodeId: ep.episodeId, order: ep.order, chapter: ep.chapter || '', label: ep.label, title: ep.title, gate: 'open', have: 'none', lineCount: 0, voiced: 0, scenes: [] };
+    const epMeta = {
+      episodeId: ep.episodeId,
+      order: ep.order,
+      chapter: ep.chapter || '',
+      label: ep.label,
+      title: ep.title,
+      xpos: ep.xpos || 0,
+      gate: 'open',
+      have: 'none',
+      lineCount: 0,
+      voiced: 0,
+      scenes: [],
+    };
     if (choiceGroupsByEp && choiceGroupsByEp[ep.episodeId]) epMeta.choiceGroups = choiceGroupsByEp[ep.episodeId];
     orderedEpMetas.push(epMeta);
     if (episodeLocked(ep, gate)) {
@@ -339,12 +356,9 @@ async function decodeEpisodeScenes(ctx, ep, epMeta, sceneBytes, voice) {
     seen.add(sid);
     let bin = sceneBytes[sid] || null;
     if (!bin && ctx.dist && ctx.distSet && ctx.distSet.has(sid)) {
-      let r = null;
-      try {
-        r = await fetchBytes(`${ctx.dist.binUrl}${ctx.dist.binUrl.includes('?') ? '&' : '?'}id=${encodeURIComponent(ctx.dist.email)}&scene=${sid}`);
-      } catch (e) {}
-      if (r && r.status === 'ok' && r.bytes) {
-        bin = r.bytes;
+      const got = await networkClient.distFetchBytes(`${ctx.dist.binUrl}${ctx.dist.binUrl.includes('?') ? '&' : '?'}id=${encodeURIComponent(ctx.dist.email)}&scene=${sid}`);
+      if (got) {
+        bin = got;
         try {
           await fileStore.writeUnder(ctx.dir, `story/${ep.episodeId}/scene_${sid}.bin`, bin);
         } catch (e) {}
@@ -602,6 +616,23 @@ function queueCardVisuals(ctx, meta, orderedEpMetas) {
   }
 }
 
+function queueSkillFx(ctx, meta) {
+  if (ctx.meta0.apiType !== 'Character') return;
+  const eff = buildIndexes.charSkillEffects(ctx.idx.master, ctx.idx.assets, ctx.folderKey);
+  const list = (eff.unique || []).filter((e) => e.vfxRel);
+  if (!list.length) return;
+  const out = (meta.skillFx = []);
+  for (const e of list) {
+    ctx.jobs.push(async () => {
+      if (ctx.sess.aborted) return;
+      const vfx = await ctx.grabOwn(e.vfxRel, PLACE.visual('skillfx'), `skillfx ${e.effect}`);
+      if (!vfx) return;
+      const se = e.seRel ? await ctx.grabOwn(e.seRel, PLACE.visual('skillfx/se'), `skillse ${e.effect}`) : null;
+      out.push({ effect: e.effect, skillId: e.skillId, skillName: e.skillName, vfx, se });
+    });
+  }
+}
+
 function queueCastSpines(ctx, routing) {
   routing.cast = {};
   routing.unresolvedCast = [];
@@ -695,7 +726,8 @@ async function findMissingScenes(ctx, work, servedByEp) {
   const out = [];
   for (const { ep } of work) {
     for (const sid of servedByEp[ep.episodeId] || []) {
-      if (!(await fileStore.exists(ctx.dir, `story/${ep.episodeId}/scene_${sid}.bin`))) out.push({ sceneId: String(sid), epId: String(ep.episodeId), epLabel: ep.label || '', epTitle: ep.title || '' });
+      if (!(await fileStore.exists(ctx.dir, `story/${ep.episodeId}/scene_${sid}.bin`)))
+        out.push({ sceneId: String(sid), epId: String(ep.episodeId), epLabel: ep.label || '', epTitle: ep.title || '' });
     }
   }
   return out;
@@ -707,7 +739,11 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
   if (!meta0) throw new Error('index に無いキー: ' + folderKey);
   const prog = utilHelpers.safeProgress(progress);
   const ctx = await createAcquireContext(folderKey, meta0, opts);
-  const { sceneBytes, servedByEp, choiceGroupsByEp } = await readSavedScenes(ctx.dir, meta0.episodes, { contents: ctx.decode });
+  if (ctx.download) prog('壊れた分を確認しています…', 0);
+  ctx.purged = ctx.download ? await fileStore.purgeEmpty(ctx.dir) : 0;
+  const savedScenes = await readSavedScenes(ctx.dir, meta0.episodes, { contents: ctx.decode });
+  const { servedByEp, choiceGroupsByEp } = savedScenes;
+  let sceneBytes = savedScenes.sceneBytes;
 
   const level = meta0.apiType === 'Character' ? ((await ownedLevels()).get(ctx.folderKey) ?? 0) : null;
   const gate = {
@@ -748,13 +784,15 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
       parsed++;
       prog(`解析中… ${parsed}/${work.length}`, 0.15 + 0.15 * (work.length ? parsed / work.length : 1));
     });
+    sceneBytes = null;
+    savedScenes.sceneBytes = null;
   } else {
     const byId = new Map(orderedEpMetas.map((m) => [String(m.episodeId), m]));
     for (const ep of ctx.meta0.episodes) {
       const epMeta = byId.get(String(ep.episodeId));
       if (!epMeta) continue;
       const ids = (ep.sceneBinIds || []).map(String);
-      const names = new Set(await fileStore.listUnder(ctx.dir, `story/${ep.episodeId}`, { nonEmpty: true }));
+      const names = new Set(await fileStore.listUnder(ctx.dir, `story/${ep.episodeId}`));
       epMeta.have = !ids[0] || !names.has(`scene_${ids[0]}.bin`) ? 'none' : ids.every((sid) => names.has(`scene_${sid}.bin`)) ? 'full' : 'partial';
     }
   }
@@ -771,6 +809,7 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
   }
 
   queueCardVisuals(ctx, meta, orderedEpMetas);
+  queueSkillFx(ctx, meta);
   if (ctx.download) {
     ctx.jobs.push(async () => {
       if (ctx.sess.aborted) return;
@@ -818,7 +857,7 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
   meta.visuals = characterMeta.buildVisuals(meta);
   const result = { folderKey: ctx.folderKey, meta, fails: ctx.fails, missing: ctx.missing, missingVoices: ctx.missingVoices, downloaded: ctx.sess.counters.got };
   if (!ctx.download) return result;
-  result.purged = await fileStore.purgeEmpty(ctx.dir);
+  result.purged = ctx.purged;
 
   const shortfall = routing.unresolved.length + routing.dlFailed.length;
   prog(

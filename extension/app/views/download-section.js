@@ -48,7 +48,12 @@ async function setPhantom(key, n) {
 const purgedText = (r) => (r && r.purged ? `・壊れた分を削除${r.purged}件` : '');
 const unresolvedText = (r) => (r && r.unresolved ? `・取り先が分からない分${r.unresolved}件（ゲームと接続して索引を作り直してください）` : '');
 const summary = (r) =>
-  `新規${r.got}件` + (r.skip != null ? `・既にあった分${r.skip}件` : '') + (r.missing ? `・データ無し${r.missing}件` : '') + (r.failed ? `・失敗${r.failed}件` : '') + unresolvedText(r) + purgedText(r);
+  `新規${r.got}件` +
+  (r.skip != null ? `・既にあった分${r.skip}件` : '') +
+  (r.missing ? `・データ無し${r.missing}件` : '') +
+  (r.failed ? `・失敗${r.failed}件` : '') +
+  unresolvedText(r) +
+  purgedText(r);
 
 const fromStatus = (st) => ({ have: (st.have ? st.have.size : 0) + (st.haveFiles ? st.haveFiles.size : 0), total: st.total || 0, unknown: st.unknown || 0 });
 
@@ -107,11 +112,31 @@ const JOBS = [
     status: async () => fromStatus(await collectionRepository.other2dStatus()),
   },
   {
+    key: 'gacha',
+    label: 'ガチャ',
+    hint: 'ガチャの演出動画・背景・バナー・前景・スタンプ・チケット。その他2Dで確認できます。',
+    run: (onProgress, opts) => assetAcquirer.runGachaDownload(onProgress, opts),
+    done: (r) =>
+      `新規${r.got}件・既にあった分${r.skip}件` +
+      (r.missing ? `・配信なし${r.missing}件` : '') +
+      (r.missList && r.missList.length ? (r.missList.length <= 20 ? `（${r.missList.join('・')}）` : '（内訳は _共有リソース/statics/_gacha_missing.json）') : '') +
+      (r.dead && r.dead.length ? `・${r.dead.join('と')}は配信なしと判断して打ち切り` : '') +
+      (r.failed ? `・失敗${r.failed}件` : ''),
+    status: () => assetAcquirer.gachaStatus(),
+  },
+  {
     key: 'monster',
     label: 'モンスター',
     hint: '図鑑の3Dモデル・立ち絵・アイコン',
     run: (onProgress, opts) => assetAcquirer.runMonsterDownload(onProgress, opts),
     status: async () => fromStatus(await collectionRepository.monsterStatus()),
+  },
+  {
+    key: 'battlefield',
+    label: 'バトルフィールド',
+    hint: '戦闘マップとボス戦の土台。ビューワーの地面に使います。1件10〜30MBあるので全部で1GBを超えます',
+    run: (onProgress, opts) => assetAcquirer.runBattleFieldDownload(onProgress, opts),
+    status: () => assetAcquirer.battleFieldStatus(),
   },
 ];
 

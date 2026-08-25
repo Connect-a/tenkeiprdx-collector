@@ -1,6 +1,7 @@
 import { collectionRepository } from '../../data/collection.js';
 import { episodeCounts, questSort } from '../../data/character-meta.js';
-import { SK } from '../../core/constants.js';
+import { SK, XPOS_CATEGORIES } from '../../core/constants.js';
+import { settings } from '../../core/settings.js';
 import { getById, el, append } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
 import { TYPE_LABEL, spinnerHtml, kanaKey } from '../ui/ui-format.js';
@@ -10,6 +11,7 @@ import { buildOnboard } from './onboarding-ui.js';
 import { getOtherPanel, getHomePanel, getItemPanel, getOther2dPanel, getMonsterPanel } from '../runtime/panel-state.js';
 import { applyPendingTarget } from './roster-view.js';
 import { hideRosterControls, groupHeading } from '../ui/panel-shell.js';
+import { renderExScenes, resetExScenes, setThumbCache } from './exscene-view.js';
 
 const GROUP_ORDER = ['リーニャ', 'テーセツ', 'ジャハラ', 'クォンツィ', 'ジェネラス', 'ペイシェ', 'ヒューム', 'アンノウン'];
 const RANK_ORDER = ['UR', 'S', 'A', 'B'];
@@ -79,10 +81,117 @@ function fillSelect({ selId, field, order, allLabel, current, onChange }) {
   if (sel.value !== current) onChange(sel.value);
 }
 
+const BWH_INDEX = { b: 0, w: 1, h: 2 };
+
+const PREF_KEYS = ['rosterOwn', 'rosterGroup', 'rosterRank', 'rosterSort', 'rosterSortAsc', 'rosterXpos', 'exMode', 'exFavOnly'];
+
+export function restoreRosterPrefs() {
+  for (const k of PREF_KEYS) playerState[k] = settings.get(k);
+  const search = getById('rosterSearch');
+  if (search) search.value = settings.get('rosterSearch') || '';
+  const own = getById('rosterOwn');
+  if (own) own.querySelectorAll('.rf').forEach((b) => b.classList.toggle('active', b.dataset.rosterOwn === playerState.rosterOwn));
+  setThumbCache(settings.get('exThumbCache'));
+}
+
+const remember = (name, value) => {
+  playerState[name] = value;
+  settings.set(name, value);
+};
+
+export function characterComparer(byName) {
+  const dir = playerState.rosterSortAsc ? 1 : -1;
+  const key = playerState.rosterSort;
+  if (key === 'id') return (a, b) => dir * (Number(a.folderKey) - Number(b.folderKey));
+  const i = BWH_INDEX[key];
+  if (i != null)
+    return (a, b) => {
+      const av = a.bwh ? a.bwh[i] : null;
+      const bv = b.bwh ? b.bwh[i] : null;
+      if (av == null && bv == null) return byName(a, b);
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return dir * (av - bv) || byName(a, b);
+    };
+  return (a, b) => dir * byName(a, b);
+}
+
+function buildExModeControls() {
+  const cb = getById('exMode');
+  const lbl = getById('exModeLabel');
+  const row = getById('exFilterRow');
+  const isChar = playerState.rosterKind === 'character';
+  if (lbl) lbl.style.display = isChar ? '' : 'none';
+  if (row) row.style.display = isChar && playerState.exMode ? '' : 'none';
+  if (!cb || cb.dataset.bound) return;
+  cb.dataset.bound = '1';
+  cb.checked = !!playerState.exMode;
+  const f0 = getById('exFavOnly');
+  if (f0) f0.checked = !!playerState.exFavOnly;
+  const c0 = getById('exCache');
+  if (c0) c0.checked = !!settings.get('exThumbCache');
+  cb.addEventListener('change', () => {
+    remember('exMode', cb.checked);
+    renderRoster();
+  });
+  const fav = getById('exFavOnly');
+  if (fav)
+    fav.addEventListener('change', () => {
+      remember('exFavOnly', fav.checked);
+      renderRoster();
+    });
+  const cache = getById('exCache');
+  if (cache)
+    cache.addEventListener('change', () => {
+      settings.set('exThumbCache', cache.checked);
+      setThumbCache(cache.checked);
+      renderRoster();
+    });
+}
+
+function buildSortControls() {
+  const sel = getById('rosterSort');
+  const descLbl = getById('rosterSortDescLabel');
+  const show = playerState.rosterKind === 'character' ? '' : 'none';
+  if (sel) sel.style.display = show;
+  if (descLbl) descLbl.style.display = show;
+  if (!sel || sel.dataset.bound) return;
+  sel.dataset.bound = '1';
+  sel.value = playerState.rosterSort;
+  const d0 = getById('rosterSortDesc');
+  if (d0) d0.checked = !playerState.rosterSortAsc;
+  sel.addEventListener('change', () => {
+    remember('rosterSort', sel.value);
+    renderRoster();
+  });
+  const desc = getById('rosterSortDesc');
+  if (desc)
+    desc.addEventListener('change', () => {
+      remember('rosterSortAsc', !desc.checked);
+      renderRoster();
+    });
+}
+
+function buildXposFilter() {
+  const sel = getById('rosterXpos');
+  if (!sel) return;
+  sel.style.display = playerState.rosterKind === 'character' ? '' : 'none';
+  if (sel.children.length > 1) return;
+  append(
+    sel,
+    XPOS_CATEGORIES.map(([bit, name]) => el('option', { value: String(bit), text: name })),
+  );
+  sel.value = String(playerState.rosterXpos || 0);
+  sel.addEventListener('change', () => {
+    remember('rosterXpos', Number(sel.value) || 0);
+    renderRoster();
+  });
+}
+
 function populateFilterSelects(folderMeta) {
   filterMeta = folderMeta || {};
-  fillSelect({ selId: 'rosterGroup', field: 'group', order: GROUP_ORDER, allLabel: 'グループすべて', current: playerState.rosterGroup, onChange: (v) => (playerState.rosterGroup = v) });
-  fillSelect({ selId: 'rosterRank', field: 'rank', order: RANK_ORDER, allLabel: 'ランクすべて', current: playerState.rosterRank, onChange: (v) => (playerState.rosterRank = v) });
+  fillSelect({ selId: 'rosterGroup', field: 'group', order: GROUP_ORDER, allLabel: 'グループすべて', current: playerState.rosterGroup, onChange: (v) => remember('rosterGroup', v) });
+  fillSelect({ selId: 'rosterRank', field: 'rank', order: RANK_ORDER, allLabel: 'ランクすべて', current: playerState.rosterRank, onChange: (v) => remember('rosterRank', v) });
 }
 
 const KIND_DEPS = {
@@ -161,6 +270,9 @@ export async function renderRoster(opts) {
   if (stale()) return;
   grid.innerHTML = '';
   populateFilterSelects(folderMeta);
+  buildXposFilter();
+  buildSortControls();
+  buildExModeControls();
 
   const capturing = !!(await chrome.storage.local.get(SK.capturing)).capturing;
   if (stale()) return;
@@ -173,10 +285,11 @@ export async function renderRoster(opts) {
   };
 
   if (!showControls) {
-    for (const id of ['rosterSearch', 'rosterType', 'rosterOwn', 'rosterGroup', 'rosterRank', 'bulkOpen', 'sharedDl', 'rostercount']) setD(id, 'none');
+    for (const id of ['rosterSearch', 'rosterType', 'rosterOwn', 'rosterGroup', 'rosterRank', 'bulkOpen', 'sharedDl', 'rostercount', 'rosterSortLbl', 'rosterSort', 'rosterSortDescLabel', 'exModeLabel', 'exFilterRow']) setD(id, 'none');
   } else {
     for (const id of ['rosterSearch', 'rosterType', 'bulkOpen', 'sharedDl', 'rostercount']) setD(id, '');
     setD('rosterOwn', playerState.rosterKind === 'character' ? '' : 'none');
+    for (const id of ['rosterSortLbl', 'rosterSort', 'rosterSortDescLabel', 'exModeLabel']) setD(id, playerState.rosterKind === 'character' ? '' : 'none');
   }
 
   if (!playerState.fsGranted || !hasData) grid.appendChild(buildOnboard({ fsGranted: playerState.fsGranted, capturing, hasData }));
@@ -184,6 +297,13 @@ export async function renderRoster(opts) {
     getById('rostercount').textContent = '';
     return;
   }
+
+  if (playerState.exMode && playerState.rosterKind === 'character') {
+    await renderExScenes(grid);
+    return;
+  }
+  resetExScenes();
+  grid.className = 'rostergrid';
 
   const model = await rosterModel();
   if (stale()) return;
@@ -233,9 +353,10 @@ export async function rosterModel() {
       else if (episodeCounts.storyFull(it)) full.push(it);
       else partial.push(it);
     }
-    full.sort(byName);
-    partial.sort(byName);
-    unowned.sort(byName);
+    const cmp = characterComparer(byName);
+    full.sort(cmp);
+    partial.sort(cmp);
+    unowned.sort(cmp);
     return {
       rosterKind,
       groups: [
@@ -243,7 +364,7 @@ export async function rosterModel() {
         { title: '解放途中', items: partial },
         { title: '未所持', items: unowned },
       ],
-      summary: summaryOf(items),
+      summary: summaryOf([...full, ...partial, ...unowned]),
     };
   }
 
@@ -259,7 +380,7 @@ export async function rosterModel() {
     return {
       rosterKind,
       groups: subs.map((s) => ({ title: s, items: bySub[s].sort(byName) })),
-      summary: summaryOf(items),
+      summary: summaryOf(Object.values(bySub).flat()),
     };
   }
 
@@ -282,7 +403,7 @@ export async function rosterModel() {
       { title: '進行中（クリア途中）', sections: questSections(rosterKind, progress) },
       { title: '未クリア', sections: questSections(rosterKind, locked) },
     ],
-    summary: summaryOf(items),
+    summary: summaryOf([...done, ...progress, ...locked]),
   };
 }
 

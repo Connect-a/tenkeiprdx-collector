@@ -8,11 +8,19 @@ const FAILURE_KINDS = [
 
 const arr = (v) => (Array.isArray(v) ? v : []);
 
+function text(v) {
+  if (v == null) return '';
+  if (typeof v !== 'object') return String(v);
+  const head = `${v.epLabel || ''}${v.epTitle ? `「${v.epTitle}」` : ''}`;
+  const tail = v.sceneId != null ? `scene ${v.sceneId}` : v.rel || '';
+  return [head, tail].filter(Boolean).join(' / ') || JSON.stringify(v);
+}
+
 export function failureReport(result) {
   const r = result || {};
   const out = { counts: {}, items: {}, total: 0 };
   for (const k of FAILURE_KINDS) {
-    const list = arr(r[k.key]).map(String);
+    const list = arr(r[k.key]).map(text);
     out.counts[k.key] = list.length;
     out.items[k.key] = list.slice(0, KEEP);
     out.total += list.length;

@@ -133,4 +133,4 @@ async function extractClips(handle, path) {
   }
 }
 
-export const charAssets = { load3d, build3dOptions, extractClips, buildWeapons, mergeMeshDeps, loadModelBundle, loadMaterialBundle };
+export const charAssets = { load3d, build3dOptions, extractClips, buildWeapons, mergeMeshDeps, loadModelBundle, loadMaterialBundle, loadMouthAtlas };

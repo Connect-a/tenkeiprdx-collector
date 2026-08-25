@@ -10,6 +10,9 @@ import { errText } from '../../core/messages.js';
 import { splitLayout, clearView, entryCard, viewHeader, downloadBar, noteRow } from '../ui/panel-shell.js';
 import { bundleName } from '../../core/paths.js';
 import { el } from '../../core/dom.js';
+import { ensureIndexes } from '../../data/index-store.js';
+import { buildIndexes } from '../../data/build-indexes.js';
+import { createSkillFxView } from '../views/skillfx-view.js';
 
 const CATEGORY = [
   { key: 'monster', label: 'モンスター' },
@@ -27,7 +30,55 @@ export function createOtherPanel(deps) {
   let _listSig = '';
   let _ordered = [];
   let _have = new Set();
+  let _fx = [];
+  let _fxHave = new Set();
+  const _skillFx = createSkillFxView();
   const _mouthCache = new Map();
+
+  async function loadSharedFx() {
+    const seen = new Map();
+    try {
+      const idx = await ensureIndexes();
+      for (const id of Object.keys(idx.master.charSkills || {})) {
+        for (const e of buildIndexes.charSkillEffects(idx.master, idx.assets, id).shared) {
+          if (e.vfxRel && !seen.has(e.effect)) seen.set(e.effect, e);
+        }
+      }
+    } catch (e) {}
+    _fx = [...seen.values()].sort((a, b) => (a.effect > b.effect ? 1 : -1));
+    _fxHave = new Set();
+    if (_fx.length) {
+      try {
+        const have = await assetStore.presentIds(
+          DIRS.shared,
+          _fx.map((e) => e.vfxRel),
+        );
+        _fxHave = new Set(have.keys());
+      } catch (e) {}
+    }
+  }
+
+  const fxReady = (e) => _fxHave.has(assetStore.idOf(e.vfxRel));
+
+  async function openSharedFx(e) {
+    const host = getById('otherView');
+    if (!host) return;
+    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    _model3d = disposeModel3d(_model3d);
+    host.innerHTML = '';
+    host.appendChild(viewHeader(`${e.effect}　[共通エフェクト]`, _fx, e, openSharedFx));
+    const body = el('div');
+    host.appendChild(body);
+    if (!fxReady(e)) {
+      noteRow(body, 'このエフェクトはまだダウンロードされていません。サイドバーの「共有リソースDL」から取得してください。');
+      return;
+    }
+    try {
+      await _skillFx.render([e], body, { dir: DIRS.shared });
+    } catch (er) {
+      noteRow(body, 'エフェクトを表示できませんでした。' + errText(er));
+    }
+  }
   function scrollToSection(name) {
     const h = _headers && _headers[name];
     if (h && h.scrollIntoView) setTimeout(() => h.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
@@ -43,10 +94,12 @@ export function createOtherPanel(deps) {
       status = await collectionRepository.other3dStatus(list);
     } catch (e) {}
     _have = (status && status.have) || new Set();
-    const sig = list.length + ':' + (status ? status.ready + '/' + status.total : '') + ':' + list.map((e) => e.id).join(',');
+    await loadSharedFx();
+    const sig = list.length + ':' + (status ? status.ready + '/' + status.total : '') + ':' + _fx.length + '/' + _fxHave.size + ':' + list.map((e) => e.id).join(',');
     if (_listSig === sig && grid.querySelector('.otherlayout')) return;
     _listSig = sig;
     _model3d = disposeModel3d(_model3d);
+    _skillFx.dispose();
     grid.innerHTML = '';
     if (!list.length) {
       grid.appendChild(el('div', 'emptyrow', 'その他の3Dデータがありません。「ゲームと接続」してからやり直してください。'));
@@ -65,7 +118,9 @@ export function createOtherPanel(deps) {
     const goto = (key) => () => {
       if (typeof navTo === 'function') navTo('other', key);
     };
-    listCol.appendChild(el('div', 'homenav', present.map((c) => el('button', { class: 'homenavlink', text: `${c.label} ${byCat[c.key].length}`, on: { click: goto(c.key) } }))));
+    const navBtns = present.map((c) => el('button', { class: 'homenavlink', text: `${c.label} ${byCat[c.key].length}`, on: { click: goto(c.key) } }));
+    if (_fx.length) navBtns.push(el('button', { class: 'homenavlink', text: `共通エフェクト ${_fx.length}`, on: { click: () => scrollToSection('skillfx') } }));
+    listCol.appendChild(el('div', 'homenav', navBtns));
 
     _headers = {};
     _ordered = present.flatMap((c) => byCat[c.key]);
@@ -81,6 +136,19 @@ export function createOtherPanel(deps) {
       _headers[c.key] = h;
       listCol.appendChild(h);
       listCol.appendChild(el('div', 'rostercards', arr.map(card)));
+    }
+    if (_fx.length) {
+      const h = el('div', 'rgroup', `共通エフェクト（${_fx.length}）`);
+      _headers.skillfx = h;
+      listCol.appendChild(h);
+      listCol.appendChild(el('div', 'note dim', '複数のキャラが使うスキルエフェクトです。キャラ固有のものは、そのキャラの「イメージ」タブにあります。'));
+      listCol.appendChild(
+        el(
+          'div',
+          'rostercards',
+          _fx.map((e) => entryCard({ name: e.effect, note: e.skillName || '', ready: fxReady(e), onClick: () => openSharedFx(e) })),
+        ),
+      );
     }
   }
 
@@ -113,6 +181,7 @@ export function createOtherPanel(deps) {
   async function openModel(e) {
     const host = getById('otherView');
     if (!host) return;
+    _skillFx.dispose();
     host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     if (!collectionRepository.other3dReady(e, _have)) {
       host.innerHTML = '<div class="note" style="padding:8px">この3Dデータはまだダウンロードされていません。上の「その他3Dをダウンロード」から取得してください。</div>';
@@ -191,6 +260,7 @@ export function createOtherPanel(deps) {
   function reset() {
     clearView('otherView', 'カードを選ぶとここに3D表示');
     _model3d = disposeModel3d(_model3d);
+    _skillFx.dispose();
     _listSig = '';
   }
 

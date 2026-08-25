@@ -37,7 +37,7 @@ async function saveUrl(session, targetDir, { url, subpath, label }) {
 
 async function saveAsset(session, dir, rel, spec) {
   const c = session.counters;
-  const r = await assetStore.acquireAsset(dir, rel, { base: spec.base, place: spec.place, overwrite: session.overwrite });
+  const r = await assetStore.acquireAsset(dir, rel, { base: spec.base, place: spec.place, overwrite: session.overwrite, fast: !!spec.fast });
   if (r.status === 'skip') c.skip++;
   else if (r.status === 'got') c.got++;
   else if (r.status === 'missing') c.missing++;

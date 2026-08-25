@@ -6,13 +6,13 @@ import { RECONNECT } from '../../core/messages.js';
 import { playerState } from './player-state.js';
 import { getById } from '../../core/dom.js';
 import { getStoryPanel } from './panel-state.js';
-import { parseRoute, isTargetRoute, routeHash } from './router.js';
+import { parseRoute, isTargetRoute, routeHash, routeKey } from './router.js';
 import { switchTab, setStageMax, updateCdnReset } from '../views/shell-ui.js';
 import { ensureEpisodes } from '../views/detail-view.js';
 import { navTo, navChar, setAppliedRouteKey } from './router-controller.js';
 import { renderRoster } from '../views/roster-ui.js';
 import { runLineSearch } from '../views/line-search.js';
-import { openBulk, closeBulk, startBulk, renderBulkCard, renderBulkBanner, refreshBulkTarget } from '../views/bulk-ui.js';
+import { openBulk, closeBulk, startBulk, stopBulk, renderBulkCard, renderBulkBanner, refreshBulkTarget } from '../views/bulk-ui.js';
 import { pickFolder } from '../views/fs-ui.js';
 import { refreshLists } from './state-refresh.js';
 import { updateConn, maybeAutoDisconnect, setAutoDisconnectOff } from './connection-controller.js';
@@ -33,6 +33,7 @@ const probeRel = async () => {
 };
 
 let lineSearchTimer = null;
+let rosterSearchSaveTimer = null;
 let bound = false;
 
 const on = (id, type, fn) => getById(id).addEventListener(type, fn);
@@ -71,13 +72,17 @@ function bindNavigation() {
     if (!r.id || !isTargetRoute(r.rosterKind)) return;
     try {
       history.replaceState(null, '', routeHash(r.rosterKind, null));
-      setAppliedRouteKey(r.rosterKind + '|');
+      setAppliedRouteKey(routeKey({ rosterKind: r.rosterKind }));
     } catch (e) {}
   });
 }
 
 function bindRosterFilters() {
-  on('rosterSearch', 'input', () => renderRoster());
+  on('rosterSearch', 'input', () => {
+    clearTimeout(rosterSearchSaveTimer);
+    rosterSearchSaveTimer = setTimeout(() => settings.set('rosterSearch', getById('rosterSearch').value || ''), 400);
+    renderRoster();
+  });
   on('lineSearch', 'input', () => {
     clearTimeout(lineSearchTimer);
     lineSearchTimer = setTimeout(runLineSearch, 200);
@@ -86,6 +91,7 @@ function bindRosterFilters() {
   for (const id of ['rosterGroup', 'rosterRank']) {
     on(id, 'change', () => {
       playerState[id] = getById(id).value;
+      settings.set(id, playerState[id]);
       renderRoster();
     });
   }
@@ -94,6 +100,7 @@ function bindRosterFilters() {
       eachIn('rosterOwn', '.rf', (x) => x.classList.remove('active'));
       b.classList.add('active');
       playerState.rosterOwn = b.dataset.rosterOwn;
+      settings.set('rosterOwn', playerState.rosterOwn);
       renderRoster();
     }),
   );
@@ -103,7 +110,7 @@ function bindBulk() {
   onClick('bulkOpen', openBulk);
   onClick('bulkClose', closeBulk);
   onClick('bulkStart', startBulk);
-  onClick('bulkStop', () => bulkDownloader.stop());
+  onClick('bulkStop', stopBulk);
   onClick('bulkModal', (e) => {
     if (e.target === getById('bulkModal')) closeBulk();
   });
@@ -117,7 +124,6 @@ function bindBulk() {
 
 function bindStage() {
   onClick('stageMax', () => setStageMax(!getById('stage').classList.contains('max')));
-  onClick('stageExit', () => setStageMax(false));
   onClick('storyProgBar', (e) => {
     const bar = getById('storyProgBar');
     const p = getStoryPanel();

@@ -526,3 +526,32 @@
 #charHead .note {
   margin: 0;
 }
+
+.eplist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .eplist {
+    grid-template-columns: 1fr;
+  }
+}
+
+.eplist .epchapter,
+.eplist .emptyrow {
+  grid-column: 1 / -1;
+}
+
+.eprow .ti {
+  flex: 0 1 auto;
+}
+
+.eprow .cats {
+  display: flex;
+  gap: 4px;
+  margin-right: auto;
+  flex-shrink: 0;
+}

@@ -3,13 +3,17 @@ import { loadModel3d, model3dSync, disposeModel3d, loadAura as getAuraRenderer }
 import { glManager } from '../../engine/render/gl-manager.js';
 import { charAssets } from '../../data/char-assets.js';
 import { errText } from '../../core/messages.js';
-import { MOTION_VOICE } from '../../core/constants.js';
+import { MOTION_VOICE, DIRS } from '../../core/constants.js';
 import { characterMeta } from '../../data/character-meta.js';
 import { voiceOut } from './voice-out.js';
 import { utilHelpers } from '../../core/util.js';
 import { settings } from '../../core/settings.js';
 import { el } from '../../core/dom.js';
-import { groupHeading, downloadBar } from '../ui/panel-shell.js';
+import { downloadBar } from '../ui/panel-shell.js';
+import { createSkillFxView } from '../views/skillfx-view.js';
+import { ensureIndexes } from '../../data/index-store.js';
+import { buildIndexes } from '../../data/build-indexes.js';
+import { PLACE } from '../../core/placement.js';
 
 export function createImagePanel(deps) {
   const { playerState, getById, visualRenderer, toast, spinnerHtml } = deps;
@@ -20,6 +24,12 @@ export function createImagePanel(deps) {
   const showSpine = () => settings.get('showSpine');
   let _load3d = { key: null, byCostume: new Map() };
   let _weapon3d = [];
+  let _weaponsData = null;
+  let _builtWeapons = false;
+  let _builtSkillFx = false;
+  let _syncClip = null;
+  let _syncSpeed = 1;
+  const _skillFx = createSkillFxView();
   let _visuals = Promise.resolve();
   const _glRebuildOk = glManager.makeRebuildLimiter(8000, 2);
   const onGlContextLost = () => {
@@ -155,7 +165,8 @@ export function createImagePanel(deps) {
       playerState._model3d = disposeModel3d(playerState._model3d);
       host.style.display = 'none';
       host.innerHTML = '';
-      renderWeapons3d(null);
+      _weaponsData = null;
+      syncM3dSections();
       return;
     }
     if (!charAssets) return;
@@ -165,7 +176,8 @@ export function createImagePanel(deps) {
     if (!hasModel) {
       host.style.display = 'none';
       host.innerHTML = '';
-      renderWeapons3d(null);
+      _weaponsData = null;
+      syncM3dSections();
       return;
     }
     if (assetAcquirer && assetAcquirer.sharedResourcesPresent && !(await assetAcquirer.sharedResourcesPresent())) {
@@ -203,7 +215,7 @@ export function createImagePanel(deps) {
         const m = playerState._model3d;
         if (m && m.setAura) {
           const a = rel ? await loadAura(rel) : null;
-          m.setAura(a && a.bytes, a && a.texByMatPid, false);
+          m.setAura(a && a.bytes, a && a.texByMatPid);
         } else render3dModel();
       };
       const auraOpt = {
@@ -231,8 +243,17 @@ export function createImagePanel(deps) {
         auraTexMap: auraLoaded && auraLoaded.texByMatPid,
       });
       opts.onContextLost = onGlContextLost;
+      opts.onClip = (name) => {
+        _syncClip = name;
+        for (const r of _weapon3d) if (r && r.setClip) r.setClip(name);
+      };
+      opts.onSpeed = (v) => {
+        _syncSpeed = v;
+        for (const r of _weapon3d) if (r && r.setSpeed) r.setSpeed(v);
+      };
       playerState._model3d = (await loadModel3d()).render(host, d.model, d.matBundle, opts);
-      renderWeapons3d(d.weapons);
+      _weaponsData = d.weapons;
+      syncM3dSections();
     } catch (e) {
       showError(host, '3Dモデルを表示できませんでした。' + errText(e));
     }
@@ -247,53 +268,90 @@ export function createImagePanel(deps) {
     _weapon3d = [];
   }
 
-  function renderWeapons3d(weapons) {
+  function buildWeaponsSection() {
     const host = getById('weapon3dHost');
     if (!host) return;
+    _builtWeapons = true;
     disposeWeapons3d();
-    const list = (weapons || []).filter((w) => w && w.model);
+    host.innerHTML = '';
+    const list = (_weaponsData || []).filter((w) => w && w.model);
     const r3d = model3dSync();
-    if (!show3d() || !list.length || !r3d) {
-      host.style.display = 'none';
-      host.innerHTML = '';
+    if (!list.length || !r3d) {
+      host.appendChild(el('div', 'note', '武器はありません。'));
       return;
     }
-    host.style.display = '';
-    host.innerHTML = '';
-    groupHeading(host, `武器 ${list.length}種`);
     const grid = el('div', 'weapongrid');
     host.appendChild(grid);
     for (const w of list) {
       const box = el('div');
       const cell = el('div', 'weaponcell', [el('div', 'note dim', `#${w.id || '?'}　${w.slot || ''}`), box]);
       grid.appendChild(cell);
-      const r = r3d.render(box, w.model, w.materials, { height: 240 });
+      const r = r3d.render(box, w.model, w.materials, { height: 240, hidePartsUI: true, hidePlaybackUI: true });
       if (r && r.dispose) _weapon3d.push(r);
+      if (r && r.ok !== false) {
+        if (_syncClip && r.setClip) r.setClip(_syncClip);
+        if (r.setSpeed) r.setSpeed(_syncSpeed);
+      }
       if (r && r.ok === false) cell.appendChild(el('div', 'note', '表示できませんでした（' + (r.reason || '不明') + '）'));
+    }
+  }
+
+  async function buildSkillFxSection() {
+    const host = getById('skillfxHost');
+    const cur = playerState.cur;
+    if (!host || !cur) return;
+    _builtSkillFx = true;
+    host.innerHTML = spinnerHtml('スキルエフェクトを準備中…');
+    try {
+      const idx = await ensureIndexes();
+      const eff = buildIndexes.charSkillEffects(idx.master, idx.assets, String(cur.folderKey));
+      await _skillFx.render(eff.unique, host, {
+        dir: cur.handle,
+        place: PLACE.visual('skillfx'),
+        sePlace: PLACE.visual('skillfx/se'),
+        emptyText: 'このキャラ固有のスキルエフェクトはありません。共通のものは「その他3D」で再生できます。',
+      });
+    } catch (e) {
+      showError(host, 'スキルエフェクトを表示できませんでした。' + errText(e));
+    }
+  }
+
+  const isCharacterEntry = () => {
+    const cur = playerState.cur;
+    if (!cur) return false;
+    if (playerState.rosterKind && playerState.rosterKind !== 'character') return false;
+    const apiType = (cur.meta || {}).apiType;
+    return !apiType || apiType === 'Character';
+  };
+
+  function syncM3dSections() {
+    const on = show3d() && isCharacterEntry();
+    const hasWeapons = !!playerState._model3d && (_weaponsData || []).some((w) => w && w.model);
+    const dW = getById('dWeaponDeco');
+    const dS = getById('dSkillFx');
+    if (dW) {
+      dW.style.display = on && hasWeapons ? '' : 'none';
+      if (on && hasWeapons && dW.open && !_builtWeapons) buildWeaponsSection();
+    }
+    if (dS) {
+      dS.style.display = on ? '' : 'none';
+      if (on && dS.open && !_builtSkillFx) buildSkillFxSection();
     }
   }
 
   async function saveDecodedPack() {
     if (!playerState.cur) return;
     const flipY = settings.get('imageFlipY');
-    let destDir = null;
-    if (globalThis.showDirectoryPicker) {
-      try {
-        destDir = await globalThis.showDirectoryPicker({ id: 'tpDecodedExport', mode: 'readwrite', startIn: 'downloads' });
-      } catch (e) {
-        return;
-      }
-      if (destDir.requestPermission && (await destDir.requestPermission({ mode: 'readwrite' })) !== 'granted') {
-        notify('保存先の書き込み許可がありません', 'err');
-        return;
-      }
-    }
     const btn = getById('saveDecodedPack');
     if (btn) btn.disabled = true;
     notify('デコード結果を保存しています…');
     try {
-      const r = await visualRenderer.saveDecodedResources(playerState.cur, { includeStory: true, flipY, destDir });
-      notify(`デコード結果を保存しました（${destDir ? destDir.name : '既定の保存先'}/${(r && r.baseDir) || ''}）`, 'ok');
+      const r = await visualRenderer.saveDecodedResources(playerState.cur, { includeStory: true, flipY });
+      if (!r || r.ok === false) {
+        notify(r && r.reason === 'no-save-dir' ? '先に保存先フォルダを選んでください' : '保存できませんでした', 'err');
+        return;
+      }
+      notify(`デコード結果を保存しました（${DIRS.save}/${r.baseDir}）`, 'ok');
     } catch (e) {
       notify('保存できませんでした。' + errText(e), 'err');
     } finally {
@@ -317,11 +375,24 @@ export function createImagePanel(deps) {
     playerState._model3d = disposeModel3d(playerState._model3d);
     playerState._costume = null;
     disposeWeapons3d();
-    for (const id of ['model3dHost', 'weapon3dHost']) {
+    _skillFx.dispose();
+    _weaponsData = null;
+    _builtWeapons = false;
+    _builtSkillFx = false;
+    _syncClip = null;
+    _syncSpeed = 1;
+    for (const id of ['model3dHost', 'weapon3dHost', 'skillfxHost']) {
       const host = getById(id);
       if (host) {
-        host.style.display = 'none';
+        if (id === 'model3dHost') host.style.display = 'none';
         host.innerHTML = '';
+      }
+    }
+    for (const id of ['dWeaponDeco', 'dSkillFx']) {
+      const d = getById(id);
+      if (d) {
+        d.open = false;
+        d.style.display = 'none';
       }
     }
     syncSplitLayout();
@@ -329,6 +400,12 @@ export function createImagePanel(deps) {
 
   function bind() {
     getById('saveDecodedPack')?.addEventListener('click', saveDecodedPack);
+    getById('dWeaponDeco')?.addEventListener('toggle', () => {
+      if (getById('dWeaponDeco').open && !_builtWeapons) buildWeaponsSection();
+    });
+    getById('dSkillFx')?.addEventListener('toggle', () => {
+      if (getById('dSkillFx').open && !_builtSkillFx) buildSkillFxSection();
+    });
     settings.subscribe((n) => {
       if (!playerState.cur) return;
       if (n === 'imageFlipY') runImageGallery();

@@ -199,8 +199,38 @@ function create(canvas, opts) {
     const dpr = Math.min(2, self.devicePixelRatio || 1);
     const w = canvas.clientWidth || 900,
       h = canvas.clientHeight || Math.round((w * 9) / 16);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    const nw = Math.round(w * dpr),
+      nh = Math.round(h * dpr);
+    if (nw === canvas.width && nh === canvas.height) return;
+    canvas.width = nw;
+    canvas.height = nh;
+    relayoutCast();
+  }
+
+  const castLayoutEnv = () => ({
+    W: canvas.width,
+    H: canvas.height,
+    refW: refWidth(),
+    refH: refHeight(),
+    sRef: (o.scaleMul || 1) * BASE_SCALE,
+    pinScreen: o.pinScreen != null ? o.pinScreen : 190 / 640,
+    pinBody: o.pinBody != null ? o.pinBody : 0.5,
+  });
+
+  const applyCastLayout = (it, cfg) => {
+    const b = it.rec && it.rec.bounds;
+    if (!b || !(b.h > 0)) return;
+    const L = layoutCast(cfg, b, castLayoutEnv());
+    it.tx = L.tx;
+    it.y = L.y;
+    it.sx = L.sx;
+    it.sy = L.sy;
+    it.dim = L.dim;
+    it.anchor = L.anchor;
+  };
+
+  function relayoutCast() {
+    for (const it of cast.values()) if (it.cfg && it.rec && !it.rec.dead) applyCastLayout(it, it.cfg);
   }
 
   function loop(t) {
@@ -563,13 +593,6 @@ function create(canvas, opts) {
       mode = 'cast';
       stillItem = null;
       emitStill(null);
-      const W = canvas.width,
-        H = canvas.height;
-      const refW = refWidth(),
-        refH = refHeight();
-      const sRef = (o.scaleMul || 1) * BASE_SCALE;
-      const pinScreen = o.pinScreen != null ? o.pinScreen : 190 / 640;
-      const pinBody = o.pinBody != null ? o.pinBody : 0.5;
       const seen = new Set();
       for (const c of list) {
         const rec = c.rec;
@@ -590,20 +613,14 @@ function create(canvas, opts) {
           continue;
         }
         seen.add(c.id);
-        const L = layoutCast(c, b, { W, H, refW, refH, sRef, pinScreen, pinBody });
         let it = cast.get(c.id);
-        if (it) {
-          it.rec = rec;
-          it.tx = L.tx;
-          it.y = L.y;
-          it.sx = L.sx;
-          it.sy = L.sy;
-          it.dim = L.dim;
-          it.anchor = L.anchor;
-        } else {
-          it = { rec, tx: L.tx, y: L.y, sx: L.sx, sy: L.sy, dim: L.dim, anchor: L.anchor, tr: appearTr(c.appear), actLast: 0, act: null };
+        if (it) it.rec = rec;
+        else {
+          it = { rec, tr: appearTr(c.appear), actLast: 0, act: null };
           cast.set(c.id, it);
         }
+        it.cfg = c;
+        applyCastLayout(it, c);
         if (c.act && c.act !== 7 && c.act !== 8 && c.act !== it.actLast) {
           it.act = { type: c.act, t: 0, dur: actionDuration(c.act) };
         }

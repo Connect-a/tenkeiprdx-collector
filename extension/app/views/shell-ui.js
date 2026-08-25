@@ -3,6 +3,9 @@ import { getById } from '../../core/dom.js';
 import { dispatchPanels } from '../runtime/panel-state.js';
 import { audioScene } from '../runtime/audio-scene.js';
 import { refreshSharedNotice } from './shared-notice.js';
+import { playerState } from '../runtime/player-state.js';
+import { routeHash, routeKey } from '../runtime/router.js';
+import { setAppliedRouteKey } from '../runtime/router-controller.js';
 
 const EMPTY_IDLE = '「キャラ一覧」から選択してください。';
 
@@ -17,6 +20,11 @@ export function setStageMax(on) {
   if (!st) return;
   st.classList.toggle('max', !!on);
   document.body.classList.toggle('stagemax', !!on);
+  const btn = getById('stageMax');
+  if (btn) {
+    btn.textContent = on ? '⤢ 縮小' : '⛶ 最大化';
+    btn.title = on ? '通常の大きさに戻す（Escでも戻せます）' : '再生画面を画面いっぱいに広げます';
+  }
 }
 
 export function applyKindTabs(rosterKind) {
@@ -33,6 +41,19 @@ export function applyKindTabs(rosterKind) {
   switchTab(charOnly ? 'image' : 'story');
 }
 
+export function syncDetailHash(section, epId) {
+  if (!playerState.cur) return;
+  const kind = playerState.rosterKind || 'character';
+  const id = String(playerState.cur.folderKey || '');
+  if (!id) return;
+  const next = routeHash(kind, id, section, epId);
+  setAppliedRouteKey(routeKey({ rosterKind: kind, id, section, epId }));
+  if (location.hash === next) return;
+  try {
+    history.replaceState(null, '', next);
+  } catch (e) {}
+}
+
 export function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === name));
@@ -40,6 +61,7 @@ export function switchTab(name) {
   audioScene.set({ storyVisible: name === 'story' });
   dispatchPanels('onTabSwitched', name);
   if (name === 'story') refreshSharedNotice();
+  syncDetailHash(name === 'story' ? 'story' : null, null);
 }
 
 export function updateCdnReset() {

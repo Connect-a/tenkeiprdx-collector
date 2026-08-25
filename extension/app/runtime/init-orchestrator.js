@@ -28,7 +28,7 @@ import { updateCdnReset } from '../views/shell-ui.js';
 import { renderIndexRebuild } from '../views/download-section.js';
 import { renderStorageSummary } from '../views/storage-summary.js';
 import { refreshLists } from './state-refresh.js';
-import { renderRoster } from '../views/roster-ui.js';
+import { renderRoster, restoreRosterPrefs } from '../views/roster-ui.js';
 import { ensureBulkTick, renderBulkBanner } from '../views/bulk-ui.js';
 import { resumeBulkIfWaitingForConnection } from './bulk-resume.js';
 import { registerPanels } from './panel-state.js';
@@ -70,6 +70,7 @@ export async function init() {
   await settings.load();
   for (const id of ['voiceMode', 'imageFlipY', 'show3d', 'showSpine', 'masterVolume', 'playerName']) settings.bind(getById(id), id);
   document.body.classList.toggle('sbcollapsed', !!settings.get('sidebarCollapsed'));
+  restoreRosterPrefs();
   const masterVol = () => settings.get('masterVolume');
 
   const homeBgm = {};

@@ -8,14 +8,21 @@ const VIDEOS = [
   ['NewTitle', 'タイトル動画（旧 NewTitle）'],
   ['NewTitle2', 'タイトル動画（旧 NewTitle2）'],
   ['DefaultTitle', 'タイトル動画（旧 DefaultTitle）'],
+  ['EndCredits', 'エンドクレジット'],
 ];
 
 const FILES = VIDEOS.map(([n, name]) => ({ key: 'video_' + n.toLowerCase(), name, sub: `${VIDEO_DIR}/${n}.mp4`, file: `${n}.mp4`, kind: 'video' }));
 
-export async function staticsList() {
-  let base = null;
+const withUrl = (list, base) => list.map((f) => ({ ...f, url: base ? `${base}/${f.sub}` : null, path: `${STATICS_DIR}/${f.file}` }));
+
+async function staticsBase() {
   try {
-    base = (await resolveOrigin()).statics || null;
-  } catch (e) {}
-  return FILES.map((f) => ({ ...f, url: base ? `${base}/${f.sub}` : null, path: `${STATICS_DIR}/${f.file}` }));
+    return (await resolveOrigin()).statics || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function staticsList() {
+  return withUrl(FILES, await staticsBase());
 }

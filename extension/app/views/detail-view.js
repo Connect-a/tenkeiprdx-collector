@@ -3,6 +3,7 @@ import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { episodeIdOf } from '../../data/character-meta.js';
 import { characterMeta } from '../../data/character-meta.js';
 import { getById, el } from '../../core/dom.js';
+import { xposNames } from '../../core/constants.js';
 import { playerState } from '../runtime/player-state.js';
 import { nameFix, chip, html, raw, spinnerHtml } from '../ui/ui-format.js';
 import { closeRoster } from './roster-view.js';
@@ -13,7 +14,7 @@ import { voiceOut } from '../panels/voice-out.js';
 import { runDownload } from './download-ui.js';
 import { resetLineSearch } from './line-search.js';
 import { renderVoiceGallery } from './voice-gallery.js';
-import { applyKindTabs, resetVisualPanel } from './shell-ui.js';
+import { applyKindTabs, resetVisualPanel, switchTab, syncDetailHash } from './shell-ui.js';
 
 const labelSpan = (text) => el('span', 'dinfo-label', text);
 const valueSpan = (val) => el('span', 'dinfo-value', nameFix(val));
@@ -71,12 +72,14 @@ function renderEpisodes(m) {
     const row = el('div', {
       class: 'eprow' + (ep.have !== 'none' ? '' : ' na'),
       data: { epid: String(episodeIdOf(ep)) },
-      html: html`<span class="lbl">${ep.label || ''}</span><span class="ti"></span><span class="epid">#${episodeIdOf(ep)}</span
+      html: html`<span class="lbl">${ep.label || ''}</span><span class="ti"></span><span class="cats"></span><span class="epid">#${episodeIdOf(ep)}</span
         ><span class="vc">${ep.have !== 'none' ? ep.lineCount + '行' + (ep.voiced ? ' / 音声' + ep.voiced : '') + (ep.have === 'partial' ? ' / 続き未取得' : '') : naLabel}</span>`,
     });
     row.querySelector('.ti').textContent = ep.title || '';
+    for (const n of xposNames(ep.xpos)) row.querySelector('.cats').appendChild(el('span', 'epcat', n));
     if (ep.have !== 'none') {
       row.addEventListener('click', () => {
+        syncDetailHash('story', String(episodeIdOf(ep)));
         const storyPanel = getStoryPanel();
         if (storyPanel) storyPanel.playEpisode(ep);
       });
@@ -99,6 +102,7 @@ export async function openCharacter(folderKey) {
   if (imagePanel && imagePanel.resetForCharacter) imagePanel.resetForCharacter();
   const handle = folderHandle(folderKey);
   if (!handle) return;
+  playerState.navId = String(folderKey);
 
   let m = null;
   try {
@@ -107,7 +111,6 @@ export async function openCharacter(folderKey) {
   if (!m) m = { name: folderKey, episodes: [] };
 
   playerState.cur = { folderKey: String(folderKey), handle, meta: m, voiceUrls: new Map() };
-  playerState.navId = String(folderKey);
 
   getById('empty').style.display = 'none';
   getById('detail').style.display = '';
@@ -142,6 +145,16 @@ export function ensureEpisodes(folderKey) {
   if (!key) return null;
   if (!_epLoad || _epLoad.key !== key) _epLoad = { key, p: loadEpisodesDeferred(key) };
   return _epLoad.p;
+}
+
+export async function openStoryRoute(folderKey, epId) {
+  switchTab('story');
+  await ensureEpisodes(String(folderKey));
+  if (!epId || playerState.viewKey() !== String(folderKey)) return;
+  const row = getById('eplist').querySelector(`.eprow[data-epid="${CSS.escape(String(epId))}"]`);
+  if (!row || row.classList.contains('na')) return;
+  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  row.click();
 }
 
 function renderRoutingWarning(m) {

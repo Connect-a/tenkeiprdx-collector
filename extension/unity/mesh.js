@@ -343,6 +343,7 @@ function extractMeshGeometry(m, LE) {
   const tan = readChannel(2);
   const col = readChannel(3);
   const uv0 = readChannel(4);
+  const uv1c = readChannel(5);
   if (!pos) return null;
 
   const positions =
@@ -395,6 +396,14 @@ function extractMeshGeometry(m, LE) {
       uv[v * 2 + 1] = uv0.arr[v * uv0.dim + 1];
     }
   }
+  let uv1 = null;
+  if (uv1c) {
+    uv1 = new Float32Array(vcount * 2);
+    for (let v = 0; v < vcount; v++) {
+      uv1[v * 2] = uv1c.arr[v * uv1c.dim];
+      uv1[v * 2 + 1] = uv1c.arr[v * uv1c.dim + 1];
+    }
+  }
 
   const use16 = Number(m.m_IndexFormat) === 0;
   const ibRaw = m.m_IndexBuffer;
@@ -438,7 +447,7 @@ function extractMeshGeometry(m, LE) {
     skinIndex = shared.rigidSkin.i;
   }
 
-  return { name: m.m_Name, vertexCount: vcount, positions, normals, tangents, binormals, colors, uv, indices, submeshes, skinWeight, skinIndex, bindposes, boneNameHashes, blendShapes };
+  return { name: m.m_Name, vertexCount: vcount, positions, normals, tangents, binormals, colors, uv, uv1, indices, submeshes, skinWeight, skinIndex, bindposes, boneNameHashes, blendShapes };
 }
 
 function readMaterialObj(sf, LE, o) {
@@ -449,17 +458,31 @@ function readMaterialObj(sf, LE, o) {
     firstTexPathID = null,
     colorTexPathID = null,
     shadowTexPathID = null,
-    maskTexPathID = null;
+    maskTexPathID = null,
+    mainTexScale = null,
+    mainTexOffset = null;
+  const texByName = {};
+  const texST = {};
   for (const pair of tex) {
     const name = pair[0];
     const env = pair[1];
     const pid = env && env.m_Texture ? String(env.m_Texture.m_PathID) : null;
+    if (typeof name === 'string' && env) {
+      const sc = env.m_Scale || {};
+      const of = env.m_Offset || {};
+      texST[name] = [sc.x == null ? 1 : Number(sc.x), sc.y == null ? 1 : Number(sc.y), Number(of.x) || 0, Number(of.y) || 0];
+      if (pid && pid !== '0') texByName[name] = pid;
+    }
     if (pid && pid !== '0') {
       if (firstTexPathID === null) firstTexPathID = pid;
       if (name === '_ColorTex') colorTexPathID = pid;
       else if (name === '_ShadowTex') shadowTexPathID = pid;
       else if (name === '_MaskTex') maskTexPathID = pid;
-      else if (name === '_MainTex' || name === '_BaseMap') mainTexPathID = pid;
+      else if (name === '_MainTex' || name === '_BaseMap') {
+        mainTexPathID = pid;
+        mainTexScale = [Number((env.m_Scale || {}).x), Number((env.m_Scale || {}).y)];
+        mainTexOffset = [Number((env.m_Offset || {}).x), Number((env.m_Offset || {}).y)];
+      }
     }
   }
   const colors = props.m_Colors || [];
@@ -496,18 +519,33 @@ function readMaterialObj(sf, LE, o) {
   };
   const vec1 = {};
   for (const p of floats) if (typeof p[0] === 'string' && p[0].indexOf('Vector1') === 0) vec1[p[0]] = Number(p[1]);
+  // 全 material prop(色/float)を name→値 で公開(実行時に実ゲームGLSLの uniform を各オーラ材質で上書きするため)。
+  const allColors = {},
+    allFloats = {};
+  for (const p of colors) if (typeof p[0] === 'string') allColors[p[0]] = getColor(p[0]);
+  for (const p of floats) if (typeof p[0] === 'string') allFloats[p[0]] = Number(p[1]);
   const graphColors = colors.filter((x) => typeof x[0] === 'string' && x[0][0] !== '_').map((x) => getColor(x[0]));
   return {
     pathID: o.pathID,
     name: mat.m_Name,
     shaderPathID: mat.m_Shader ? String(mat.m_Shader.m_PathID) : null,
     mainTexPathID: mainTexPathID || colorTexPathID || firstTexPathID,
+    mainTexScale,
+    mainTexOffset,
     color: getColor('_BaseColor') || getColor('_Color'),
     graphColors,
     transparent: dstBlend != null && dstBlend !== 0,
     srcBlend: getF('_SrcBlend'),
     dstBlend,
+    cutoff: getF('_Cutoff') != null ? getF('_Cutoff') : getF('_AlphaClip'),
+    alphaClip: getF('_AlphaClip'),
+    cull: getF('_Cull'),
+    zwrite: getF('_ZWrite'),
+    texByName,
+    texST,
     vec1,
+    allColors,
+    allFloats,
     toon,
   };
 }
@@ -522,8 +560,9 @@ function readShaderInfo(sf, LE, o) {
   const name = pf.m_Name;
   if (!rt) return { name };
   const db = rt.destBlend || {};
+  const sb = rt.srcBlend || {};
   const dynamic = typeof db.name === 'string' && db.name.charAt(0) === '_';
-  return { name, dst: db.val != null ? Number(db.val) : null, dynamic };
+  return { name, dst: db.val != null ? Number(db.val) : null, src: sb.val != null ? Number(sb.val) : null, dynamic };
 }
 
 function resolveBlend(mat, shaderInfoByPid) {
@@ -534,6 +573,7 @@ function resolveBlend(mat, shaderInfoByPid) {
     return 'add';
   }
   if (mat.dstBlend === 10) return 'alpha';
+  if (mat.dstBlend === 0) return 'opaque';
   return 'add';
 }
 
@@ -687,10 +727,7 @@ function parseModelBundle(bytes) {
   return { meshes, renderers, materials, transforms, gameObjects, avatar, clips, actionPoints, fbx };
 }
 
-function decodeTexture(tex, parsed) {
-  const fmt = Number(tex.m_TextureFormat);
-  const w = Number(tex.m_Width),
-    h = Number(tex.m_Height);
+function textureBytes(tex, parsed) {
   let bytes = tex['image data'] && tex['image data'].__bytes;
   if ((!bytes || bytes.length === 0) && tex.m_StreamData && tex.m_StreamData.path) {
     const sd = tex.m_StreamData;
@@ -700,7 +737,15 @@ function decodeTexture(tex, parsed) {
     const node = parsed.nodes.find((n) => n.path === sd.path || n.path.endsWith(base));
     if (node) bytes = parsed.data.subarray(node.off + off, node.off + off + size);
   }
-  if (!bytes || !bytes.length) return { width: w, height: h, format: fmt, error: 'no-image-bytes' };
+  return bytes && bytes.length ? bytes : null;
+}
+
+function decodeTexture(tex, parsed) {
+  const fmt = Number(tex.m_TextureFormat);
+  const w = Number(tex.m_Width),
+    h = Number(tex.m_Height);
+  const bytes = textureBytes(tex, parsed);
+  if (!bytes) return { width: w, height: h, format: fmt, error: 'no-image-bytes' };
   let rgba = null;
   try {
     if (fmt === 29) {
@@ -710,12 +755,36 @@ function decodeTexture(tex, parsed) {
       }
       return { width: w, height: h, format: fmt, error: 'unityCrunch-unavailable' };
     } else if (fmt === 12 || fmt === 2 || fmt === 13 || fmt === 4) rgba = texCodec.decodeByFormat(fmt, bytes, w, h);
+    else if (fmt === 17 || fmt === 24) return { width: w, height: h, format: fmt, raw: bytes.subarray(0, fmt === 17 ? w * h * 8 : Math.ceil(w / 4) * Math.ceil(h / 4) * 16) };
     else return { width: w, height: h, format: fmt, error: 'unsupported-format-' + fmt };
   } catch (e) {
     return { width: w, height: h, format: fmt, error: e && e.message ? e.message : String(e) };
   }
   if (!rgba) return { width: w, height: h, format: fmt, error: 'unityDecode-failed' };
-  return { width: w, height: h, format: fmt, rgba };
+  const ts = tex.m_TextureSettings || {};
+  return { width: w, height: h, format: fmt, rgba, wrapU: Number(ts.m_WrapU) || 0, wrapV: Number(ts.m_WrapV) || 0 };
+}
+
+const blockBytes = (fmt) => (fmt === 12 || fmt === 13 ? 16 : 8);
+const levelBytes = (fmt, w, h) => Math.max(1, Math.ceil(w / 4)) * Math.max(1, Math.ceil(h / 4)) * blockBytes(fmt);
+
+function decodeCubemap(tex, parsed) {
+  const fmt = Number(tex.m_TextureFormat);
+  const w = Number(tex.m_Width);
+  const h = Number(tex.m_Height);
+  const faces = Number(tex.m_ImageCount) || 6;
+  const bytes = textureBytes(tex, parsed);
+  if (fmt !== 12 || !bytes || faces !== 6) return { width: w, height: h, format: fmt, error: 'unsupported-cubemap-' + fmt };
+  let stride = 0;
+  for (let i = 0; i < (Number(tex.m_MipCount) || 1); i++) stride += levelBytes(fmt, Math.max(1, w >> i), Math.max(1, h >> i));
+  const size = levelBytes(fmt, w, h);
+  const out = [];
+  for (let f = 0; f < 6; f++) {
+    const off = f * stride;
+    if (off + size > bytes.length) return { width: w, height: h, format: fmt, error: 'cubemap-short' };
+    out.push(texCodec.decodeByFormat(fmt, bytes.subarray(off, off + size), w, h));
+  }
+  return { width: w, height: h, format: fmt, faces: out };
 }
 
 function parseMaterialBundle(bytes) {
@@ -730,7 +799,10 @@ function parseMaterialBundle(bytes) {
     if (o.classID === 48) {
       try {
         const b = readShaderInfo(sf, sfp.LE, o);
-        if (b) { shaderInfoByPid[String(o.pathID)] = b; if (b.name) shaders[String(o.pathID)] = b.name; }
+        if (b) {
+          shaderInfoByPid[String(o.pathID)] = b;
+          if (b.name) shaders[String(o.pathID)] = b.name;
+        }
       } catch (e) {}
     }
   }
@@ -743,17 +815,29 @@ function parseMaterialBundle(bytes) {
         m.shaderName = si && si.name ? si.name : null;
         materials.push(m);
       } catch (e) {}
-    } else if (o.classID === 28) {
+    } else if (o.classID === 28 || o.classID === 89) {
       try {
         const tx = unitySf.readObject(sf, sfp.LE, o);
-        const dec = decodeTexture(tx, parsed);
-        textures.push({ pathID: o.pathID, name: tx.m_Name, width: dec.width, height: dec.height, format: dec.format, rgba: dec.rgba || null, error: dec.error || null });
+        const dec = o.classID === 89 ? decodeCubemap(tx, parsed) : decodeTexture(tx, parsed);
+        textures.push({
+          pathID: o.pathID,
+          name: tx.m_Name,
+          width: dec.width,
+          height: dec.height,
+          format: dec.format,
+          rgba: dec.rgba || null,
+          raw: dec.raw || null,
+          faces: dec.faces || null,
+          wrapU: dec.wrapU || 0,
+          wrapV: dec.wrapV || 0,
+          error: dec.error || null,
+        });
       } catch (e) {
         textures.push({ pathID: o.pathID, error: e && e.message ? e.message : String(e) });
       }
     }
   }
-  return { materials, textures, shaders };
+  return { materials, textures, shaders, shaderInfo: shaderInfoByPid };
 }
 
 function decodePrimaryTexture(bytes, parsed) {
@@ -866,4 +950,14 @@ function extractSpineInputs(bytes) {
   return { atlasBytes: a.bytes, skeletonBytes: s.bytes, skeletonPath: s.name, texture };
 }
 
-export const unityMesh = { parseModelBundle, parseMaterialBundle, decodeTextureRgba, decodeTextureCanvas, decodeAllTextureCanvases, parseMouthAtlas, extractSpineInputs, extractMeshGeometry };
+export const unityMesh = {
+  parseModelBundle,
+  parseMaterialBundle,
+  resolveBlend,
+  decodeTextureRgba,
+  decodeTextureCanvas,
+  decodeAllTextureCanvases,
+  parseMouthAtlas,
+  extractSpineInputs,
+  extractMeshGeometry,
+};

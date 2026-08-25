@@ -63,7 +63,7 @@ export async function runDownload(folderKey, triggerBtn) {
   resetProgress();
   try {
     const bst = await bulkDownloader.getState();
-    if (bst && bulkDownloader.isActive(bst.phase)) {
+    if (bulkDownloader.isStarting() || (bst && bulkDownloader.isActive(bst.phase))) {
       const m = '一括DLの実行中です。完了または停止してから個別DLしてください。';
       setProgress(m, 0);
       toast(m, 'err');

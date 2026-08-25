@@ -40,6 +40,7 @@ async function list() {
   for (const s of cat.m_InternalIds || []) {
     const m = String(s).match(AURA_RE);
     if (!m || seen.has(m[2])) continue;
+    if (/vfxmaterials/i.test(m[1])) continue;
     seen.add(m[2]);
     out.push({ rel: m[1], label: m[2].replace(/^abnorma.?aura_?/i, '') || m[2] });
   }

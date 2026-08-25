@@ -200,7 +200,7 @@ async function extractVoiceClips(bundleBytes) {
   const names = [];
   {
     const archiveRe = /archive:/g;
-    const nameRe = /(?:vo|c_|s_|e_|m_)\d{6,}_\d+(?:_?[a-z]+\d*)*/gi;
+    const nameRe = /(?:vo|c_|s_|e_|m_)\d{6,}_\d+(?:_?[a-z]+\d*)*|system\d{3,}/gi;
     const seen = new Set();
     let am;
     while ((am = archiveRe.exec(t)) !== null) {

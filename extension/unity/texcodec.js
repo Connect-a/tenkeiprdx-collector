@@ -437,7 +437,25 @@ function decodeDXT1(dxt, width, height) {
   return out;
 }
 
+function decodeDdsCanvas(bytes) {
+  if (!bytes || bytes.length < 128) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (dv.getUint32(0, true) !== 0x20534444) return null;
+  const height = dv.getUint32(12, true);
+  const width = dv.getUint32(16, true);
+  const fourCC = String.fromCharCode(bytes[84], bytes[85], bytes[86], bytes[87]);
+  const data = bytes.subarray(128);
+  let rgba = null;
+  try {
+    if (fourCC === 'DXT5') rgba = decodeDxt5Rgba(data, width, height);
+    else if (fourCC === 'DXT1') rgba = decodeDXT1(data, width, height);
+  } catch (e) {}
+  if (!rgba || !width || !height) return null;
+  return renderRgbaToCanvas(flipRgbaY(rgba, width, height), width, height);
+}
+
 export const texCodec = {
+  decodeDdsCanvas,
   decodeDXT1,
   decodeDxt5Rgba,
   decodeByFormat,

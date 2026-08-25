@@ -337,12 +337,13 @@ async function anyEntry(dirHandle) {
   } catch (er) {}
   return false;
 }
-async function exists(dirHandle, subpath) {
+async function exists(dirHandle, subpath, { checkSize = true } = {}) {
   const parts = subpath.split('/');
   const fn = parts.pop();
   try {
     const d = await descend(dirHandle, parts, false);
     const fh = await d.getFileHandle(fn, { create: false });
+    if (!checkSize) return true;
     return (await fh.getFile()).size > 0;
   } catch (e) {
     return false;

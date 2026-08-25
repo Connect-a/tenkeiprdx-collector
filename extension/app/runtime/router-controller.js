@@ -1,8 +1,8 @@
 import { collectionRepository } from '../../data/collection.js';
 import { playerState } from './player-state.js';
-import { parseRoute, routeHash, isTargetRoute } from './router.js';
+import { parseRoute, routeHash, routeKey, isTargetRoute } from './router.js';
 import { openRoster } from '../views/roster-view.js';
-import { openCharacter } from '../views/detail-view.js';
+import { openCharacter, openStoryRoute } from '../views/detail-view.js';
 import { showDownloadPrompt } from '../views/download-ui.js';
 import { toast } from '../ui/notifier.js';
 import { rosterModel } from '../views/roster-ui.js';
@@ -31,7 +31,8 @@ export function setAppliedRouteKey(v) {
 }
 
 export function navTo(rosterKind, id, opts) {
-  const next = routeHash(rosterKind, id || null);
+  const o = opts || {};
+  const next = routeHash(rosterKind, id || null, o.section, o.epId);
   if (location.hash === next) {
     route(true);
     return;
@@ -71,7 +72,7 @@ async function openById(id) {
 
 export async function route(skipDedup) {
   const r = parseRoute();
-  const key = r.rosterKind + '|' + (r.id || '');
+  const key = routeKey(r);
   if (!skipDedup && key === appliedRoute) return;
   appliedRoute = key;
 
@@ -83,7 +84,11 @@ export async function route(skipDedup) {
   if (r.id) {
     playerState.rosterKind = r.rosterKind;
     const ok = await openById(r.id);
-    if (!ok) openRoster(r.rosterKind);
+    if (!ok) {
+      openRoster(r.rosterKind);
+      return;
+    }
+    if (r.section === 'story') await openStoryRoute(r.id, r.epId);
     return;
   }
 

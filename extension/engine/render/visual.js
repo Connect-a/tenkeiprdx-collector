@@ -8,19 +8,14 @@ import { spineWeb } from '../story/spine-web.js';
 import { slotGroup } from '../story/slot-group.js';
 import { DIRS } from '../../core/constants.js';
 import { bundleName } from '../../core/paths.js';
-import { el, append, filterBox } from '../../core/dom.js';
+import { el, append } from '../../core/dom.js';
+import { buildGroupedVisPanel } from '../../core/vis-panel.js';
 import { fileStore } from '../../core/fsdir.js';
 import { assetStore } from '../../data/asset-store.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { unityDecode } from '../../unity/decode.js';
 const mapLimit = (items, limit, worker) => utilHelpers.pool(Array.isArray(items) ? items : [], limit, worker);
 
-const VIS_STATES = [
-  ['1', '表示'],
-  ['0.5', '半透明'],
-  ['0', '非表示'],
-];
-let _visSeq = 0;
 const setupAlpha = (slot) => (slot.data && slot.data.color && slot.data.color.a != null ? slot.data.color.a : 1);
 function installPlayerVis(player) {
   if (player.__visHooked) return player.__vis;
@@ -49,40 +44,12 @@ function installPlayerVis(player) {
   player.__visHooked = true;
   return player.__vis;
 }
-function visRadios(initial, onPick) {
-  const name = 'pv' + _visSeq++;
-  const w = el('span', 'stillradios');
-  for (const [v, t] of VIS_STATES) {
-    const input = el('input', { type: 'radio', name, value: v, checked: String(initial) === v });
-    input.addEventListener('change', () => {
-      if (input.checked) onPick(Number(v));
-    });
-    w.appendChild(el('label', 'stillradio', [input, el('span', { text: t })]));
-  }
-  return w;
-}
-function applyVisFilter(panel, q) {
-  const on = !!q;
-  panel.querySelectorAll('.stillgrp').forEach((wrap) => {
-    const parts = wrap.querySelector('.stillparts');
-    let any = false;
-    wrap.querySelectorAll('.stillpart-row').forEach((row) => {
-      const nm = (row.querySelector('.stillpart-lbl').textContent || '').toLowerCase();
-      const m = !on || nm.includes(q);
-      row.style.display = m ? '' : 'none';
-      if (m && on) any = true;
-    });
-    if (parts) parts.style.display = on ? (any ? '' : 'none') : 'none';
-    wrap.style.display = on && !any ? 'none' : '';
-  });
-}
 function buildVisPanel(panel, player) {
   const sk = player && player.skeleton;
   if (!sk || !sk.slots) {
     panel.textContent = '（読み込み中… もう一度開いてください）';
     return false;
   }
-  panel.innerHTML = '';
   const vis = installPlayerVis(player);
   const groups = new Map();
   for (const slot of sk.slots) {
@@ -91,62 +58,36 @@ function buildVisPanel(panel, player) {
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(nm);
   }
-  const setRad = (root, a) => root.querySelectorAll('.stillradios input[value="' + a + '"]').forEach((r) => (r.checked = true));
-  panel.appendChild(
-    el('div', 'stillpanel-hd', [
-      el('span', { text: '表示制御' }),
-      el('button', {
-        class: 'btn xs',
-        text: '全表示',
-        on: {
-          click: () => {
-            for (const k of Object.keys(vis)) delete vis[k];
-            setRad(panel, 1);
-          },
-        },
-      }),
-    ]),
-  );
-  const fb = filterBox({ placeholder: '部品名でフィルタ（入力すると部品を表示）…' }, (q) => applyVisFilter(panel, q));
-  panel.appendChild(fb.wrap);
-  for (const [g, names] of groups) {
-    const wrap = el('div', 'stillgrp');
-    const parts = el('div', { class: 'stillparts', style: { display: 'none' } });
-    const grad = visRadios(1, (a) => {
+  buildGroupedVisPanel(panel, {
+    groups: [...groups],
+    alphaOf: (n) => (vis[n] == null ? 1 : vis[n]),
+    onSet: (names, a) => {
       for (const n of names) {
         if (a === 1) delete vis[n];
         else vis[n] = a;
       }
-      setRad(parts, a);
-    });
-    const exp = el('button', { class: 'btn xs', text: '部品' });
-    exp.addEventListener('click', () => (parts.style.display = parts.style.display === 'none' ? '' : 'none'));
-    wrap.appendChild(el('div', 'stillgrp-row', [el('span', { class: 'stillgrp-lbl', text: g + '（' + names.length + '）' }), grad, exp]));
-    for (const n of names) {
-      const prad = visRadios(1, (a) => {
-        if (a === 1) delete vis[n];
-        else vis[n] = a;
-      });
-      parts.appendChild(el('div', 'stillpart-row', [el('span', { class: 'stillpart-lbl', text: n }), prad]));
-    }
-    wrap.appendChild(parts);
-    panel.appendChild(wrap);
-  }
+    },
+    onResetAll: () => {
+      for (const k of Object.keys(vis)) delete vis[k];
+    },
+  });
   return true;
 }
 function attachVisControl(cell, player) {
   const panel = el('div', { class: 'spine-vispanel', style: { display: 'none' } });
   const btn = el('button', {
-    class: 'btn xs spine-visbtn',
+    class: 'btn xs spine-visbtn active',
     text: '表示制御',
     on: {
       click: () => {
         if (panel.style.display !== 'none') {
           panel.style.display = 'none';
+          btn.classList.add('active');
           return;
         }
         if (!panel.__built) panel.__built = buildVisPanel(panel, player);
         panel.style.display = '';
+        btn.classList.remove('active');
       },
     },
   });
@@ -446,7 +387,7 @@ async function renderImageGallery(cur, hostEl, opt) {
   if (includeStoryAssets && cur.handle && fileStore.walkBundles) {
     const known = new Set([...paths, ...spineVisuals(cur.meta || {}).map((v) => v.path)]);
     try {
-      const SKIP = /(^|\/)(visual\/(spine|spinelight|model|materials|weapon|illustvoice)\/|story\/[^/]+\/(voice|bgm|se)\/|voice_gallery\.)/i;
+      const SKIP = /(^|\/)(visual\/(spine|spinelight|model|weapon|illustvoice|skillfx)\/|story\/[^/]+\/(voice|bgm|se)\/|voice_gallery\.)/i;
       for (const rel of await fileStore.walkBundles(cur.handle)) {
         if (known.has(rel) || SKIP.test(rel)) continue;
         known.add(rel);
@@ -633,7 +574,10 @@ async function renderImageGallery(cur, hostEl, opt) {
 
   if (!summary.rendered) {
     hostEl.innerHTML = '';
-    append(hostEl, [el('div', 'note', '候補バンドルは見つかりましたが、表示可能な画像を生成できませんでした。'), summary.failSamples.length ? el('pre', 'statusout', JSON.stringify({ failSamples: summary.failSamples })) : null]);
+    append(hostEl, [
+      el('div', 'note', '候補バンドルは見つかりましたが、表示可能な画像を生成できませんでした。'),
+      summary.failSamples.length ? el('pre', 'statusout', JSON.stringify({ failSamples: summary.failSamples })) : null,
+    ]);
     return {
       ok: false,
       error: 'no renderable images',
@@ -646,11 +590,16 @@ async function renderImageGallery(cur, hostEl, opt) {
   return summary;
 }
 
-const canvasToPngBytes = async (canvas) => {
+const WEBP_QUALITY = 0.92;
+const DECODED_DIR = 'デコード結果';
+
+const canvasToImageBytes = async (canvas) => {
   if (!canvas) return null;
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  let blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', WEBP_QUALITY));
+  if (blob && blob.type === 'image/webp') return { bytes: new Uint8Array(await blob.arrayBuffer()), ext: 'webp' };
+  blob = blob || (await new Promise((resolve) => canvas.toBlob(resolve, 'image/png')));
   if (!blob) return null;
-  return new Uint8Array(await blob.arrayBuffer());
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), ext: 'png' };
 };
 
 async function saveDecodedResources(cur, opt) {
@@ -663,13 +612,11 @@ async function saveDecodedResources(cur, opt) {
     return { ok: false, reason: 'invalid-context' };
   }
 
-  const destHandle = options.destDir || cur.handle;
-  const baseDir = options.destDir
-    ? fileStore.folderDirName
-      ? fileStore.folderDirName(cur.folderKey, characterMeta.displayName(cur.meta || {}) || '')
-      : String(cur.folderKey || 'char')
-    : `_decoded_export/${String(cur.folderKey || 'char')}`;
-  const outPath = (rel) => (baseDir ? `${baseDir}/${rel}` : rel);
+  const destHandle = await fileStore.getDir(DIRS.save, { create: true });
+  if (!destHandle) return { ok: false, reason: 'no-save-dir' };
+  const folderName = fileStore.folderDirName ? fileStore.folderDirName(cur.folderKey, characterMeta.displayName(cur.meta || {}) || '') : String(cur.folderKey || 'char');
+  const baseDir = `${DECODED_DIR}/${folderName}`;
+  const outPath = (rel) => `${baseDir}/${rel}`;
   const writeOut = (rel, bytes) => fileStore.writeUnder(destHandle, outPath(rel), bytes);
   if (fileStore.removeDirUnder) {
     try {
@@ -713,10 +660,10 @@ async function saveDecodedResources(cur, opt) {
 
       let wrote = 0;
       for (const t of texResult.previews) {
-        const png = await canvasToPngBytes(t.canvas);
-        if (!png) continue;
+        const img = await canvasToImageBytes(t.canvas);
+        if (!img) continue;
         const bn = bundleName(p) || 'bundle';
-        await writeOut(`images/${bn}__tex_${imageIdx}.png`, png);
+        await writeOut(`images/${bn}__tex_${imageIdx}.${img.ext}`, img.bytes);
         imageIdx += 1;
         out.imageSaved += 1;
         wrote += 1;
@@ -724,11 +671,14 @@ async function saveDecodedResources(cur, opt) {
 
       for (let i = 0; i < embedded.length; i++) {
         const e = embedded[i];
-        const ext = e.type === 'jpg' ? 'jpg' : e.type;
         const bn = bundleName(p) || 'bundle';
         const mime = e.type === 'jpg' ? 'image/jpeg' : `image/${e.type}`;
-        const enc = flipY ? await texCodec.flipEncodedImageBytesY(e.bytes, mime) : { bytes: e.bytes };
-        await writeOut(`images/${bn}__embedded_${i}.${ext}`, enc.bytes);
+        let img = null;
+        try {
+          img = await canvasToImageBytes(await texCodec.decodeEncodedToCanvas(e.bytes, mime, flipY));
+        } catch (er) {}
+        if (img) await writeOut(`images/${bn}__embedded_${i}.${img.ext}`, img.bytes);
+        else await writeOut(`images/${bn}__embedded_${i}.${e.type === 'jpg' ? 'jpg' : e.type}`, flipY ? (await texCodec.flipEncodedImageBytesY(e.bytes, mime)).bytes : e.bytes);
         out.imageSaved += 1;
         wrote += 1;
       }

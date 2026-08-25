@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>ビューワー｜天啓パラドクス コレクター</title>
+    <link rel="stylesheet" href="style/base.css" />
+    <link rel="stylesheet" href="style/roster.css" />
+    <link rel="stylesheet" href="style/visual.css" />
+    <link rel="stylesheet" href="style/viewer.css" />
+  </head>
+  <body class="vwbody">
+    <header class="hdr">
+      <h1 id="vwTitle">ビューワー<span class="vw-buggy" title="フィールドの水面まわりなど、描画が実ゲームと違う箇所があります">（バグあり）</span></h1>
+      <div class="vw-tabs">
+        <button class="vw-tab active" data-mode="3d">3D</button>
+        <button class="vw-tab" data-mode="2d">2D（立ち絵）</button>
+      </div>
+      <span class="hdspacer"></span>
+      <span id="vwSceneName" class="note dim"></span>
+      <button class="btn xs" id="vwSave" title="いまの配置に名前を付けて保存します">保存</button>
+      <button class="btn xs" id="vwLoad" title="保存した配置を読み込みます">読込</button>
+      <button class="btn xs" id="vwExport" title="配置をJSONファイルとして書き出します">JSON出力</button>
+      <button class="btn xs" id="vwImport" title="JSONファイルから配置を読み込みます">JSON取込</button>
+      <button class="btn xs" id="vwShot" title="いまの表示をPNGでセーブデータフォルダに保存します">画像保存</button>
+      <a class="btn xs" href="player.html" title="コレクターに戻る">← コレクター</a>
+    </header>
+
+    <div id="vwNeedFolder" class="vw-need" style="display: none">
+      <p>保存先フォルダに接続していません。</p>
+      <button class="btn primary" id="vwPickFolder">フォルダを選ぶ</button>
+    </div>
+
+    <main class="vw-main" id="vwMain" style="display: none">
+      <aside class="vw-side" id="vwPicker"></aside>
+      <section class="vw-stagewrap">
+        <div class="vw-fieldbar">
+          <label class="vw-lbl" id="vwFieldLabel">フィールド</label>
+          <select id="vwField" class="rgsel"></select>
+          <span class="note dim" id="vwFieldNote"></span>
+          <span class="hdspacer"></span>
+          <button class="btn xs" id="vwRecenter" title="カメラを配置中のキャラに合わせ直します">カメラを戻す</button>
+          <button class="btn xs" id="vwClear" title="配置中のキャラを全て外します">全部外す</button>
+        </div>
+        <div class="vw-stagebox">
+          <div class="vw-stage" id="vwStage"></div>
+          <div class="vw-busy" id="vwBusy" style="display: none"><span class="dlspin"></span><span id="vwBusyText"></span></div>
+        </div>
+        <div class="vw-ctrls" id="vwCtrls"></div>
+      </section>
+    </main>
+
+    <div class="vw-modal" id="vwModal" style="display: none">
+      <div class="vw-modalbox">
+        <div class="vw-modalhd" id="vwModalTitle"></div>
+        <div class="vw-modalbody" id="vwModalBody"></div>
+        <div class="vw-modalft"><button class="btn xs" id="vwModalClose">閉じる</button></div>
+      </div>
+    </div>
+
+    <script type="module" src="app/viewer/viewer-main.js"></script>
+  </body>
+</html>

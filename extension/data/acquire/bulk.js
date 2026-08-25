@@ -2,6 +2,7 @@ import { scanFolder } from '../folder-scan.js';
 import { downloadRunner } from './download-runner.js';
 import { SK } from '../../core/constants.js';
 import { failureReport, failureSummary, hasFailures } from '../../core/failure-report.js';
+import { bgTimeout } from '../../core/bgtimer.js';
 const STATE_KEY = SK.bulkState;
 const FAIL_LIMIT = 5;
 const GD_INTERVAL_SEC = 3;
@@ -18,6 +19,7 @@ const ownedByOther = (st) => !!st && !!st.owner && st.owner !== RUNNER_ID && Dat
 let _state = null;
 let _stopReq = false;
 let _running = false;
+let _starting = false;
 
 async function loadState() {
   try {
@@ -37,7 +39,7 @@ function flush(force) {
   }
   if (force) {
     if (_flushTimer) {
-      clearTimeout(_flushTimer);
+      _flushTimer();
       _flushTimer = null;
     }
     _flushPending = false;
@@ -53,13 +55,13 @@ function flush(force) {
   try {
     chrome.storage.local.set({ [STATE_KEY]: _state });
   } catch (e) {}
-  _flushTimer = setTimeout(() => {
+  _flushTimer = bgTimeout(FLUSH_MS, () => {
     _flushTimer = null;
     if (_flushPending) {
       _flushPending = false;
       flush();
     }
-  }, FLUSH_MS);
+  });
 }
 
 function stats(items) {
@@ -81,11 +83,11 @@ function sleepCancelable(ms) {
   return new Promise((res) => {
     if (ms <= 0) return res();
     const w = () => {
-      clearTimeout(t);
+      cancel();
       _wakers.delete(w);
       res();
     };
-    const t = setTimeout(w, Math.min(ms, 60000));
+    const cancel = bgTimeout(Math.min(ms, 60000), w);
     _wakers.add(w);
   });
 }
@@ -255,6 +257,11 @@ async function runPipelines() {
             })
             .then((o) => {
               metaOutcome = o;
+            })
+            .catch(() => {
+              metaOutcome = 'error';
+            })
+            .finally(() => {
               metaRunning = false;
             })
         : null,
@@ -306,17 +313,24 @@ async function runPipelines() {
 
 async function start(items, opts) {
   opts = opts || {};
+  if (_starting) return { ok: false, reason: 'active' };
   if (_state && isActive(_state.phase)) return { ok: false, reason: 'active' };
   if (!items || !items.length) return { ok: false, reason: 'empty' };
   const stored = await loadState();
   if (stored && isActive(stored.phase) && ownedByOther(stored)) return { ok: false, reason: 'active' };
   const overwrite = !!opts.overwrite;
+  _stopReq = false;
+  _starting = true;
   let have = new Set();
-  if (!overwrite) {
-    try {
-      have = new Set((await scanFolder()).filter((x) => x.counts.total > 0 && x.counts.have >= x.counts.total).map((x) => String(x.folderKey)));
-    } catch (e) {}
+  try {
+    if (!overwrite) {
+      have = new Set(opts.have || (await scanFolder()).filter((x) => x.counts.total > 0 && x.counts.have >= x.counts.total).map((x) => String(x.folderKey)));
+    }
+  } catch (e) {
+  } finally {
+    _starting = false;
   }
+  if (_stopReq) return { ok: false, reason: 'stopped' };
   _state = {
     phase: 'running',
     owner: RUNNER_ID,
@@ -347,7 +361,6 @@ async function start(items, opts) {
     })),
   };
   flush(true);
-  _stopReq = false;
   runPipelines();
   return { ok: true, stats: stats(_state.items) };
 }
@@ -355,8 +368,9 @@ async function start(items, opts) {
 async function stop() {
   _stopReq = true;
   wakeAll();
+  if (_starting) return;
   if (!_state) _state = await loadState();
-  if (_state) {
+  if (_state && isActive(_state.phase)) {
     _state.phase = 'stopped';
     _state.currentStatus = '';
     _state.gdStatus = '';
@@ -407,4 +421,4 @@ async function clear() {
   return { ok: true };
 }
 
-export const bulkDownloader = { isActive, getState, stats, start, stop, resume, resumeAfterReconnect, clear };
+export const bulkDownloader = { isActive, isStarting: () => _starting, getState, stats, start, stop, resume, resumeAfterReconnect, clear };

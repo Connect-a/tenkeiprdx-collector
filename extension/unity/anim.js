@@ -37,6 +37,53 @@ function curveSize(b) {
   return 1;
 }
 
+const qMul = (a, b) => [
+  a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+  a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+  a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+  a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+];
+
+function qSlerpFromIdentity(q, t) {
+  let [x, y, z, w] = q;
+  if (w < 0) {
+    x = -x;
+    y = -y;
+    z = -z;
+    w = -w;
+  }
+  const ang = Math.acos(Math.min(1, w));
+  if (ang < 1e-6) return [0, 0, 0, 1];
+  const s = Math.sin(ang);
+  const a = Math.sin((1 - t) * ang) / s;
+  const b = Math.sin(t * ang) / s;
+  return [x * b, y * b, z * b, w * b + a];
+}
+
+function applyLoopBlend(tr, frames) {
+  if (frames < 2) return;
+  const v = tr.values;
+  if (tr.type === 'rot') {
+    const e = (frames - 1) * 4;
+    const inv = [-v[0], -v[1], -v[2], v[3]];
+    const delta = qMul([v[e], v[e + 1], v[e + 2], v[e + 3]], inv);
+    if (Math.abs(delta[0]) + Math.abs(delta[1]) + Math.abs(delta[2]) < 1e-7) return;
+    for (let i = 0; i < frames; i++) {
+      const c = qSlerpFromIdentity(delta, i / (frames - 1));
+      const q = qMul([-c[0], -c[1], -c[2], c[3]], [v[i * 4], v[i * 4 + 1], v[i * 4 + 2], v[i * 4 + 3]]);
+      const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+      for (let k = 0; k < 4; k++) v[i * 4 + k] = q[k] / l;
+    }
+    return;
+  }
+  const d = [v[(frames - 1) * 3] - v[0], v[(frames - 1) * 3 + 1] - v[1], v[(frames - 1) * 3 + 2] - v[2]];
+  if (Math.abs(d[0]) + Math.abs(d[1]) + Math.abs(d[2]) < 1e-7) return;
+  for (let i = 0; i < frames; i++) {
+    const f = i / (frames - 1);
+    for (let k = 0; k < 3; k++) v[i * 3 + k] -= d[k] * f;
+  }
+}
+
 function decodeClipObj(clipObj) {
   const name = clipObj.m_Name;
   const mc = clipObj.m_MuscleClip;
@@ -91,6 +138,7 @@ function decodeClipObj(clipObj) {
   const startTime = Number(mc.m_StartTime || 0);
   const stopTime = Number(mc.m_StopTime || 0);
   const sampleRate = Number(clipObj.m_SampleRate || 30) || 30;
+  const loopBlend = !!(mc.m_LoopTime && mc.m_LoopBlend);
 
   const evalStreamed = (keys, t) => {
     if (!keys.length) return 0;
@@ -202,6 +250,7 @@ function decodeClipObj(clipObj) {
         tracks.push({ boneHash: e.path, type: 'scale', times, values: vals });
       }
     }
+    if (loopBlend) for (const tr of tracks) applyLoopBlend(tr, frames);
     return { name, duration, tracks };
   };
 
