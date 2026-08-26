@@ -23,28 +23,20 @@ import { buildOnboard } from '../views/onboarding-ui.js';
 import { navTo, route } from './router-controller.js';
 import { routeHash } from './router.js';
 import { showVersionAndCheckUpdate } from './update-check.js';
-import { updateConn } from './connection-controller.js';
 import { updateCdnReset } from '../views/shell-ui.js';
 import { renderIndexRebuild } from '../views/download-section.js';
 import { renderStorageSummary } from '../views/storage-summary.js';
 import { refreshLists } from './state-refresh.js';
 import { renderRoster, restoreRosterPrefs } from '../views/roster-ui.js';
 import { ensureBulkTick, renderBulkBanner } from '../views/bulk-ui.js';
-import { resumeBulkIfWaitingForConnection } from './bulk-resume.js';
 import { registerPanels } from './panel-state.js';
 import { audioScene } from './audio-scene.js';
 import { settings } from '../../core/settings.js';
 import { resolveOrigin, ensureOriginAlive } from '../../data/origin.js';
 import { CFG } from '../../config.js';
-let connPollTimer = null;
 
 export async function init() {
-  try {
-    Promise.resolve(chrome.runtime.sendMessage({ cmd: 'reattach' })).catch(() => {});
-  } catch (e) {}
   showVersionAndCheckUpdate();
-  updateConn();
-  if (!connPollTimer) connPollTimer = setInterval(updateConn, 30000);
 
   try {
     const o = await chrome.storage.local.get(SK.email);
@@ -143,9 +135,6 @@ export async function init() {
       ensureBulkTick(true);
       await renderBulkBanner();
       bulkDownloader.resume();
-    } else if (bst && bst.tokenError && (await resumeBulkIfWaitingForConnection())) {
-      ensureBulkTick(true);
-      await renderBulkBanner();
     }
   } catch (e) {}
 

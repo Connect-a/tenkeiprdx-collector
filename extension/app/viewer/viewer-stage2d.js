@@ -2,6 +2,8 @@ import { spineWeb } from '../../engine/story/spine-web.js';
 import { visualRenderer } from '../../engine/render/visual.js';
 import { spineInputsFor } from './viewer-source.js';
 import { unityMesh } from '../../unity/mesh.js';
+import { texCodec } from '../../unity/texcodec.js';
+import { fileStore } from '../../core/fsdir.js';
 import { assetStore } from '../../data/asset-store.js';
 import { DIRS } from '../../core/constants.js';
 import { createStageCore } from './viewer-stage-core.js';
@@ -13,6 +15,33 @@ const REF_W = 1136;
 const REF_H = 640;
 const BASE_SCALE = 0.33;
 
+async function readBg(dir, rel) {
+  try {
+    return await assetStore.readAsset(dir, rel);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function readPlainFile(dir, rel) {
+  try {
+    const d = await fileStore.getDir(dir, { create: false });
+    return d ? await fileStore.readBytesUnder(d, rel) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function backgroundCanvas(rel) {
+  if (/\.dds$/i.test(rel)) {
+    const bytes = await readPlainFile(DIRS.home, rel);
+    return bytes ? texCodec.decodeDdsCanvas(bytes) : null;
+  }
+  const bytes = (await readBg(DIRS.shared, rel)) || (await readBg(DIRS.home, rel));
+  const list = bytes ? unityMesh.decodeAllTextureCanvases(bytes) : null;
+  return list && list.length ? list[0] : null;
+}
+
 const EXPRESSIONS = [
   ['idle_normal', 'ふつう'],
   ['idle_joy', 'よろこび'],
@@ -22,12 +51,7 @@ const EXPRESSIONS = [
   ['idle_surprise', 'おどろき'],
   ['idle_unique', 'とくべつ'],
 ];
-const SLIDERS = [
-  ['x', '左右', -6, 6, 0.05],
-  ['y', '高さ', -6, 6, 0.05],
-  ['z', '前後', -6, 6, 1],
-  ['scale', '大きさ', 0.2, 3, 0.01],
-];
+const SLIDERS = [['z', '前後', -6, 6, 1]];
 
 const idleAnim = (names) => (names || []).find((n) => n === 'idle_normal') || (names || []).find((n) => /idle/i.test(n)) || (names || [])[0] || '';
 
@@ -67,6 +91,16 @@ export function createStage(hostEl, deps) {
   let bgUrl = '';
   let bgCss = '';
   let bgImg = null;
+  let selected = null;
+  let mode = null;
+  let dragFrom = null;
+  const rects = new Map();
+  const box = el('div', { class: 'vw-gizmo2d', style: { display: 'none' } });
+  const knob = el('div', 'vw-gizmo2d-knob');
+  const spin = el('div', 'vw-gizmo2d-spin');
+  box.appendChild(knob);
+  box.appendChild(spin);
+  hostEl.appendChild(box);
   const CAM = () => state.scene.camera;
   const zoomOf = (cam) => 8 / Math.max(0.05, cam.dist || 8);
 
@@ -79,26 +113,117 @@ export function createStage(hostEl, deps) {
     canvas.height = h;
   }
 
+  const localPos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+
+  const toLocal = (r, p) => {
+    const cs = Math.cos(r.rot || 0);
+    const sn = Math.sin(r.rot || 0);
+    const dx = p.x - r.cx;
+    const dy = p.y - r.cy;
+    return { x: dx * cs + dy * sn, y: -dx * sn + dy * cs };
+  };
+
+  const toWorld = (r, x, y) => {
+    const cs = Math.cos(r.rot || 0);
+    const sn = Math.sin(r.rot || 0);
+    return { x: r.cx + x * cs - y * sn, y: r.cy + x * sn + y * cs };
+  };
+
+  const near = (p, q) => Math.abs(p.x - q.x) <= 10 && Math.abs(p.y - q.y) <= 10;
+
+  const handleAt = (p) => {
+    const r = selected ? rects.get(selected) : null;
+    if (!r) return null;
+    if (near(p, toWorld(r, r.w / 2, -r.h / 2))) return 'scale';
+    if (near(p, toWorld(r, 0, -r.h / 2 - 20))) return 'rotate';
+    return null;
+  };
+
+  const charAt = (p) => {
+    const order = state.scene.chars.slice().sort((a, b) => (a.z || 0) - (b.z || 0));
+    for (const c of order) {
+      const r = rects.get(String(c.id));
+      if (!r) continue;
+      const l = toLocal(r, p);
+      if (Math.abs(l.x) <= r.w / 2 && Math.abs(l.y) <= r.h / 2) return String(c.id);
+    }
+    return null;
+  };
+
+  const unitPerPx = () => {
+    const W = canvas.width;
+    const H = canvas.height;
+    const dpr = W / (hostEl.clientWidth || REF_W);
+    const zoom = zoomOf(CAM());
+    return { ux: 12 / ((W / dpr) * zoom), uy: 12 / ((H / dpr) * zoom) };
+  };
+
   function bindPointer() {
     let drag = false;
+    let moved = 0;
     let lx = 0;
     let ly = 0;
     canvas.style.touchAction = 'none';
     canvas.style.cursor = 'grab';
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
-      drag = true;
       lx = e.clientX;
       ly = e.clientY;
+      moved = 0;
       canvas.setPointerCapture(e.pointerId);
+      const p = localPos(e);
+      const h = selected ? handleAt(p) : null;
+      if (h) {
+        const c = state.get(selected);
+        const r = rects.get(selected);
+        mode = h;
+        dragFrom = h === 'scale' ? { scale: c ? c.scale || 1 : 1, dist: Math.max(8, Math.hypot(p.x - r.cx, p.y - r.cy)) } : { rot: c ? c.rotY || 0 : 0, angle: Math.atan2(p.x - r.cx, -(p.y - r.cy)) };
+        return;
+      }
+      if (selected && charAt(p) === selected) {
+        const c = state.get(selected);
+        mode = 'move';
+        dragFrom = { x: c ? c.x || 0 : 0, y: c ? c.y || 0 : 0, px: p.x, py: p.y };
+        return;
+      }
+      drag = true;
     });
     canvas.addEventListener('pointerup', (e) => {
+      if (!mode && drag && moved < 5 && e.button === 0) {
+        selected = charAt(localPos(e));
+        if (deps.onSelect) deps.onSelect(selected);
+      }
       drag = false;
+      mode = null;
+      dragFrom = null;
       try {
         canvas.releasePointerCapture(e.pointerId);
       } catch (x) {}
     });
     canvas.addEventListener('pointermove', (e) => {
+      moved += Math.abs(e.clientX - lx) + Math.abs(e.clientY - ly);
+      if (mode && selected) {
+        const p = localPos(e);
+        if (mode === 'scale') {
+          const r = rects.get(selected);
+          const d = Math.max(8, Math.hypot(p.x - r.cx, p.y - r.cy));
+          state.update(selected, { scale: Math.max(0.05, Math.min(8, dragFrom.scale * (d / dragFrom.dist))) });
+        } else if (mode === 'rotate') {
+          const r = rects.get(selected);
+          const a = Math.atan2(p.x - r.cx, -(p.y - r.cy));
+          state.update(selected, { rotY: dragFrom.rot - (a - dragFrom.angle) });
+        } else {
+          const u = unitPerPx();
+          state.update(selected, { x: dragFrom.x + (p.x - dragFrom.px) * u.ux, y: dragFrom.y - (p.y - dragFrom.py) * u.uy });
+        }
+        if (deps.onGizmo) deps.onGizmo(selected);
+        lx = e.clientX;
+        ly = e.clientY;
+        return;
+      }
       if (!drag) return;
       const cam = CAM();
       cam.panX += e.clientX - lx;
@@ -150,6 +275,7 @@ export function createStage(hostEl, deps) {
         bgCss = css;
         bgEl.style.transform = css;
       }
+      rects.clear();
       const heights = state.scene.chars
         .map((c) => core.live(c.id))
         .filter((r) => r && r.bounds.h > 0)
@@ -166,16 +292,36 @@ export function createStage(hostEl, deps) {
         const b = rec.bounds;
         if (!(b.h > 0)) continue;
         const scale = (refH > 0 ? (H * 0.5) / refH : BASE_SCALE * (H / REF_H)) * (c.scale || 1) * zoom;
-        rec.skeleton.x = px + (c.x || 0) * (W / 12) * zoom - (b.x + b.w / 2) * scale;
-        rec.skeleton.y = py + (c.y || 0) * (H / 12) * zoom - (b.y + b.h / 2) * scale;
+        const th = c.rotY || 0;
+        const cos = Math.cos(th);
+        const sin = Math.sin(th);
+        const ox = b.x + b.w / 2;
+        const oy = b.y + b.h / 2;
+        rec.skeleton.x = px + (c.x || 0) * (W / 12) * zoom - (ox * cos - oy * sin) * scale;
+        rec.skeleton.y = py + (c.y || 0) * (H / 12) * zoom - (ox * sin + oy * cos) * scale;
         rec.skeleton.scaleX = scale;
         rec.skeleton.scaleY = scale;
+        const rootBone = rec.skeleton.getRootBone ? rec.skeleton.getRootBone() : (rec.skeleton.bones || [])[0];
+        if (rootBone) rootBone.rotation = ((c.rotY || 0) * 180) / Math.PI;
         rec.skeleton.updateWorldTransform();
+        const cx = px + (c.x || 0) * (W / 12) * zoom;
+        const cy = py + (c.y || 0) * (H / 12) * zoom;
+        rects.set(String(c.id), { cx: cx / dpr, cy: (H - cy) / dpr, w: (b.w * scale) / dpr, h: (b.h * scale) / dpr, rot: -th });
         try {
           renderer.drawSkeleton(rec.skeleton, true);
         } catch (e) {}
       }
       renderer.end();
+      const r = selected ? rects.get(selected) : null;
+      if (!r) box.style.display = 'none';
+      else {
+        box.style.display = '';
+        box.style.left = r.cx - r.w / 2 + 'px';
+        box.style.top = r.cy - r.h / 2 + 'px';
+        box.style.width = Math.max(4, r.w) + 'px';
+        box.style.height = Math.max(4, r.h) + 'px';
+        box.style.transform = r.rot ? `rotate(${(r.rot * 180) / Math.PI}deg)` : '';
+      }
     },
     async create(key, entry) {
       let inputs = null;
@@ -192,6 +338,10 @@ export function createStage(hostEl, deps) {
         core.note(`#${key} の立ち絵を組み立てられませんでした。`);
         return null;
       }
+    },
+    selected: () => selected,
+    select(id) {
+      selected = id ? String(id) : null;
     },
     destroy(rec) {
       try {
@@ -230,9 +380,7 @@ export function createStage(hostEl, deps) {
       }
       core.busy(true, '背景を読み込み中…');
       try {
-        const bytes = await assetStore.readAsset(DIRS.shared, f.rel);
-        const canvases = bytes ? unityMesh.decodeAllTextureCanvases(bytes) : null;
-        const cv = canvases && canvases.length ? canvases[0] : null;
+        const cv = await backgroundCanvas(f.rel);
         if (!cv) return;
         const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
         bgUrl = URL.createObjectURL(blob);

@@ -104,18 +104,52 @@ function lightmapTexture(T, rec, bptc) {
 }
 
 const LIT_SHADER = /Baked Lit|^Universal Render Pipeline\/(Lit|Simple Lit)$/;
+const FLAT_SH = (l0) => [l0.map((x) => x / 0.886227), [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+
 function ambientOf(rs) {
   const probe = rs && rs.m_AmbientProbe;
   if (probe) {
     const keys = Object.keys(probe).sort((a, b) => parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10));
     const v = keys.map((k) => Number(probe[k]));
+    if (v.length >= 27) {
+      const sh = [];
+      for (let i = 0; i < 9; i++) sh.push([v[i], v[i + 9], v[i + 18]]);
+      if (sh.some((c) => c.some((x) => x !== 0))) return sh;
+    }
     if (v.length >= 19) {
       const dc = [v[0], v[9], v[18]].map((x) => Math.max(0, x * 0.886227));
-      if (dc.some((x) => x > 0)) return dc;
+      if (dc.some((x) => x > 0)) return FLAT_SH(dc);
     }
   }
   const c = (rs && rs.m_AmbientSkyColor) || null;
-  return c ? [Number(c.r) || 0, Number(c.g) || 0, Number(c.b) || 0] : [1, 1, 1];
+  return FLAT_SH(c ? [Number(c.r) || 0, Number(c.g) || 0, Number(c.b) || 0] : [1, 1, 1]);
+}
+
+const SH_A = [0.886227, 1.023328, 0.858086, 0.247708, 0.429043];
+function shIrradiance(sh, nx, ny, nz, out) {
+  for (let k = 0; k < 3; k++) {
+    let r = SH_A[0] * sh[0][k];
+    r += SH_A[1] * (sh[1][k] * ny + sh[2][k] * nz + sh[3][k] * nx);
+    r += SH_A[4] * (sh[4][k] * nx * ny + sh[5][k] * ny * nz + sh[7][k] * nx * nz) * 2;
+    r += SH_A[3] * sh[6][k] * (3 * nz * nz - 1);
+    r += SH_A[4] * sh[8][k] * (nx * nx - ny * ny);
+    out[k] = Math.max(0, r);
+  }
+  return out;
+}
+
+function bakeAmbientColors(T, geo, sh) {
+  const nrm = geo.attributes.normal;
+  if (!nrm) return null;
+  const col = new Float32Array(nrm.count * 3);
+  const tmp = [0, 0, 0];
+  for (let i = 0; i < nrm.count; i++) {
+    shIrradiance(sh, nrm.getX(i), nrm.getY(i), nrm.getZ(i), tmp);
+    col[i * 3] = tmp[0];
+    col[i * 3 + 1] = tmp[1];
+    col[i * 3 + 2] = tmp[2];
+  }
+  return new T.BufferAttribute(col, 3);
 }
 
 function threeMaterial(T, mat, texByPid, lightMap, ambient) {
@@ -136,10 +170,11 @@ function threeMaterial(T, mat, texByPid, lightMap, ambient) {
     opts.lightMap = lightMap;
     opts.lightMapIntensity = Math.PI;
   }
-  const amb = !lightMap && ambient && mat && LIT_SHADER.test(String(mat.shaderName || '')) ? ambient : [1, 1, 1];
+  const lit = !lightMap && mat && LIT_SHADER.test(String(mat.shaderName || ''));
+  if (lit) opts.vertexColors = true;
   const c = (mat && mat.color) || null;
   const base = Array.isArray(c) ? c : c ? [c.r ?? 1, c.g ?? 1, c.b ?? 1] : [1, 1, 1];
-  if (c || amb[0] !== 1 || amb[1] !== 1 || amb[2] !== 1) opts.color = new T.Color(Math.min(1, base[0] * amb[0]), Math.min(1, base[1] * amb[1]), Math.min(1, base[2] * amb[2]));
+  if (c) opts.color = new T.Color(base[0], base[1], base[2]);
   if (mat && mat.cutoff != null && mat.alphaClip === 1) {
     opts.alphaTest = mat.cutoff;
     opts.transparent = false;
@@ -232,7 +267,7 @@ export async function loadBattleField(T, rel, opt) {
     return { index: i, sx: t.x == null ? 1 : Number(t.x), sy: t.y == null ? 1 : Number(t.y), ox: Number(t.z) || 0, oy: Number(t.w) || 0 };
   };
 
-  let ambient = [1, 1, 1];
+  let ambient = FLAT_SH([1, 1, 1]);
   for (const o of sfp.objects) {
     if (o.classID !== CLS.RENDER_SETTINGS) continue;
     try {
@@ -404,7 +439,8 @@ export async function loadBattleField(T, rel, opt) {
     const subs = geo.submeshes && geo.submeshes.length ? geo.submeshes : [{ indexStart: 0, indexCount: geo.indices.length, topology: 0 }];
     const range = cnt > 0 ? subs.slice(first, first + cnt) : subs;
     const matRefs = mr.m_Materials || [];
-    const lm = lightmapRef(mr);
+    const lmRaw = lightmapRef(mr);
+    const lm = cnt > 0 && lmRaw ? { index: lmRaw.index, sx: 1, sy: 1, ox: 0, oy: 0 } : lmRaw;
     const parts = [];
     range.forEach((sm, i) => {
       if (!sm || !sm.indexCount || Number(sm.topology) !== 0) return;
@@ -454,6 +490,10 @@ export async function loadBattleField(T, rel, opt) {
     g.setIndex(a.index);
     if (!a.normal) g.computeVertexNormals();
     if (geo.uv1) g.setAttribute('uv1', new T.BufferAttribute(bakeLightmapUv(geo, parts), 2));
+    if (parts.some((p) => !(p.lm && geo.uv1))) {
+      const vc = bakeAmbientColors(T, g, ambient);
+      if (vc) g.setAttribute('color', vc);
+    }
     const matList = [];
     const matIndex = new Map();
     for (const p of parts) {
@@ -523,6 +563,8 @@ export async function loadBattleField(T, rel, opt) {
 
   let fog = null;
   let background = null;
+  let backgroundRotation = 0;
+  let backgroundIntensity = 1;
   let light = null;
   for (const o of sfp.objects) {
     if (o.classID === CLS.RENDER_SETTINGS) {
@@ -540,6 +582,9 @@ export async function loadBattleField(T, rel, opt) {
         const skyRef = skyMat ? String(skyMat.mainTexPathID || skyMat.firstTexPathID || '') : '';
         const skyCube = skyRef ? cubeByPid.get(skyRef) : null;
         const skyTex = skyRef ? texByPid.get(skyRef) : null;
+        const skyFloats = (skyMat && skyMat.allFloats) || {};
+        backgroundRotation = ((Number(skyFloats._Rotation) || 0) * Math.PI) / 180;
+        backgroundIntensity = Number(skyFloats._Exposure) || 1;
         if (skyCube) {
           background = cubeTexture(T, skyCube);
         } else if (skyTex) {
@@ -567,5 +612,5 @@ export async function loadBattleField(T, rel, opt) {
     for (const t of lightMaps) if (t) t.dispose();
     if (background && background.dispose && background.isCubeTexture) background.dispose();
   };
-  return { group, fog, background, light, origin, meshCount: drawn, lightmaps: lightMaps.filter(Boolean).length, fieldMats };
+  return { group, fog, background, backgroundRotation, backgroundIntensity, light, origin, meshCount: drawn, lightmaps: lightMaps.filter(Boolean).length, fieldMats };
 }

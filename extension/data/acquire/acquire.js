@@ -1,6 +1,6 @@
 import { unityDecode } from '../../unity/decode.js';
 import { fileStore } from '../../core/fsdir.js';
-import { DIRS, SK, DL_CONC, OTHER_EPISODE_SUBTYPE, FOLDER_PARENTS } from '../../core/constants.js';
+import { DIRS, SK, DL_CONC, FOLDER_PARENTS } from '../../core/constants.js';
 import { networkClient } from '../network.js';
 import { dlSession } from '../dl-session.js';
 import { ensureIndexes } from '../index-store.js';
@@ -11,15 +11,12 @@ import { characterMeta } from '../character-meta.js';
 import { assetRefs } from '../asset-refs.js';
 import { buildIndexes } from '../build-indexes.js';
 import { ensureSharedSingletons } from './acquire-shared-res.js';
-import { CFG } from '../../config.js';
 import { fileNameOf } from '../../core/paths.js';
 import { PLACE } from '../../core/placement.js';
 import { assetStore } from '../asset-store.js';
-const { assetRoot, fetchBytes, apiFetchBytes } = networkClient;
+const { assetRoot } = networkClient;
 const { ownedLevels, unlockedPaidSet, clearedNodeSet, openEpisodeSet, userLoaded } = userStateService;
-const sleep = utilHelpers.sleep;
 const pool = utilHelpers.pool;
-const bytesToB64 = utilHelpers.bytesToB64;
 
 async function distConfig() {
   let binUrl = '',
@@ -48,17 +45,6 @@ function episodeLocked(ep, ctx) {
 function extractSceneUrls(bytes, out) {
   const SCENE_URL = /production\/scenes\/(\d+)\.bin\?[A-Za-z0-9%=&._~:+-]+/g;
   for (const m of unityDecode.extractEmbeddedUrls(bytes, SCENE_URL)) if (!out[m[1]]) out[m[1]] = m[0];
-}
-
-async function postLog(items, group) {
-  if (!CFG.receiverUrl || !items.length) return;
-  const { email } = await distConfig();
-  try {
-    await fetch(CFG.receiverUrl + '/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, email, group: String(group) }) });
-  } catch (e) {}
-}
-function sceneLogItem(sceneId, bytes) {
-  return { url: `production/scenes/${sceneId}.bin`, base64: bytesToB64(bytes), base64Encoded: true, mime: 'application/octet-stream' };
 }
 
 async function readSavedScenes(dir, episodes, { contents = true } = {}) {
@@ -91,131 +77,6 @@ async function readSavedScenes(dir, episodes, { contents = true } = {}) {
 }
 
 const folderNameOf = (meta0, folderKey) => characterMeta.displayName(meta0) || folderKey;
-
-async function planApiEpisodes(folderKey, opts) {
-  const overwrite = !!(opts && opts.overwrite);
-  const { folderMeta } = await folderModel();
-  const meta0 = folderMeta[String(folderKey)];
-  if (!meta0) return { apiType: null, episodes: [], dir: null };
-  const apiType = meta0.apiType;
-  const dir = await fileStore.getFolderDir(folderKey, folderNameOf(meta0, folderKey), { create: true, kind: meta0.rosterKind });
-  if (!apiType || !dir) return { apiType, episodes: [], dir };
-  const { sceneBytes, servedByEp } = await readSavedScenes(dir, meta0.episodes);
-  const level = meta0.apiType === 'Character' ? ((await ownedLevels()).get(String(folderKey)) ?? 0) : null;
-
-  const paid = meta0.apiType === 'Special' ? await unlockedPaidSet() : null;
-  const cleared = meta0.apiType === 'Quest' ? await clearedNodeSet() : null;
-  const clearedLoaded = meta0.apiType === 'Quest' ? await userLoaded() : true;
-  const openSet = meta0.apiType === 'Character' ? await openEpisodeSet() : null;
-  const openLoaded = meta0.apiType === 'Character' ? await userLoaded() : true;
-  const eps = [];
-  for (const ep of meta0.episodes) {
-    if (episodeLocked(ep, { apiType: meta0.apiType, level, openSet, openLoaded, clearedSet: cleared, clearedLoaded, paidSet: paid })) continue;
-    const served = servedByEp[ep.episodeId];
-    const need = new Set([...(ep.sceneBinIds || []).map(String), ...(served || [])]);
-    const complete = served != null && [...need].every((sid) => sceneBytes[sid]);
-    if (!complete || overwrite) eps.push({ episodeId: ep.episodeId, order: ep.order, subType: ep.subType });
-  }
-  return { apiType, episodes: eps, dir };
-}
-
-const SFW_RATING = 'normal';
-const SFW_EPISODE_IDS = new Set(['602600104', '602600105', '602600106', '602600201', '602600206']);
-
-function detailUrls(apiType, episodeId, subType) {
-  if (apiType === 'Special') {
-    const paid = `${CFG.apiBase}/api/Episodes/${episodeId}/getPaidEpisodeDetails`;
-    const special = `${CFG.apiBase}/api/Episodes/Quest/${episodeId}/getSpecialEpisodeDetails`;
-    return subType === 'イベントエピソード' || subType === OTHER_EPISODE_SUBTYPE ? [special, paid] : [paid, special];
-  }
-  return [`${CFG.apiBase}/api/Episodes/${apiType}/${episodeId}/getDetails`];
-}
-
-async function apiFetchStory(dir, apiType, episodeId, subType, overwrite) {
-  const opts = SFW_EPISODE_IDS.has(String(episodeId)) ? { rating: SFW_RATING } : undefined;
-  let b = null;
-  for (const url of detailUrls(apiType, episodeId, subType)) {
-    b = await apiFetchBytes(url, 'POST', opts);
-    if (b) break;
-  }
-  if (!b) return { ok: false, log: [] };
-  if (dir) {
-    try {
-      await fileStore.writeUnder(dir, `story/${episodeId}/getDetails.bin`, b);
-    } catch (e) {}
-  }
-  const sas = {};
-  try {
-    extractSceneUrls(b, sas);
-  } catch (e) {}
-  const log = [];
-
-  for (const sid of Object.keys(sas)) {
-    try {
-      if (!overwrite && (await fileStore.exists(dir, `story/${episodeId}/scene_${sid}.bin`))) continue;
-      if (!sas[sid]) continue;
-      const r = await fetchBytes(CFG.masterDataBase + sas[sid]);
-      if (r.status === 'missing') continue;
-      if (r.status === 'ok' && r.bytes) {
-        try {
-          await fileStore.writeUnder(dir, `story/${episodeId}/scene_${sid}.bin`, r.bytes);
-        } catch (e) {}
-        log.push(sceneLogItem(sid, r.bytes));
-      }
-    } catch (e) {}
-  }
-  return { ok: true, log };
-}
-
-const GD_INTERVAL_MS = 3000;
-async function collectStory(folderKey, progress, opts) {
-  const o = opts || {};
-  const plan = await planApiEpisodes(folderKey, { overwrite: o.overwrite });
-  const eps = plan.episodes || [];
-  const need = eps.length;
-  if (o.onPlan) o.onPlan(need);
-  if (!plan.dir || !plan.apiType || !need) return { got: 0, need, fail: 0, logged: 0, aborted: false };
-  const prog = utilHelpers.safeProgress(progress);
-  const wait = o.sleep || sleep;
-  const interval = o.intervalMs != null ? o.intervalMs : GD_INTERVAL_MS;
-  const stop = o.shouldAbort || (() => false);
-  const log = [];
-  let got = 0,
-    fail = 0,
-    aborted = false;
-  try {
-    for (let i = 0; i < need; i++) {
-      if (stop()) {
-        aborted = true;
-        break;
-      }
-      if (i && interval > 0) {
-        if (o.onWait) o.onWait(interval);
-        await wait(interval);
-        if (stop()) {
-          aborted = true;
-          break;
-        }
-      }
-      const ep = eps[i];
-      if (o.onEpisodeStart) o.onEpisodeStart(ep);
-      const r = await apiFetchStory(plan.dir, plan.apiType, ep.episodeId, ep.subType, o.overwrite);
-      if (r.ok) {
-        got++;
-        if (r.log && r.log.length) log.push(...r.log);
-        prog(`ストーリー取得中… ${got}/${need}`, (0.15 * got) / need);
-      } else fail++;
-      if (o.onEpisode) o.onEpisode(ep, r);
-    }
-  } finally {
-    if (log.length) {
-      try {
-        await postLog(log, folderKey);
-      } catch (e) {}
-    }
-  }
-  return { got, need, fail, logged: log.length, aborted };
-}
 
 let _binlistScenes = null;
 async function binlistSceneSet({ force } = {}) {
@@ -888,4 +749,4 @@ async function charMetaFull(folderKey, progress) {
   return r && r.meta;
 }
 
-export const acquireCore = { downloadCharacterAssets, charMeta, charMetaFull, collectStory, binlistSceneSet, clearBinlistScenes };
+export const acquireCore = { downloadCharacterAssets, charMeta, charMetaFull, binlistSceneSet, clearBinlistScenes };

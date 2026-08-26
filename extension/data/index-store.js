@@ -6,7 +6,7 @@ import { DIRS, SK } from '../core/constants.js';
 import { networkClient } from './network.js';
 import { utilHelpers } from '../core/util.js';
 import { buildIndexes as BUILD_MOD } from './build-indexes.js';
-import { parseOrigin, saveOrigin, recoverOrigin } from './origin.js';
+import { parseOrigin, saveOrigin, recoverOrigin, resolveOrigin } from './origin.js';
 import { CFG } from '../config.js';
 
 const { assetRoot, fetchBytesRaw, apiFetchBytes } = networkClient;
@@ -21,6 +21,7 @@ let _indexes = null;
 let _building = null;
 let _rawMaster = null;
 let _rawMasterSaved = false;
+let _masterFromFolder = false;
 
 const extVersion = () => {
   try {
@@ -75,15 +76,18 @@ async function resolveCatalogNames(base) {
       break;
     }
   }
-  if (!envBytes) {
-    diag.step = 'no-env';
-    return { names: null, diag };
+  let assetBase = null;
+  let staticsBase = null;
+  if (envBytes) {
+    const parsed = parseOrigin(latin1.decode(envBytes));
+    diag.originFromEnv = parsed;
+    const saved = await saveOrigin(parsed, 'env');
+    assetBase = parsed.assets || null;
+    staticsBase = (saved && saved.statics) || null;
+  } else {
+    diag.env = 'none';
+    staticsBase = (await resolveOrigin()).statics || null;
   }
-  const parsed = parseOrigin(latin1.decode(envBytes));
-  diag.originFromEnv = parsed;
-  const saved = await saveOrigin(parsed, 'env');
-  const assetBase = parsed.assets || null;
-  const staticsBase = (saved && saved.statics) || null;
   if (!staticsBase) {
     diag.step = 'no-statics';
     return { names: null, diag, assetBase };
@@ -112,21 +116,54 @@ async function resolveCatalogNames(base) {
 
 async function fetchMasterRecords(prog) {
   prog('マスターデータ取得中…');
-  const mbytes = await apiFetchBytes(CFG.apiBase + '/api/data/master', 'GET');
-  if (!mbytes) throw new Error('ゲームのデータを取得できませんでした。');
-  const murl = extractMasterUrl(mbytes);
-  if (!murl) throw new Error('ゲームのデータの場所が分かりませんでした。');
-  const mbin = await fetchBytesRaw(murl);
-  if (!mbin) throw new Error('ゲームのデータをダウンロードできませんでした。');
-  return mbin;
+  _masterFromFolder = false;
+  const folder = await readFolderMaster();
+  try {
+    const mbytes = await apiFetchBytes(CFG.apiBase + '/api/data/master', 'GET');
+    const murl = mbytes && extractMasterUrl(mbytes);
+    const mbin = murl && (await fetchBytesRaw(murl));
+    if (masterUsable(mbin, folder)) return mbin;
+  } catch (e) {}
+  if (CFG.masterDataFallbackUrl) {
+    prog('マスターデータを配信元から取得中…');
+    try {
+      const mbin = await fetchBytesRaw(CFG.masterDataFallbackUrl);
+      if (masterUsable(mbin, folder)) return mbin;
+    } catch (e) {}
+  }
+  if (folder && folder.length) {
+    prog('配信元から取得できないため、保存済みのマスターデータを使います');
+    _masterFromFolder = true;
+    return folder;
+  }
+  throw new Error('ゲームのデータを取得できませんでした。');
 }
 
+let _recsBin = null;
+let _recsCache = null;
+
 function masterRecords(mbin) {
+  if (_recsBin === mbin && _recsCache) return _recsCache;
   const dec = unityDecode.decodeUserBytes(mbin);
   let recs = dec.length === 1 && Array.isArray(dec[0]) ? dec[0] : dec;
   if (recs.length && Array.isArray(recs[0]) && Array.isArray(recs[0][0])) recs = recs[0];
   if (!Object.keys(BUILD_MOD.masterIndexes(recs).characters).length) throw new Error('ゲームのデータを読み取れませんでした。');
+  _recsBin = mbin;
+  _recsCache = recs;
   return recs;
+}
+
+const MASTER_MIN_BYTES = 1 << 20;
+
+function masterUsable(mbin, folder) {
+  if (!mbin || mbin.length < MASTER_MIN_BYTES) return false;
+  if (folder && folder.length && mbin.length < folder.length * 0.9) return false;
+  try {
+    masterRecords(mbin);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 async function fetchCatalogs(base, prog) {
@@ -280,7 +317,7 @@ async function buildIndexes(progress, masterBinIn, fromFolder) {
   const mbin = masterBinIn || (await fetchMasterRecords(prog));
   const recs = masterRecords(mbin);
   _rawMaster = mbin;
-  _rawMasterSaved = !!fromFolder;
+  _rawMasterSaved = !!fromFolder || _masterFromFolder;
   saveMasterArtifacts();
 
   const catalogs = await fetchCatalogs(await assetRoot(), prog);

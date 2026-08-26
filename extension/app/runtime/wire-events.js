@@ -2,7 +2,6 @@ import { bulkDownloader } from '../../data/acquire/bulk.js';
 import { fileStore } from '../../core/fsdir.js';
 import { collectionRepository } from '../../data/collection.js';
 import { setManualOrigin } from '../../data/origin.js';
-import { RECONNECT } from '../../core/messages.js';
 import { playerState } from './player-state.js';
 import { getById } from '../../core/dom.js';
 import { getStoryPanel } from './panel-state.js';
@@ -15,8 +14,6 @@ import { runLineSearch } from '../views/line-search.js';
 import { openBulk, closeBulk, startBulk, stopBulk, renderBulkCard, renderBulkBanner, refreshBulkTarget } from '../views/bulk-ui.js';
 import { pickFolder } from '../views/fs-ui.js';
 import { refreshLists } from './state-refresh.js';
-import { updateConn, maybeAutoDisconnect, setAutoDisconnectOff } from './connection-controller.js';
-import { reacquireData } from './data-reacquire.js';
 import { toast } from '../ui/notifier.js';
 import { runSharedDownload, sharedDlToast } from '../views/shared-notice.js';
 import { networkClient } from '../../data/network.js';
@@ -87,7 +84,7 @@ function bindRosterFilters() {
     clearTimeout(lineSearchTimer);
     lineSearchTimer = setTimeout(runLineSearch, 200);
   });
-  eachIn('rosterType', '.rf', (b) => b.addEventListener('click', () => navTo(b.dataset.rosterType)));
+  eachIn('rosterType', '.rf[data-roster-type]', (b) => b.addEventListener('click', () => navTo(b.dataset.rosterType)));
   for (const id of ['rosterGroup', 'rosterRank']) {
     on(id, 'change', () => {
       playerState[id] = getById(id).value;
@@ -166,48 +163,6 @@ function bindFolder() {
   });
 }
 
-function bindConnection() {
-  onClick('connToggle', async () => {
-    const wasOn = getById('connToggle').dataset.on === '1';
-    if (wasOn) {
-      await chrome.runtime.sendMessage({ cmd: 'stop' });
-      await updateConn();
-      return;
-    }
-    setAutoDisconnectOff();
-    const resp = await chrome.runtime.sendMessage({ cmd: 'start' });
-    if (!resp || !resp.ok) {
-      await updateConn();
-      if (resp && resp.error === 'no-tab') getById('connInfo').textContent = 'ゲームのタブが見つかりません（play.games.dmm でゲームを開いてから）';
-      return;
-    }
-    const info = getById('connInfo');
-    info.textContent = `ゲームタブ${(resp.game || []).length}件に接続。所持データ取得中…`;
-    await reacquireData(info, (user) => {
-      if (user && user.ok) toast(`接続しました。所持キャラ${user.owned}体を取得しました。`, 'ok');
-    });
-    await maybeAutoDisconnect();
-    await updateConn();
-  });
-
-  onClick('dataReacquire', async () => {
-    const btn = getById('dataReacquire');
-    const info = getById('connInfo');
-    const prev = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '再取得中…';
-    try {
-      const user = await reacquireData(info);
-      if (info) info.textContent = user && user.ok ? `再取得が完了しました（所持キャラ${user.owned}体）` : RECONNECT;
-    } catch (e) {
-      if (info) info.textContent = RECONNECT;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = prev;
-    }
-  });
-}
-
 async function probeCdn(base) {
   try {
     const r = await fetch(assetUrlOn(base, 'web', await probeRel()), { method: 'HEAD' });
@@ -282,7 +237,6 @@ export function bind() {
   bindBulk();
   bindStage();
   bindFolder();
-  bindConnection();
   bindCdnSettings();
   bindMaintenance();
 }

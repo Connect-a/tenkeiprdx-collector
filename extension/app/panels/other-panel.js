@@ -102,7 +102,7 @@ export function createOtherPanel(deps) {
     _skillFx.dispose();
     grid.innerHTML = '';
     if (!list.length) {
-      grid.appendChild(el('div', 'emptyrow', 'その他の3Dデータがありません。「ゲームと接続」してからやり直してください。'));
+      grid.appendChild(el('div', 'emptyrow', 'その他の3Dデータがありません。「索引を作り直す」を実行してからやり直してください。'));
       return;
     }
     const byCat = {};

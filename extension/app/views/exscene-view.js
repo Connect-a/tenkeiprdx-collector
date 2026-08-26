@@ -116,6 +116,7 @@ export function setThumbCache(on) {
 const cachePath = (epId) => `${CACHE_SUB}/${epId}.webp`;
 
 function showBlob(box, blob) {
+  if (!box.isConnected) return;
   const url = URL.createObjectURL(blob);
   urls.push(url);
   const img = el('img', { class: 'exthumb-img', src: url, loading: 'lazy' });
@@ -189,8 +190,14 @@ async function paintThumb(box, it) {
 async function drainThumbs() {
   if (draining) return;
   draining = true;
-  while (thumbQueue.length) await Promise.all(thumbQueue.splice(0, THUMB_CONC).map(([box, it]) => paintThumb(box, it)));
-  draining = false;
+  try {
+    while (thumbQueue.length) {
+      const batch = thumbQueue.splice(0, THUMB_CONC).filter(([box]) => box.isConnected);
+      await Promise.all(batch.map(([box, it]) => paintThumb(box, it)));
+    }
+  } finally {
+    draining = false;
+  }
 }
 
 function watchThumbs(grid, byId) {
@@ -233,7 +240,14 @@ function card(it) {
   c.appendChild(el('div', 'exname', nameFix(it.displayName)));
   c.appendChild(el('div', 'extitle', `${it.label}　${nameFix(it.title)}`));
   const cats = xposNames(it.xpos);
-  if (cats.length) c.appendChild(el('div', 'excats', cats.map((n) => el('span', 'excat', n))));
+  if (cats.length)
+    c.appendChild(
+      el(
+        'div',
+        'excats',
+        cats.map((n) => el('span', 'excat', n)),
+      ),
+    );
   return c;
 }
 

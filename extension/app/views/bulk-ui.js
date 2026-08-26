@@ -9,33 +9,17 @@ import { TYPE_LABEL, html } from '../ui/ui-format.js';
 import { toast } from '../ui/notifier.js';
 import { failureGroups } from '../../core/failure-report.js';
 import { isSingleDlActive as getSingleDlActive } from './download-ui.js';
-import { ensureUserState } from '../runtime/user-state-guard.js';
-import { rescanAll, pendingScan, lastScanAt } from '../runtime/state-refresh.js';
+import { rescanAll } from '../runtime/state-refresh.js';
 import { networkClient } from '../../data/network.js';
 
-const DL_INTERVALS = [30, 60, 180];
-const SCAN_FRESH_MS = 5 * 60 * 1000;
-const bulkOpts = { unlockedMode: 'only', overwrite: false, includeUnowned: false, dlIntervalSec: 180 };
+const DL_INTERVALS = [5, 30, 60, 180];
+const bulkOpts = { overwrite: false, dlIntervalSec: 180 };
 const QUEST_KINDS = new Set(['main', 'event']);
-const UNLOCK_LABELS = {
-  character: ['ストーリー解放', '全解放のみ', '全解放を優先'],
-  quest: ['クリア状況', '全クリアのみ', '全クリアを優先'],
-};
 const PHASE_LABEL = { running: '実行中', done: '完了', stopped: '停止', error: 'エラー' };
 let _bulkTick = null;
 let _starting = false;
 let _startCancelled = false;
 let _latestBulkMissingSummary = null;
-
-async function storyCompleteKeys() {
-  try {
-    await pendingScan();
-  } catch (e) {}
-  const at = lastScanAt();
-  if (!at || Date.now() - at > SCAN_FRESH_MS) return null;
-  const arr = Array.isArray(playerState.dl) ? playerState.dl : [];
-  return arr.filter((x) => x && x.counts && x.counts.total > 0 && x.counts.have >= x.counts.total).map((x) => String(x.folderKey));
-}
 
 function setStartingUi(on) {
   _starting = on;
@@ -54,9 +38,7 @@ function setStartingUi(on) {
 }
 const assetStatusText = (it) =>
   it.status === 'skipped'
-    ? it.skipReason === 'story-missing'
-      ? 'ストーリー情報が無く未処理'
-      : '変更なし'
+    ? '変更なし'
     : it.status === 'done'
       ? `${it.have || 0}/${it.total || 0}話${it.partial ? '（うち途中' + it.partial + '）' : ''}・音声${it.voiced || 0}・背景${it.bg || 0}${it.missing ? '・データ無し' + it.missing : ''}${it.fails ? '・失敗' + it.fails : ''}`
       : it.status === 'dl'
@@ -85,29 +67,14 @@ async function collectBulkCandidates() {
   try {
     items = await collectionRepository.rosterItems(rosterKind, { dl: playerState.dl, distSet: playerState.binlistScenes || new Set() });
   } catch (e) {}
-  const list = [];
-  for (const it of items) {
-    const base = { id: it.folderKey, name: it.displayName, rosterKind: it.rosterKind };
-    const storyFull = episodeCounts.storyFull(it);
-    if (rosterKind === 'character') {
-      if (!it.owned) {
-        if (episodeCounts.distOnly(it)) list.push({ ...base, total: it.counts.total, full: true, dist: true });
-        else if (bulkOpts.includeUnowned) list.push({ ...base, total: it.counts.total, full: false, unowned: true });
-        continue;
-      }
-      if (bulkOpts.unlockedMode === 'only' && !storyFull) continue;
-      list.push({ ...base, total: it.counts.total, full: storyFull });
-    } else {
-      const avail = episodeCounts.availableCount(it);
-      if (!avail) continue;
-      if (QUEST_KINDS.has(rosterKind) && bulkOpts.unlockedMode === 'only' && !storyFull) continue;
-      list.push({ ...base, total: avail, full: storyFull });
-    }
-  }
+  const list = items.map((it) => ({
+    id: it.folderKey,
+    name: it.displayName,
+    rosterKind: it.rosterKind,
+    total: rosterKind === 'character' ? it.counts.total : episodeCounts.availableCount(it) || it.counts.total,
+  }));
   const byName = (a, b) => (a.name > b.name ? 1 : -1);
-  const cmp = QUEST_KINDS.has(rosterKind) ? questSort.byQuestId((x) => x.id) : byName;
-  if (bulkOpts.unlockedMode === 'priority' && rosterKind !== 'special') list.sort((a, b) => Number(b.full) - Number(a.full) || cmp(a, b));
-  else list.sort(cmp);
+  list.sort(QUEST_KINDS.has(rosterKind) ? questSort.byQuestId((x) => x.id) : byName);
   return list;
 }
 
@@ -127,14 +94,7 @@ export async function refreshBulkTarget() {
   }
   const list = await collectBulkCandidates();
   playerState._bulkCandidates = list;
-  const unownedN = list.filter((x) => x.unowned).length;
-  let note = '';
-  if (playerState.rosterKind === 'character') {
-    note = unownedN ? `（うち未所持 ${unownedN}体は立ち絵などのみ）` : '';
-  } else if (QUEST_KINDS.has(playerState.rosterKind)) {
-    note = bulkOpts.unlockedMode === 'only' ? '（全クリアのみ）' : `（うち全クリア ${list.filter((x) => x.full).length}件）`;
-  }
-  target.textContent = `対象 ${list.length} 件${note}`;
+  target.textContent = `対象 ${list.length} 件`;
 }
 
 export async function openBulk() {
@@ -144,28 +104,6 @@ export async function openBulk() {
     if (!DL_INTERVALS.includes(bulkOpts.dlIntervalSec)) bulkOpts.dlIntervalSec = 180;
   } catch (e) {}
   getById('bulkTitle').textContent = `一括ダウンロード（${TYPE_LABEL[playerState.rosterKind] || ''}）`;
-  const isChar = playerState.rosterKind === 'character';
-  const isQuest = QUEST_KINDS.has(playerState.rosterKind);
-  const unlockRow = getById('bulkUnlockRow');
-  unlockRow.style.display = isChar || isQuest ? '' : 'none';
-  if (isChar || isQuest) {
-    const [rowLabel, only, priority] = UNLOCK_LABELS[isChar ? 'character' : 'quest'];
-    unlockRow.querySelector('.optlbl').textContent = rowLabel;
-    const segs = unlockRow.querySelectorAll('.sg');
-    if (segs[0]) segs[0].textContent = only;
-    if (segs[1]) segs[1].textContent = priority;
-  }
-  getById('bulkUnownedRow').style.display = isChar ? '' : 'none';
-  seg('bulkUnlock', bulkOpts.unlockedMode, (v) => {
-    bulkOpts.unlockedMode = v;
-    persistBulkOpts();
-    refreshBulkTarget();
-  });
-  seg('bulkUnowned', bulkOpts.includeUnowned ? '1' : '0', (v) => {
-    bulkOpts.includeUnowned = v === '1';
-    persistBulkOpts();
-    refreshBulkTarget();
-  });
   seg('bulkOverwrite', bulkOpts.overwrite ? '1' : '0', (v) => {
     bulkOpts.overwrite = v === '1';
     persistBulkOpts();
@@ -200,7 +138,6 @@ export async function startBulk() {
   setStartingUi(true);
   let r = null;
   try {
-    if (!(await ensureUserState({ onDemand: true }))) return;
     const list = playerState._bulkCandidates || (await collectBulkCandidates());
     if (!list.length) {
       toast('対象が0件です', 'err');
@@ -211,8 +148,7 @@ export async function startBulk() {
       toast('先に保存先フォルダを選んでください', 'err');
       return;
     }
-    const have = bulkOpts.overwrite ? null : await storyCompleteKeys();
-    r = _startCancelled ? { ok: false, reason: 'stopped' } : await bulkDownloader.start(list, { overwrite: bulkOpts.overwrite, dlIntervalSec: bulkOpts.dlIntervalSec || 180, have });
+    r = _startCancelled ? { ok: false, reason: 'stopped' } : await bulkDownloader.start(list, { overwrite: bulkOpts.overwrite, dlIntervalSec: bulkOpts.dlIntervalSec || 180 });
   } finally {
     setStartingUi(false);
     await renderBulkCard();
@@ -326,21 +262,11 @@ async function renderBulkFailures(st, opts) {
   }
 }
 
-function metaCell(it) {
-  if (it.gd === 'skipped') return { text: 'スキップ', cls: 'skip' };
-  if (it.gd === 'failed') return { text: '取得失敗', cls: 'bad' };
-  if (it.gd === 'partial') return { text: `一部 ${it.gdGot || 0}/${it.gdNeed || 0}`, cls: 'warn' };
-  if (it.gd === 'pending') return { text: it.gdNeed ? `${it.gdGot || 0}/${it.gdNeed}` : '待機', cls: '' };
-  return { text: it.gdNeed ? `${it.gdGot || 0}/${it.gdNeed}` : 'スキップ', cls: it.gdNeed ? '' : 'skip' };
-}
-
 function createBulkRow(it) {
-  const { text: metaText, cls: metaCls } = metaCell(it);
   const tr = el('tr', {
     class: 'bkrow ' + it.status,
     data: { itemId: it.id },
     html: html`<td class="bk-name"></td>
-      <td class="bk-meta ${metaCls}">${metaText}</td>
       <td class="bk-asset dim">${assetStatusText(it)}</td>
       <td class="bk-detail dim">${assetDetailText(it)}</td>`,
   });
@@ -378,7 +304,6 @@ export async function renderBulkCard() {
   const active = bulkDownloader.isActive(st.phase);
   const busy = active || _starting;
   const s = bulkDownloader.stats(st.items);
-  const gd = st.gd || { total: 0, done: 0, failed: 0 };
   startBtn.style.display = active ? 'none' : '';
   startBtn.disabled = _starting;
   stopBtn.style.display = busy ? '' : 'none';
@@ -393,25 +318,19 @@ export async function renderBulkCard() {
   parts.count.textContent = ` ${s.processed}/${s.total}${s.running ? '（DL中' + s.running + '）' : ''}`;
 
   const rows = [];
-  rows.push(
-    `<div class="bk-line dim">ストーリー情報 ${gd.done}/${gd.total}${gd.failed ? '（失敗' + gd.failed + '）' : ''}｜本文・画像・音声 取得済み${s.done} / スキップ${s.skipped} / 失敗${s.failed}</div>`,
-  );
+  rows.push(`<div class="bk-line dim">取得済み${s.done} / 変更なし${s.skipped} / 失敗${s.failed}</div>`);
   if (active) {
     let slotB = '';
     if (st.nextDlAt && st.nextDlAt > Date.now()) {
       const sec = Math.ceil((st.nextDlAt - Date.now()) / 1000);
       slotB = `次のDLまで ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
-    } else if (st.gdStatus && st.currentStatus) {
-      slotB = st.gdStatus;
     }
-    const slotA = st.currentStatus || st.gdStatus || '';
-    rows.push(html`<div class="bk-line dim bk-slot">${slotA}</div>`);
+    rows.push(html`<div class="bk-line dim bk-slot">${st.currentStatus || ''}</div>`);
     rows.push(html`<div class="bk-line dim bk-slot">${slotB}</div>`);
   }
   const fbs = networkClient.fallbackStats ? networkClient.fallbackStats() : null;
   if (fbs && (fbs.hit || fbs.off)) rows.push(`<div class="bk-line dim">旧世代から救済 ${fbs.hit}件${fbs.off ? '（効果が無いため打ち切り）' : ''}</div>`);
   if (st.phase === 'error' && st.lastError) rows.push(html`<div class="bk-line err">エラー: ${st.lastError}</div>`);
-  if (st.tokenError) rows.push(`<div class="bk-line err">トークンが切れているためシナリオのDLができません。ゲームと再接続してください。</div>`);
   parts.rest.innerHTML = rows.join('');
 
   const existingRows = Array.from(tbody.querySelectorAll('tr'));
@@ -424,13 +343,8 @@ export async function renderBulkCard() {
     if (existing) {
       existing.className = 'bkrow ' + it.status;
       const tds = existing.querySelectorAll('td');
-      const { text: metaText, cls: metaCls } = metaCell(it);
-      const assetText = assetStatusText(it);
-      const detailText = assetDetailText(it);
-      tds[1].className = `bk-meta ${metaCls}`;
-      tds[1].textContent = metaText;
-      tds[2].textContent = assetText;
-      tds[3].textContent = detailText;
+      tds[1].textContent = assetStatusText(it);
+      tds[2].textContent = assetDetailText(it);
       existingMap.delete(it.id);
     } else {
       tbody.appendChild(createBulkRow(it));

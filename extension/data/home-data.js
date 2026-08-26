@@ -80,7 +80,6 @@ function collectHomeRefs(data) {
     add(home, e.iconRel);
     add(shared, e.audioRel);
     add(shared, e.introRel);
-    add(shared, e.plainRel);
   }
   for (const e of data.background || []) {
     add(home, e.iconRel);
@@ -119,7 +118,16 @@ export async function homeAssetStatus(dataIn) {
   try {
     const data = dataIn || (await homeData());
     const r = await lookupHome(data);
-    const unknown = data.staticsBase ? 0 : [...r.refs.comic].filter((p) => !r.hasComic(String(p).replace(/^comic\//, '').replace(/\.dds$/, ''))).length;
+    const unknown = data.staticsBase
+      ? 0
+      : [...r.refs.comic].filter(
+          (p) =>
+            !r.hasComic(
+              String(p)
+                .replace(/^comic\//, '')
+                .replace(/\.dds$/, ''),
+            ),
+        ).length;
     return { have: r.have, total: r.total, unknown };
   } catch (e) {
     return { have: 0, total: 0, unknown: 0 };

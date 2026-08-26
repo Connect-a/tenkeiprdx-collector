@@ -1,4 +1,4 @@
-import { FAIL_CAP } from '../core/constants.js';
+import { FAIL_CAP, MISS_STREAK_CAP } from '../core/constants.js';
 import { fileStore } from '../core/fsdir.js';
 import { networkClient } from './network.js';
 import { assetStore } from './asset-store.js';
@@ -14,7 +14,7 @@ async function saveUrl(session, targetDir, { url, subpath, label }) {
   }
   if (!url) {
     counters.unresolved++;
-    return { status: 'missing' };
+    return { status: 'missing', unresolved: true };
   }
   if (session.aborted) return { status: 'abort' };
   const r = await fetchBytes(url);
@@ -67,11 +67,19 @@ function createDlSession(opts) {
   const session = {
     counters: { got: 0, skip: 0, fail: 0, missing: 0, unresolved: 0, recovered: 0 },
     aborted: null,
+    cdnDown: false,
+    missStreak: 0,
     overwrite: !!(opts && opts.overwrite),
     deferred: [],
   };
   const guard = (r, note) => {
+    if (r.status === 'got' || r.status === 'skip') session.missStreak = 0;
+    else if (r.status === 'missing' && !r.unresolved) session.missStreak++;
     if (r.status === 'fail' && session.counters.fail >= FAIL_CAP && !session.aborted) session.aborted = new Error(`失敗${FAIL_CAP}件で中断（${note || ''}）`);
+    if (session.missStreak >= MISS_STREAK_CAP && !session.aborted) {
+      session.cdnDown = true;
+      session.aborted = new Error(`配信元が${MISS_STREAK_CAP}件連続で応答しなかったため中断しました（配信停止の可能性）`);
+    }
     return r;
   };
   session.saveUrl = async (targetDir, spec, note) => guard(await saveUrl(session, targetDir, spec), note);

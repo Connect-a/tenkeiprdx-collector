@@ -1,11 +1,9 @@
-import { scanFolder } from '../folder-scan.js';
 import { downloadRunner } from './download-runner.js';
 import { SK } from '../../core/constants.js';
 import { failureReport, failureSummary, hasFailures } from '../../core/failure-report.js';
 import { bgTimeout } from '../../core/bgtimer.js';
 const STATE_KEY = SK.bulkState;
 const FAIL_LIMIT = 5;
-const GD_INTERVAL_SEC = 3;
 const FLUSH_MS = 2000;
 const DL_INTERVAL_SEC = 180;
 
@@ -103,18 +101,6 @@ function pushFailure(name, reason, soft, report) {
   } catch (e) {}
 }
 
-function recomputeGd() {
-  let total = 0,
-    done = 0,
-    failed = 0;
-  for (const it of _state.items) {
-    total += it.gdNeed || 0;
-    done += it.gdGot || 0;
-    failed += it.gdFail || 0;
-  }
-  _state.gd = { total, done, failed };
-}
-
 const itemOf = (target) => _state.items.find((x) => String(x.id) === String(target.folderKey)) || null;
 
 let _statusAt = 0;
@@ -122,35 +108,9 @@ function onEvent(ev) {
   if (!_state) return;
   const it = itemOf(ev.target);
   if (!it) return;
-  const metaOnly = ev.target.assets === false;
   if (ev.type === 'start') {
-    if (!metaOnly) it.status = 'dl';
-  } else if (ev.type === 'skip') {
-    if (!metaOnly && !_state.tokenError && it.skipReason === 'story-missing' && it.status === 'pending') {
-      it.status = 'skipped';
-      it.at = Date.now();
-    }
-  } else if (ev.type === 'plan') {
-    it.gdNeed = ev.need;
-    it.gdGot = 0;
-    it.gdFail = 0;
-    recomputeGd();
-    _state.gdStatus = ev.need ? `ストーリー情報の取得待ち… ${it.name}` : '';
-  } else if (ev.type === 'episodeStart') {
-    _state.gdStatus = `ストーリー情報を取得中 ${it.name} #${ev.ep.episodeId}`;
-  } else if (ev.type === 'episode') {
-    const r = ev.result || {};
-    if (r.ok) {
-      it.gdGot = (it.gdGot || 0) + 1;
-      it.gdFetched = (it.gdFetched || 0) + ((r.log && r.log.length) || 0);
-    } else it.gdFail = (it.gdFail || 0) + 1;
-    recomputeGd();
-  } else if (ev.type === 'story') {
-    it.gd = it.gdFail ? (it.gdGot ? 'partial' : 'failed') : 'done';
-    if (it.gdFail && !it.gdGot) pushFailure(it.name, `ストーリー情報を${it.gdFail}件取得できませんでした`, true);
-    _state.gdStatus = '';
+    it.status = 'dl';
   } else if (ev.type === 'progress') {
-    if (ev.phase === 'story') return;
     const now = Date.now();
     if (now - _statusAt < 800) return;
     _statusAt = now;
@@ -172,37 +132,26 @@ function onEvent(ev) {
     it.downloaded = r.downloaded || 0;
     if (hasFailures(rep)) pushFailure(it.name, `一部取得できず（${failureSummary(rep)}）`, true, rep);
   } else if (ev.type === 'done') {
-    if (!metaOnly) {
-      it.status = ev.worked || it.gdFetched || it.fails ? 'done' : 'skipped';
-      it.at = Date.now();
-      _state.consecutiveFailures = 0;
-    }
+    it.status = ev.worked || it.fails ? 'done' : 'skipped';
+    it.at = Date.now();
+    _state.consecutiveFailures = 0;
     _state.currentStatus = '';
   } else if (ev.type === 'error') {
     const e = ev.error;
     const msg = e && e.message ? e.message : String(e);
-    if (e && e.auth) {
-      _state.tokenError = true;
-      _state.lastError = 'ゲームとの接続が切れたため、取得できたところまでで停止しました。';
-      if (!metaOnly && it.status === 'dl') it.status = 'pending';
-      flush(true);
-      return;
-    }
     pushFailure(it.name, msg);
     _state.lastError = `${it.name}: ${msg}`;
-    if (!metaOnly) {
-      it.status = 'failed';
-      it.error = msg;
-      it.at = Date.now();
-      _state.consecutiveFailures = (_state.consecutiveFailures || 0) + 1;
-    }
+    it.status = 'failed';
+    it.error = msg;
+    it.at = Date.now();
+    _state.consecutiveFailures = (_state.consecutiveFailures || 0) + 1;
     flush(true);
     return;
   } else if (ev.type === 'wait') {
     if (ev.phase === 'target') {
       _state.nextDlAt = ev.until;
       _state.currentStatus = '';
-    } else _state.gdStatus = `ストーリー情報の取得待ち… ${it.name}`;
+    }
   } else if (ev.type === 'waitEnd') {
     _state.nextDlAt = 0;
   }
@@ -229,82 +178,29 @@ async function sleepUntil(ms) {
 async function runPipelines() {
   if (_running) return;
   _running = true;
-  for (const it of _state.items) {
-    if (it.status === 'dl') it.status = 'pending';
-    if (it.skipReason) delete it.skipReason;
-  }
-  recomputeGd();
+  for (const it of _state.items) if (it.status === 'dl') it.status = 'pending';
   flush(true);
-  const pending = () => _state.items.filter((it) => it.status === 'pending');
   const shouldAbort = () => _stopReq || !isActiveState();
   let outcome = 'done';
   try {
-    const meta = pending()
-      .filter((it) => it.gd === 'pending')
-      .map((it) => ({ folderKey: it.id, name: it.name, assets: false }));
-    const assets = pending().map((it) => ({ folderKey: it.id, name: it.name, story: false }));
-    let metaOutcome = 'done';
-    let metaRunning = meta.length > 0;
-    await Promise.all([
-      meta.length
-        ? downloadRunner
-            .run(meta, {
-              sleep: sleepUntil,
-              shouldAbort,
-              storyIntervalMs: (_state.gdIntervalSec || GD_INTERVAL_SEC) * 1000,
-              overwrite: !!_state.overwrite,
-              report: onEvent,
-            })
-            .then((o) => {
-              metaOutcome = o;
-            })
-            .catch(() => {
-              metaOutcome = 'error';
-            })
-            .finally(() => {
-              metaRunning = false;
-            })
-        : null,
-      assets.length
-        ? downloadRunner
-            .run(assets, {
-              sleep: sleepUntil,
-              shouldAbort,
-              targetIntervalMs: (_state.dlIntervalSec || DL_INTERVAL_SEC) * 1000,
-              failCap: FAIL_LIMIT,
-              overwrite: !!_state.overwrite,
-              report: onEvent,
-              readyFor: async (t) => {
-                const it = itemOf(t);
-                if (!it) return false;
-                for (;;) {
-                  if (shouldAbort()) return false;
-                  if (it.gd !== 'pending') return true;
-                  if (!metaRunning) {
-                    if (it.gdGot > 0) return true;
-                    it.skipReason = 'story-missing';
-                    return false;
-                  }
-                  await sleepCancelable(500);
-                }
-              },
-            })
-            .then((o) => {
-              outcome = o;
-            })
-        : null,
-    ]);
-    if (metaOutcome === 'auth' && outcome === 'done') outcome = 'auth';
+    const assets = _state.items.filter((it) => it.status === 'pending').map((it) => ({ folderKey: it.id, name: it.name }));
+    if (assets.length)
+      outcome = await downloadRunner.run(assets, {
+        sleep: sleepUntil,
+        shouldAbort,
+        targetIntervalMs: (_state.dlIntervalSec || DL_INTERVAL_SEC) * 1000,
+        failCap: FAIL_LIMIT,
+        overwrite: !!_state.overwrite,
+        report: onEvent,
+      });
   } finally {
     _running = false;
   }
   if (_stopReq || !_state) return;
   if (isActive(_state.phase)) {
     if (outcome === 'failcap') _state.lastError = `${_state.consecutiveFailures}回続けて失敗したため停止しました。${_state.lastError || ''}`;
-    else if (_state.tokenError) _state.lastError = 'ゲームとの接続が切れたため、取得できたところまでで停止しました。';
-    _state.phase = outcome === 'done' || outcome === 'aborted' ? (_state.tokenError ? 'error' : 'done') : 'error';
+    _state.phase = outcome === 'done' || outcome === 'aborted' ? 'done' : 'error';
     _state.currentStatus = '';
-    _state.gdStatus = '';
     _state.nextDlAt = 0;
     _state.endedAt = Date.now();
     flush(true);
@@ -316,34 +212,26 @@ async function start(items, opts) {
   if (_starting) return { ok: false, reason: 'active' };
   if (_state && isActive(_state.phase)) return { ok: false, reason: 'active' };
   if (!items || !items.length) return { ok: false, reason: 'empty' };
-  const stored = await loadState();
-  if (stored && isActive(stored.phase) && ownedByOther(stored)) return { ok: false, reason: 'active' };
-  const overwrite = !!opts.overwrite;
   _stopReq = false;
   _starting = true;
-  let have = new Set();
+  let stored = null;
   try {
-    if (!overwrite) {
-      have = new Set(opts.have || (await scanFolder()).filter((x) => x.counts.total > 0 && x.counts.have >= x.counts.total).map((x) => String(x.folderKey)));
-    }
-  } catch (e) {
+    stored = await loadState();
   } finally {
     _starting = false;
   }
+  if (stored && isActive(stored.phase) && ownedByOther(stored)) return { ok: false, reason: 'active' };
   if (_stopReq) return { ok: false, reason: 'stopped' };
+  const overwrite = !!opts.overwrite;
   _state = {
     phase: 'running',
     owner: RUNNER_ID,
     beat: Date.now(),
-    gdIntervalSec: opts.gdIntervalSec || GD_INTERVAL_SEC,
     dlIntervalSec: opts.dlIntervalSec || DL_INTERVAL_SEC,
     overwrite,
-    tokenError: false,
     lastError: '',
     currentStatus: '',
-    gdStatus: '',
     nextDlAt: 0,
-    gd: { total: 0, done: 0, failed: 0 },
     consecutiveFailures: 0,
     failures: [],
     startedAt: Date.now(),
@@ -353,10 +241,6 @@ async function start(items, opts) {
       name: s.name || String(s.id),
       rosterKind: s.rosterKind || '',
       total: s.total || 0,
-      gd: !overwrite && have.has(String(s.id)) ? 'skipped' : 'pending',
-      gdNeed: 0,
-      gdGot: 0,
-      gdFail: 0,
       status: 'pending',
     })),
   };
@@ -373,7 +257,6 @@ async function stop() {
   if (_state && isActive(_state.phase)) {
     _state.phase = 'stopped';
     _state.currentStatus = '';
-    _state.gdStatus = '';
     _state.endedAt = Date.now();
     flush(true);
   }
@@ -387,23 +270,6 @@ async function resume() {
     _stopReq = false;
     runPipelines();
   }
-}
-
-async function resumeAfterReconnect() {
-  if (_running) return false;
-  const st = _state || (await loadState());
-  if (!st || st.phase !== 'error' || !st.tokenError) return false;
-  if (ownedByOther(st)) return false;
-  st.phase = 'running';
-  st.tokenError = false;
-  st.lastError = '';
-  st.consecutiveFailures = 0;
-  st.endedAt = 0;
-  _state = st;
-  _stopReq = false;
-  flush(true);
-  runPipelines();
-  return true;
 }
 
 async function getState() {
@@ -421,4 +287,4 @@ async function clear() {
   return { ok: true };
 }
 
-export const bulkDownloader = { isActive, isStarting: () => _starting, getState, stats, start, stop, resume, resumeAfterReconnect, clear };
+export const bulkDownloader = { isActive, isStarting: () => _starting, getState, stats, start, stop, resume, clear };

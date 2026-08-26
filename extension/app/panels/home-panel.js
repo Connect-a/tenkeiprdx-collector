@@ -70,7 +70,7 @@ export function createHomePanel(deps) {
     getById('rostercount').textContent = '';
     if (!playerState.fsGranted) {
       grid.innerHTML = '';
-      grid.appendChild(buildOnboard({ fsGranted: false, capturing: false, hasData: false }));
+      grid.appendChild(buildOnboard({ fsGranted: false, hasIndex: false }));
       return;
     }
     grid.innerHTML = spinnerHtml();
@@ -126,7 +126,11 @@ export function createHomePanel(deps) {
       else homeSection(grid, section, list, dl[section]);
       if (section === 'comic' && !data.staticsBase) {
         grid.appendChild(
-          el('div', { class: 'note dim', style: { margin: '-6px 0 14px', wordBreak: 'break-all' }, text: '※1コマ漫画の配信元が分かりませんでした。ゲームと接続してからやり直してください。' }),
+          el('div', {
+            class: 'note dim',
+            style: { margin: '-6px 0 14px', wordBreak: 'break-all' },
+            text: '※1コマ漫画の配信元が分かりませんでした。「索引を作り直す」を実行してからやり直してください。',
+          }),
         );
       }
     }

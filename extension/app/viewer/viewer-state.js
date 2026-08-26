@@ -1,5 +1,12 @@
 export const MAX_CHARS = 10;
-export const SCENE_VERSION = 2;
+
+const APP_VERSION = (() => {
+  try {
+    return chrome.runtime.getManifest().version;
+  } catch (e) {
+    return '';
+  }
+})();
 
 const num = (v, def, min, max) => {
   const n = Number(v);
@@ -15,7 +22,9 @@ function defaultChar(id, kind) {
     x: 0,
     y: 0,
     z: 0,
+    rotX: 0,
     rotY: 0,
+    rotZ: 0,
     scale: 1,
     motion: null,
     speed: 1,
@@ -24,13 +33,14 @@ function defaultChar(id, kind) {
     mouth: null,
     face: '',
     brow: '',
+    shadow: 'blob',
   };
 }
 
 function defaultScene(mode) {
   const m = mode === '2d' ? '2d' : '3d';
   return {
-    v: SCENE_VERSION,
+    app: APP_VERSION,
     mode: m,
     field: { kind: m === '3d' ? 'grid' : 'none', rel: '' },
     camera: { yaw: 0.5, pitch: 0.28, dist: 8, panX: 0, panY: 0, tx: 0, ty: 1, tz: 0 },
@@ -44,7 +54,9 @@ function normalizeChar(raw) {
   c.x = num(raw.x, 0, -50, 50);
   c.y = num(raw.y, 0, -50, 50);
   c.z = num(raw.z, 0, -50, 50);
+  c.rotX = num(raw.rotX, 0, -Math.PI * 4, Math.PI * 4);
   c.rotY = num(raw.rotY, 0, -Math.PI * 4, Math.PI * 4);
+  c.rotZ = num(raw.rotZ, 0, -Math.PI * 4, Math.PI * 4);
   c.scale = num(raw.scale, 1, 0.05, 8);
   c.motion = str(raw.motion, null) || str(raw.clip, null) || str(raw.anim, null);
   c.speed = num(raw.speed, 1, 0, 4);
@@ -53,6 +65,7 @@ function normalizeChar(raw) {
   c.mouth = raw.mouth == null ? null : num(raw.mouth, 6, 1, 25);
   c.face = str(raw.face, '');
   c.brow = str(raw.brow, '');
+  c.shadow = raw.shadow === 'cast' || raw.shadow === 'none' ? raw.shadow : raw.shadow === false ? 'none' : 'blob';
   return c;
 }
 

@@ -66,20 +66,6 @@
 
     <div class="layout">
       <aside class="sidebar">
-        <div class="connbar">
-          <button class="btn primary" id="connToggle" style="flex: 1">ゲームと接続</button>
-          <button class="btn xs" id="dataReacquire" style="display: none; flex: 1" title="所持キャラとゲームのデータをまとめて取り直します">データ再取得</button>
-        </div>
-        <div id="connInfo" class="note" style="margin: 2px 2px 4px"></div>
-
-        <div class="gamebox">
-          <div class="boxhd">ゲームを開く</div>
-          <div class="gamelinks">
-            <a class="gamelink" href="https://play.games.dmm.com/game/tenkeiprdx" target="_blank" rel="noopener">全年齢<span class="ext">↗</span></a>
-            <a class="gamelink" href="https://play.games.dmm.co.jp/game/tenkeiprdx_x" target="_blank" rel="noopener">R18<span class="ext">↗</span></a>
-          </div>
-        </div>
-
         <div class="boxhd" style="margin: 0 2px 6px">ホームディレクトリ</div>
         <div class="fsbar" id="fsbar">
           <span class="fsdot" id="fsDot"></span>
@@ -115,6 +101,7 @@
 
         <details class="dm" id="dlSection">
           <summary>ダウンロード</summary>
+          <div id="indexRebuildHost"></div>
           <div id="dlSectionBody"></div>
         </details>
 
@@ -122,8 +109,7 @@
           <summary>データ管理</summary>
 
           <button class="btn xs" id="knownIssues" title="残っている課題・わかっている不具合">残課題と不具合の確認</button>
-          <button class="btn xs" id="v2Notice" title="ver2.1 / ver2.0 の更新時に出る案内" style="margin: 4px 0 8px">更新のお知らせ（v2使用時の推奨事項）</button>
-          <div id="indexRebuildHost"></div>
+          <button class="btn xs" id="v2Notice" title="これまでの更新内容と推奨事項をまとめて表示します" style="margin: 4px 0 8px">更新のお知らせ</button>
           <table class="tmptbl" id="tmpDataTable"></table>
           <div class="note dim" style="margin: 0 0 8px">※中身はブラウザの検証（F12）から Application を開き、IndexedDB と Extension Storage を確認してください。</div>
         </details>
@@ -224,12 +210,6 @@
           </div>
           <div id="dlbar" class="dlbar" style="display: none">
             <div class="dlrow2">
-              <span class="dllbl">ストーリー</span>
-              <div class="bar"><i id="dlfillStory"></i></div>
-              <span class="dlpct" id="dlpctStory"></span>
-            </div>
-            <div id="dlmsgStory" class="dlsub"></div>
-            <div class="dlrow2">
               <span class="dllbl">画像・音声</span>
               <div class="bar"><i id="dlfill"></i></div>
               <span class="dlpct" id="dlpctAssets"></span>
@@ -317,23 +297,7 @@
           <div class="bulknote note dim">
             選択した対象を、安全な間隔をあけて順にダウンロードします。手動やマクロによる短時間の連続取得を避けるための機能です。<br />
             ダイアログを閉じてもダウンロードは継続しますが、<strong>ブラウザのタブを閉じるとダウンロードは中断されます</strong>（再度開くと途中から再開します）。<br />
-            ストーリー情報（ゲームへのログインが必要）を先にまとめて取得し、そのあとで画像・音声をダウンロードします。途中でゲームとの接続が切れた場合は、ストーリー情報を取得できたぶんだけダウンロードして停止します。
-          </div>
-
-          <div class="bulkopt" id="bulkUnlockRow">
-            <span class="optlbl">ストーリー解放</span>
-            <div class="segbtn" id="bulkUnlock">
-              <button class="sg active" data-v="only">全解放のみ</button>
-              <button class="sg" data-v="priority">全解放を優先</button>
-            </div>
-          </div>
-
-          <div class="bulkopt" id="bulkUnownedRow">
-            <span class="optlbl">未所持キャラ</span>
-            <div class="segbtn" id="bulkUnowned">
-              <button class="sg active" data-v="0">含めない</button>
-              <button class="sg" data-v="1">含める</button>
-            </div>
+            ストーリー本文はサービス終了により取得できないため、画像・音声・3Dモデルなどの資産だけを取得します。すでに保存済みの台本があるぶんは、その内容から背景CGやボイスも取得します。
           </div>
 
           <div class="bulkopt">
@@ -347,6 +311,7 @@
           <div class="bulkopt">
             <span class="optlbl">DL間隔</span>
             <div class="segbtn" id="bulkInterval">
+              <button class="sg" data-v="5">5秒（超非推奨）</button>
               <button class="sg" data-v="30">30秒（非推奨）</button>
               <button class="sg" data-v="60">1分</button>
               <button class="sg active" data-v="180">3分</button>
@@ -354,7 +319,7 @@
           </div>
 
           <div class="note dim" style="margin: 0 0 8px">
-            ストーリー情報をまとめて取得したあと、画像・音声を<strong>1件ごとに上記の間隔をあけて</strong>順に取得します（短いほどゲームサーバーへの負荷が増えます＝3分推奨）。1キャラの取得が5件以下のときは間隔をあけずに進みます。
+            画像・音声を<strong>1件ごとに上記の間隔をあけて</strong>順に取得します（短いほど配信元サーバーへの負荷が増えます＝3分推奨）。1キャラの取得が5件以下のときは間隔をあけずに進みます。
           </div>
 
           <div class="bulktarget" id="bulkTarget">対象 0 件</div>
@@ -374,7 +339,6 @@
                 <thead>
                   <tr>
                     <th>名前</th>
-                    <th>ストーリー情報</th>
                     <th>本文・音声</th>
                     <th>立ち絵など</th>
                   </tr>

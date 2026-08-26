@@ -17,14 +17,28 @@ function selectRow(label, options, value, onChange, title) {
   return el('label', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), sel]);
 }
 
+function radioRow(label, name, options, value, onChange) {
+  const group = el('span', 'vw-radios');
+  for (const [v, t] of options) {
+    const input = el('input', { type: 'radio', name, value: String(v) });
+    input.checked = String(v) === String(value);
+    input.addEventListener('change', () => {
+      if (input.checked) onChange(String(v));
+    });
+    group.appendChild(el('label', 'vw-radio', [input, el('span', '', t)]));
+  }
+  return el('div', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), group]);
+}
+
 function slider(label, min, max, step, value, onInput) {
   const input = el('input', { class: 'vw-range', type: 'range', min: String(min), max: String(max), step: String(step), value: String(value) });
   input.addEventListener('input', () => onInput(Number(input.value)));
-  return el('label', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), input]);
+  return { row: el('label', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), input]), input };
 }
 
 export function createControls(hostEl, deps) {
   const { state, stage, nameOf } = deps;
+  const ranges = new Map();
 
   function card(c) {
     const st = stage();
@@ -55,6 +69,8 @@ export function createControls(hostEl, deps) {
     motion.appendChild(pause);
     body.appendChild(motion);
 
+    if (ui.shadow) body.appendChild(radioRow('影', 'vwshadow-' + c.id, ui.shadow, c.shadow, (v) => apply({ shadow: v })));
+
     const row = el('div', 'vw-row');
     for (const s of ui.selects) {
       const options = s.keep ? [KEEP, ...s.options] : s.options;
@@ -72,8 +88,14 @@ export function createControls(hostEl, deps) {
     if (row.childNodes.length) body.appendChild(row);
 
     const pos = el('div', 'vw-grid');
-    for (const [key, label, min, max, step] of ui.sliders) pos.appendChild(slider(label, min, max, step, c[key], (v) => apply({ [key]: v })));
-    body.appendChild(pos);
+    const inputs = new Map();
+    for (const [key, label, min, max, step] of ui.sliders) {
+      const s = slider(label, min, max, step, c[key], (v) => apply({ [key]: v }));
+      inputs.set(key, s.input);
+      pos.appendChild(s.row);
+    }
+    ranges.set(String(c.id), inputs);
+    if (ui.sliders.length) body.appendChild(pos);
 
     off.addEventListener('click', () => {
       state.remove(c.id);
@@ -86,6 +108,7 @@ export function createControls(hostEl, deps) {
 
   function rebuild() {
     hostEl.textContent = '';
+    ranges.clear();
     const list = state.scene.chars;
     if (!list.length) {
       hostEl.appendChild(el('div', 'note dim', '左の一覧から選ぶと、ここに個別の操作が出ます。'));
@@ -94,5 +117,12 @@ export function createControls(hostEl, deps) {
     for (const c of list) hostEl.appendChild(card(c));
   }
 
-  return { rebuild };
+  function refresh(id) {
+    const inputs = ranges.get(String(id));
+    const c = state.get(id);
+    if (!inputs || !c) return;
+    for (const [key, input] of inputs) if (c[key] != null) input.value = String(c[key]);
+  }
+
+  return { rebuild, refresh };
 }

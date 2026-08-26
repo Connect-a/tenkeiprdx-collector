@@ -10,12 +10,11 @@ import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, grou
 import { bundleName } from '../../core/paths.js';
 import { el } from '../../core/dom.js';
 
-const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha', 'gachaticket']);
-const isGacha = (e) => e.source === 'gacha' || e.source === 'gachaticket';
+const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha']);
+const isGacha = (e) => e.source === 'gacha';
 const SECTIONS = [
   ['動画', (e) => !!e.file],
   ['ガチャ', (e) => e.source === 'gacha'],
-  ['ガチャチケット', (e) => e.source === 'gachaticket'],
   ['ストーリーキャラ', (e) => !e.file && !STORY_EXCLUDE.has(e.source)],
   ['アイコン', (e) => !e.file && e.source === 'ui'],
   ['UIパネル', (e) => e.source === 'uipanel'],
@@ -157,12 +156,7 @@ export function createOther2dPanel(deps) {
     _videoUrls.push(url);
     const v = el('video', { class: 'statvideo', src: url, controls: true, loop: true, playsInline: true, autoplay: true });
     host.appendChild(v);
-    try {
-      await v.play();
-    } catch (e) {
-      v.muted = true;
-      v.play().catch(() => {});
-    }
+    v.play().catch(() => {});
   }
 
   async function openEntry(e) {

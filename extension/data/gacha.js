@@ -28,12 +28,12 @@ export const GACHA_ONLY = {
 };
 
 export const GACHA_KINDS = [
-  { key: 'video', label: '演出動画', ext: 'mp4', evidence: 'Gacha_3050.mp4', sub: (id) => `${VIDEO_DIR}/Gacha_${id}.mp4`, file: (id) => `Gacha_${id}.mp4` },
-  { key: 'banner', label: 'バナー', ext: 'dds', evidence: 'banner_1002.dds', sub: (id) => `${DDS_DIR}/banner_${id}.dds`, file: (id) => `banner_${id}.dds` },
-  { key: 'foreground', label: '前景', ext: 'dds', evidence: 'foreground_14011.dds', sub: (id) => `${DDS_DIR}/foreground_${id}.dds`, file: (id) => `foreground_${id}.dds` },
-  { key: 'stamp', label: 'スタンプ', ext: 'dds', evidence: 'stamp_2145.dds', sub: (id) => `${DDS_DIR}/stamp_${id}.dds`, file: (id) => `stamp_${id}.dds` },
-  { key: 'stampTitle', label: 'スタンプ台紙', ext: 'dds', evidence: 'stampTitle_2145.dds', sub: (id) => `${DDS_DIR}/stampTitle_${id}.dds`, file: (id) => `stampTitle_${id}.dds` },
-  { key: 'ticket', label: 'チケット', ext: 'dds', evidence: 'ticket_1040244.dds', sub: (id) => `${DDS_DIR}/ticket_${id}.dds`, file: (id) => `ticket_${id}.dds` },
+  { key: 'video', label: '演出動画', ext: 'mp4', sub: (id) => `${VIDEO_DIR}/Gacha_${id}.mp4`, file: (id) => `Gacha_${id}.mp4` },
+  { key: 'banner', label: 'バナー', ext: 'dds', sub: (id) => `${DDS_DIR}/banner_${id}.dds`, file: (id) => `banner_${id}.dds` },
+  { key: 'foreground', label: '前景', ext: 'dds', sub: (id) => `${DDS_DIR}/foreground_${id}.dds`, file: (id) => `foreground_${id}.dds` },
+  { key: 'stamp', label: 'スタンプ', ext: 'dds', sub: (id) => `${DDS_DIR}/stamp_${id}.dds`, file: (id) => `stamp_${id}.dds` },
+  { key: 'stampTitle', label: 'スタンプ台紙', ext: 'dds', sub: (id) => `${DDS_DIR}/stampTitle_${id}.dds`, file: (id) => `stampTitle_${id}.dds` },
+  { key: 'ticket', label: 'チケット', ext: 'dds', sub: (id) => `${DDS_DIR}/ticket_${id}.dds`, file: (id) => `ticket_${id}.dds` },
 ];
 
 export const KIND_BY_KEY = new Map(GACHA_KINDS.map((k) => [k.key, k]));

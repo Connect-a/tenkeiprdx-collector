@@ -5,19 +5,17 @@ import { guardRenderer } from '../../engine/render/gl-manager.js';
 import { loadBattleField } from './viewer-battlefield.js';
 import { updateFieldUniforms, noteShaderError } from '../../engine/render/field-shader.js';
 import { createStageCore } from './viewer-stage-core.js';
+import { createShadow, disposeShadow, placeShadow, SHADOW_OPACITY, SHADOW_KINDS } from './viewer-shadow.js';
+import { createGizmo } from './viewer-gizmo.js';
 import { el } from '../../core/dom.js';
 
 const PITCH_LIMIT = 1.3;
+const OPAQUE_RT_CAP = 1600;
 const idleClip = (names) => (names || []).find((n) => /^idle$/i.test(n)) || (names || []).find((n) => /idle/i.test(n)) || (names || [])[0] || '';
-const SLIDERS = [
-  ['x', '左右', -6, 6, 0.05],
-  ['y', '高さ', -6, 6, 0.05],
-  ['z', '奥行', -6, 6, 0.05],
-  ['rotY', '向き', -3.14, 3.14, 0.02],
-  ['scale', '大きさ', 0.2, 3, 0.01],
-];
+const SLIDERS = [];
 
 export function createStage(hostEl, deps) {
+  deps = deps || {};
   const core = createStageCore(hostEl, deps);
   const { state } = core;
   const wrap = el('div', 'vw-canvas');
@@ -29,9 +27,10 @@ export function createStage(hostEl, deps) {
   camera.updateProjectionMatrix = function () {
     _updateProj();
     camera.projectionMatrix.elements[0] *= -1;
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
   };
   camera.updateProjectionMatrix();
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, logarithmicDepthBuffer: true, preserveDrawingBuffer: true });
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, logarithmicDepthBuffer: false, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, globalThis.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace || 'srgb';
   wrap.appendChild(renderer.domElement);
@@ -40,6 +39,25 @@ export function createStage(hostEl, deps) {
   light.position.set(0.4, 1, 0.8);
   scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+  const shadowLight = new THREE.DirectionalLight(0xffffff, 0);
+  shadowLight.shadow.mapSize.set(2048, 2048);
+  shadowLight.shadow.bias = -0.0006;
+  const sc = shadowLight.shadow.camera;
+  sc.left = -8;
+  sc.right = 8;
+  sc.top = 8;
+  sc.bottom = -8;
+  sc.near = 0.5;
+  sc.far = 40;
+  sc.updateProjectionMatrix();
+  scene.add(shadowLight);
+  scene.add(shadowLight.target);
+
+  const catcher = new THREE.Mesh(new THREE.PlaneGeometry(60, 60).rotateX(-Math.PI / 2), new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY, transparent: true, side: THREE.DoubleSide }));
+  catcher.receiveShadow = true;
+  catcher.visible = false;
+  scene.add(catcher);
 
   let fieldGroup = null;
   let grid = null;
@@ -50,6 +68,14 @@ export function createStage(hostEl, deps) {
   let m3d = null;
   const anchor = new THREE.Vector3(0, 0, 0);
   const focus = new THREE.Vector3(0, 1, 0);
+  const ray = new THREE.Raycaster();
+  const rayFrom = new THREE.Vector3();
+  const pivot = new THREE.Vector3();
+  const spun = new THREE.Vector3();
+  const DOWN = new THREE.Vector3(0, -1, 0);
+  let selected = null;
+  const pointer = new THREE.Vector2();
+  const gizmo = createGizmo(scene);
   let framed = false;
   let camLocked = false;
   let authored = false;
@@ -64,6 +90,11 @@ export function createStage(hostEl, deps) {
     const tz = focus.z;
     camera.position.set(tx + Math.cos(cam.pitch) * Math.sin(cam.yaw) * d, ty + Math.sin(cam.pitch) * d, tz + Math.cos(cam.pitch) * Math.cos(cam.yaw) * d);
     camera.lookAt(tx, ty, tz);
+    const near = Math.max(0.01, Math.min(1, d / 60));
+    if (Math.abs(camera.near - near) > 1e-4) {
+      camera.near = near;
+      camera.updateProjectionMatrix();
+    }
   };
 
   function setAnchor(group, origin) {
@@ -124,11 +155,64 @@ export function createStage(hostEl, deps) {
     camera.updateProjectionMatrix();
   }
 
+  function groundAt(x, y, z) {
+    if (!fieldGroup) return anchor.y;
+    rayFrom.set(x, y + 6, z);
+    ray.set(rayFrom, DOWN);
+    ray.far = 60;
+    const hit = ray.intersectObject(fieldGroup, true);
+    for (const h of hit) if (h.object.visible && h.point.y <= y + 0.001) return h.point.y;
+    return anchor.y;
+  }
+
+  function applyShadowMode() {
+    let any = false;
+    for (const c of state.scene.chars) {
+      const inst = core.live(c.id);
+      if (!inst) continue;
+      const cast = c.shadow === 'cast';
+      if (cast) any = true;
+      inst.root.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = cast;
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          if (!m) continue;
+          m.shadowSide = THREE.DoubleSide;
+        }
+      });
+    }
+    if (renderer.shadowMap.enabled !== any) {
+      renderer.shadowMap.enabled = any;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      scene.traverse((o) => {
+        if (!o.material) return;
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
+      });
+    }
+    shadowLight.castShadow = any;
+    catcher.visible = any;
+    catcher.position.set(anchor.x, anchor.y + 0.005, anchor.z);
+    if (!any) return;
+    const d = new THREE.Vector3(0.4, 1, 0.8);
+    shadowLight.position.copy(anchor).addScaledVector(d.normalize(), 14);
+    shadowLight.target.position.copy(anchor);
+    shadowLight.target.updateMatrixWorld();
+  }
+
   function place(c, inst) {
     inst.root.position.set(anchor.x - (c.x || 0), anchor.y + (c.y || 0), anchor.z + (c.z || 0));
-    inst.root.rotation.y = (inst.defaultRotY || 0) + (c.rotY || 0);
+    inst.root.rotation.set(c.rotX || 0, (inst.defaultRotY || 0) + (c.rotY || 0), c.rotZ || 0);
+    if (inst.center) {
+      const s0 = c.scale || 1;
+      pivot.copy(inst.center).multiplyScalar(s0);
+      spun.copy(pivot).applyEuler(inst.root.rotation);
+      inst.root.position.add(pivot).sub(spun);
+    }
     const s = c.scale || 1;
     inst.root.scale.set(s, s, s);
+    if (!inst.shadow) return;
+    const p = inst.root.position;
+    placeShadow(inst.shadow, { kind: c.shadow, x: p.x, groundY: groundAt(p.x, p.y, p.z), z: p.z, scale: s, rotY: inst.root.rotation.y });
   }
 
   function placeAll() {
@@ -152,14 +236,56 @@ export function createStage(hostEl, deps) {
       grid = null;
     }
     scene.background = null;
+    scene.backgroundRotation = new THREE.Euler(0, 0, 0);
+    scene.backgroundIntensity = 1;
     scene.fog = null;
     setAnchor(null);
+  }
+
+  function pickRay(e) {
+    const r = renderer.domElement.getBoundingClientRect();
+    pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(pointer, camera);
+    ray.far = Infinity;
+    return ray;
+  }
+
+  function charUnder(e) {
+    const hits = pickRay(e).intersectObjects(
+      [...core.items.values()].filter((i) => i && i.ok).map((i) => i.root),
+      true,
+    );
+    if (!hits.length) return null;
+    for (const c of state.scene.chars) {
+      const inst = core.live(c.id);
+      if (inst && (hits[0].object === inst.root || isDescendant(hits[0].object, inst.root))) return c.id;
+    }
+    return null;
+  }
+
+  function isDescendant(node, root) {
+    for (let p = node; p; p = p.parent) if (p === root) return true;
+    return false;
+  }
+
+  function selectChar(id) {
+    selected = id ? String(id) : null;
+    const inst = selected ? core.live(selected) : null;
+    if (!inst) {
+      selected = null;
+      gizmo.detach();
+      return;
+    }
+    gizmo.attach(inst);
+    gizmo.resize(camera);
   }
 
   function bindPointer() {
     const cv = renderer.domElement;
     let drag = false;
     let pan = false;
+    let gizmoDrag = false;
+    let moved = 0;
     let lx = 0;
     let ly = 0;
     cv.style.touchAction = 'none';
@@ -168,12 +294,26 @@ export function createStage(hostEl, deps) {
     cv.addEventListener('pointerdown', (e) => {
       lx = e.clientX;
       ly = e.clientY;
-      if (e.button === 2 || e.button === 1) pan = true;
-      else drag = true;
+      moved = 0;
       cv.setPointerCapture(e.pointerId);
+      if (e.button === 2 || e.button === 1) {
+        pan = true;
+        return;
+      }
+      if (selected) {
+        const c = state.get(selected);
+        const inst = core.live(selected);
+        if (c && inst && gizmo.begin(pickRay(e), c, inst, camera)) {
+          gizmoDrag = true;
+          return;
+        }
+      }
+      drag = true;
     });
     cv.addEventListener('pointerup', (e) => {
-      drag = pan = false;
+      if (gizmoDrag) gizmo.end();
+      else if (drag && moved < 5 && e.button === 0) selectChar(charUnder(e));
+      drag = pan = gizmoDrag = false;
       try {
         cv.releasePointerCapture(e.pointerId);
       } catch (x) {}
@@ -183,6 +323,23 @@ export function createStage(hostEl, deps) {
         dy = e.clientY - ly;
       lx = e.clientX;
       ly = e.clientY;
+      moved += Math.abs(dx) + Math.abs(dy);
+      if (gizmoDrag) {
+        const patch = gizmo.move(pickRay(e));
+        if (patch && selected) {
+          state.update(selected, patch);
+          const inst = core.live(selected);
+          if (inst) place(state.get(selected), inst);
+          gizmo.attach(inst);
+          gizmo.resize(camera);
+          if (deps.onGizmo) deps.onGizmo(selected);
+        }
+        return;
+      }
+      if (!drag && !pan) {
+        gizmo.hover(pickRay(e));
+        return;
+      }
       const cam = CAM();
       if (drag) {
         cam.yaw += dx * 0.006;
@@ -199,7 +356,7 @@ export function createStage(hostEl, deps) {
       (e) => {
         e.preventDefault();
         const cam = CAM();
-        cam.dist = Math.max(0.05, Math.min(2000, cam.dist * (1 + Math.sign(e.deltaY) * 0.1)));
+        cam.dist = Math.max(0.05, Math.min(4000, cam.dist * (1 + Math.sign(e.deltaY) * 0.1)));
         camLocked = true;
         applyCam();
       },
@@ -231,13 +388,16 @@ export function createStage(hostEl, deps) {
       if (guard && guard.lost) return;
       if (fieldMats.length) {
         const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-        if (!sceneRT || sceneRT.width !== size.x || sceneRT.height !== size.y) {
+        const k = Math.min(1, OPAQUE_RT_CAP / Math.max(size.x, size.y));
+        const rw = Math.max(1, Math.round(size.x * k));
+        const rh = Math.max(1, Math.round(size.y * k));
+        if (!sceneRT || sceneRT.width !== rw || sceneRT.height !== rh) {
           if (sceneRT) {
             sceneRT.depthTexture.dispose();
             sceneRT.dispose();
           }
-          sceneRT = new THREE.WebGLRenderTarget(Math.max(1, size.x), Math.max(1, size.y));
-          sceneRT.depthTexture = new THREE.DepthTexture(Math.max(1, size.x), Math.max(1, size.y));
+          sceneRT = new THREE.WebGLRenderTarget(rw, rh);
+          sceneRT.depthTexture = new THREE.DepthTexture(rw, rh);
           sceneRT.depthTexture.format = THREE.DepthFormat;
           sceneRT.depthTexture.type = THREE.UnsignedIntType;
         }
@@ -256,6 +416,7 @@ export function createStage(hostEl, deps) {
         for (const o of hidden) o.visible = true;
         updateFieldUniforms(fieldMats, THREE, { camera, time: clock, width: size.x, height: size.y, opaque: sceneRT.texture, depth: sceneRT.depthTexture });
       }
+      gizmo.resize(camera);
       renderer.render(scene, camera);
     },
     async create(key, entry, want) {
@@ -283,9 +444,12 @@ export function createStage(hostEl, deps) {
       inst.costumes = d.variations || [];
       inst.costume = d.costume || '';
       scene.add(inst.root);
+      inst.shadow = createShadow();
+      scene.add(inst.shadow);
       return inst;
     },
     destroy(inst) {
+      disposeShadow(inst.shadow);
       inst.dispose();
     },
     added() {
@@ -300,10 +464,11 @@ export function createStage(hostEl, deps) {
       if (c.motion) inst.setClip(c.motion);
       inst.setSpeed(c.speed);
       inst.setPaused(c.paused);
-      if (c.mouth != null) inst.setMouth(c.mouth);
+      inst.setMouth(c.mouth);
       inst.setFace(c.face || '');
       inst.setBrow(c.brow || '');
       place(c, inst);
+      applyShadowMode();
     },
     controlsFor(inst) {
       if (!inst) return { motionLabel: 'モーション', motions: [], selects: [], sliders: SLIDERS };
@@ -313,7 +478,7 @@ export function createStage(hostEl, deps) {
         { key: 'brow', label: '眉', keep: true, options: (inst.brows || []).map((b, i) => [b, String(i + 1)]) },
       ].filter((s) => s.options.length);
       if ((inst.costumes || []).length > 1) selects.push({ key: 'costume', label: '服装', options: inst.costumes.map((x) => [x.value, x.label]) });
-      return { motionLabel: 'モーション', motions: (inst.clipNames || []).map((n) => [n, n]), selects, sliders: SLIDERS };
+      return { motionLabel: 'モーション', motions: (inst.clipNames || []).map((n) => [n, n]), selects, sliders: SLIDERS, shadow: SHADOW_KINDS };
     },
     async syncField() {
       const prevAnchor = anchor.clone();
@@ -334,16 +499,22 @@ export function createStage(hostEl, deps) {
         const r = await loadBattleField(THREE, f.rel, { bptc: renderer.extensions.has('EXT_texture_compression_bptc') });
         if (!r) {
           core.note('このフィールドを読み込めませんでした。バトルフィールドDLを実行してください。');
+          shiftCamera(prevAnchor);
+          placeAll();
+          frame();
           return;
         }
         fieldGroup = r.group;
         fieldMats = r.fieldMats || [];
         scene.add(fieldGroup);
         setAnchor(fieldGroup, r.origin);
+        applyShadowMode();
         shiftCamera(prevAnchor);
         placeAll();
         frame();
         if (r.background) scene.background = r.background;
+        scene.backgroundRotation = new THREE.Euler(0, r.backgroundRotation || 0, 0);
+        scene.backgroundIntensity = r.backgroundIntensity || 1;
         if (r.fog) scene.fog = r.fog;
         if (r.light) {
           light.intensity = r.light.intensity;
@@ -373,7 +544,12 @@ export function createStage(hostEl, deps) {
       camLocked = false;
       frame(true);
     },
+    selected: () => selected,
+    select(id) {
+      selectChar(id);
+    },
     dispose() {
+      gizmo.dispose();
       clearField();
       if (sceneRT) {
         sceneRT.depthTexture.dispose();

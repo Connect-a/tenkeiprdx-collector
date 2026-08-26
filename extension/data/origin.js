@@ -21,7 +21,7 @@ export async function resolveOrigin({ ignoreManual } = {}) {
   const manual = ignoreManual ? '' : trim(o[SK.originManual]);
   return {
     assets: manual || trim(saved.assets) || trim(CFG.assetRootDefault),
-    statics: trim(saved.statics) || null,
+    statics: trim(saved.statics) || trim(CFG.staticsRootDefault) || null,
     manual: manual || null,
     from: manual ? 'manual' : saved.assets ? saved.from || 'saved' : 'default',
   };
