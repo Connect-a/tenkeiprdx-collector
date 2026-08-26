@@ -5,13 +5,9 @@ import { SK } from '../../core/constants.js';
 import { ensureBulkTick, renderBulkBanner, renderBulkCard } from '../views/bulk-ui.js';
 import { updateCard } from '../views/roster-ui.js';
 import { refreshLists } from './state-refresh.js';
-import { updateConn, maybeAutoDisconnect } from './connection-controller.js';
-import { resumeBulkIfWaitingForConnection } from './bulk-resume.js';
-import { reacquireData } from './data-reacquire.js';
 import { playerState } from './player-state.js';
 import { updateCdnReset } from '../views/shell-ui.js';
 
-let reactTimer = null;
 let bulkRefreshTimer = null;
 let bound = false;
 let manualPinned = false;
@@ -69,25 +65,6 @@ function onChanged(ch, area) {
         refreshListsSafe(['fs']);
       }, 1200);
     }
-  }
-
-  if (ch.capturing || ch.captureLive || ch.captureError || ch.apiAuth || ch.apiAuthBad) updateConn();
-
-  if (ch.apiAuth || ch.apiAuthBad) {
-    const nTok = ch.apiAuth && ch.apiAuth.newValue && ch.apiAuth.newValue.authorization;
-    const oTok = ch.apiAuth && ch.apiAuth.oldValue && ch.apiAuth.oldValue.authorization;
-    const badCleared = !!(ch.apiAuthBad && ch.apiAuthBad.oldValue && !ch.apiAuthBad.newValue);
-    if ((nTok && nTok !== oTok) || badCleared) resumeBulkIfWaitingForConnection();
-  }
-
-  if (ch.apiAuth || ch.apiAuthBad) {
-    const fresh = !!(ch.apiAuth && ch.apiAuth.newValue && ch.apiAuth.newValue.authorization && ch.apiAuth.newValue.authorization !== (ch.apiAuth.oldValue && ch.apiAuth.oldValue.authorization));
-    clearTimeout(reactTimer);
-    reactTimer = setTimeout(async () => {
-      if (fresh && playerState.owned.size <= 0) await reacquireData(getById('connInfo'));
-      else await refreshLists(['owned']);
-      await maybeAutoDisconnect();
-    }, 1500);
   }
 
   if (ch.origin || ch.originManual) {

@@ -1,5 +1,5 @@
 import { fileStore } from '../../core/fsdir.js';
-import { FAIL_CAP, DL_CONC } from '../../core/constants.js';
+import { FAIL_CAP, MISS_STREAK_CAP, DL_CONC } from '../../core/constants.js';
 import { utilHelpers } from '../../core/util.js';
 import { assetStore } from '../asset-store.js';
 import { networkClient } from '../network.js';
@@ -27,6 +27,7 @@ export async function runBulkDownload(items, opts) {
   const total = list.length;
   const ctx = { done: 0, got: 0, skip: 0, fail: 0, missing: 0, total };
   let aborted = null;
+  let missStreak = 0;
   const emit = (phase) => {
     if (!tick) return;
     const m = tick(ctx, phase);
@@ -67,6 +68,7 @@ export async function runBulkDownload(items, opts) {
       const status = await grab(item);
       if (!status) return;
       ctx.done++;
+      if (status === 'skip' || status === 'got') missStreak = 0;
       if (status === 'skip') {
         ctx.skip++;
         emit('skip');
@@ -77,8 +79,10 @@ export async function runBulkDownload(items, opts) {
         emit('dl');
         return;
       }
-      if (status === 'missing') ctx.missing++;
-      else {
+      if (status === 'missing') {
+        ctx.missing++;
+        if (++missStreak >= MISS_STREAK_CAP) aborted = new Error(`配信元が${MISS_STREAK_CAP}件連続で応答しなかったため中断しました（配信停止の可能性）`);
+      } else {
         deferred.push(item);
         if (++ctx.fail >= FAIL_CAP) aborted = new Error(`通信の失敗${FAIL_CAP}件で中断`);
       }

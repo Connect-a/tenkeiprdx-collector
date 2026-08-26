@@ -153,6 +153,43 @@
   background-position: center;
   background-repeat: no-repeat;
 }
+.vw-gizmo2d {
+  position: absolute;
+  border: 1px solid #ffc93c;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 3;
+}
+.vw-gizmo2d-knob {
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  width: 11px;
+  height: 11px;
+  background: #f2f4f8;
+  border: 1px solid #333a48;
+  border-radius: 2px;
+}
+.vw-gizmo2d-spin {
+  position: absolute;
+  left: 50%;
+  top: -26px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: #ffc93c;
+  border: 1px solid #333a48;
+  border-radius: 50%;
+}
+.vw-gizmo2d-spin::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 11px;
+  width: 1px;
+  height: 14px;
+  background: #ffc93c;
+}
 .vw-stage canvas {
   display: block;
   width: 100%;
@@ -173,7 +210,7 @@
   border: 1px solid #3a4152;
   border-radius: 6px;
   padding: 6px 10px;
-  width: 560px;
+  width: 420px;
   max-width: 100%;
   background: #1c2029;
 }
@@ -226,6 +263,22 @@
   width: 34px;
   padding: 2px 0;
   text-align: center;
+}
+.vw-radios {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.vw-radio {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #c7d0de;
+  cursor: pointer;
+}
+.vw-radio input {
+  margin: 0;
 }
 .vw-grid {
   display: grid;

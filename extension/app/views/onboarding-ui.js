@@ -29,11 +29,14 @@ function buildEmailStep() {
   } catch (e) {}
 
   const label = el('span', 'olabel', document.createTextNode('メールアドレス（入力不要）'));
-  append(label, [el('div', 'emailrow', [input, save]), el('div', { class: 'note dim', style: { marginTop: '4px' }, text: '入力せずとも機能に変化や欠落はありません。あとでサイドバーの「設定」からいつでも変更・削除できます。' })]);
+  append(label, [
+    el('div', 'emailrow', [input, save]),
+    el('div', { class: 'note dim', style: { marginTop: '4px' }, text: '入力せずとも機能に変化や欠落はありません。あとでサイドバーの「設定」からいつでも変更・削除できます。' }),
+  ]);
   return el('div', 'step active', [el('span', 'onum', '0'), label]);
 }
 
-export function buildOnboard({ fsGranted, capturing, hasData }) {
+export function buildOnboard({ fsGranted, hasIndex }) {
   const box = el('div', 'onboard');
   const step = ({ status, num, label, btn }) =>
     `<div class="step ${status === 'done' ? 'done' : status === 'active' ? 'active' : ''}"><span class="onum">${status === 'done' ? '✓' : num}</span><span class="olabel">${label}</span>${status === 'active' && btn ? btn : ''}</div>`;
@@ -46,11 +49,10 @@ export function buildOnboard({ fsGranted, capturing, hasData }) {
       ? `保存先フォルダ「${fileStore.dirName()}」を許可`
       : '保存先フォルダを選択';
   const step1btn = !supported ? '' : `<button class="btn primary" id="obFolder">${hasHandle ? 'このフォルダを許可' : 'フォルダを選ぶ'}</button>`;
-  box.innerHTML = `<h2 class="obh">はじめに（3ステップ）</h2>
+  box.innerHTML = `<h2 class="obh">はじめに（2ステップ）</h2>
     ${step({ status: stepStatus(fsGranted, !fsGranted), num: '①', label: step1label, btn: step1btn })}
-    ${step({ status: stepStatus(fsGranted && capturing, fsGranted && !capturing), num: '②', label: 'ゲームと接続', btn: '<button class="btn primary" id="obConn">ゲームと接続</button>' })}
-    ${step({ status: stepStatus(fsGranted && hasData, fsGranted && capturing && !hasData), num: '③', label: 'ライブのゲームを開いてホームまで進む→所持データを取得', btn: '<a class="gamelink" href="https://play.games.dmm.co.jp/game/tenkeiprdx_x" target="_blank" rel="noopener" style="display:inline-block;margin-top:4px">ゲームを開く（R18）</a>' })}
-    <div class="note dim" style="margin-top:10px">※接続後、所持キャラの解放済みストーリーをAPIで取得し選択フォルダへ保存します。</div>
+    ${step({ status: stepStatus(hasIndex, fsGranted && !hasIndex), num: '②', label: 'サイドバーの「ダウンロード」から索引を作る', btn: '' })}
+    <div class="note dim" style="margin-top:10px">※サービス終了によりゲームとの接続はできなくなりました。既に取得済みのデータと配信中のCDNから読み込みます。</div>
     <div class="note dim" style="margin-top:4px">※取得したデータ（ストーリー・ボイス・画像等）は私的な閲覧のみに使用し、再配布・公開はしないでください。</div>`;
   box.insertBefore(buildEmailStep(), box.querySelector('.obh').nextSibling);
 
@@ -69,13 +71,5 @@ export function buildOnboard({ fsGranted, capturing, hasData }) {
       }
     });
   }
-  const c = box.querySelector('#obConn');
-  if (c) {
-    c.addEventListener('click', () => {
-      const connToggle = getById('connToggle');
-      if (connToggle) connToggle.click();
-    });
-  }
-
   return box;
 }

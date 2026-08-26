@@ -5,7 +5,7 @@ import { monsterStatus, other3dStatus } from '../entity-lists.js';
 import { runBulkDownload } from './acquire-bulk.js';
 import { assetStore } from '../asset-store.js';
 import { staticsList } from '../statics.js';
-import { GACHA_KINDS, KIND_BY_KEY, gachaFileList } from '../gacha.js';
+import { KIND_BY_KEY, gachaFileList } from '../gacha.js';
 import { dlSession } from '../dl-session.js';
 import { localInventory } from '../inventory.js';
 import { fileStore } from '../../core/fsdir.js';
@@ -45,9 +45,7 @@ const gachaBgRels = async () => (await ensureIndexes()).assets.gachaBgRels || []
 const gachaExtraRels = async () => (await ensureIndexes()).assets.gachaExtraRels || [];
 const gachaBundleRels = async () => [...(await gachaBgRels()), ...(await gachaExtraRels())];
 
-const DEAD_KIND_MISSES = 10;
 const MISSING_FILE = 'statics/_gacha_missing.json';
-const CAN_DIE = new Set(GACHA_KINDS.filter((k) => !k.evidence).map((k) => k.key));
 
 async function runGachaDownload(progress, opts) {
   const stop = (opts && opts.shouldAbort) || (() => false);
@@ -61,8 +59,6 @@ async function runGachaDownload(progress, opts) {
   }
   const list = [...groups.values()].sort((a, b) => (a.kind === b.kind ? Number(a.id) - Number(b.id) : a.kind === 'ガチャ' ? -1 : 1));
   const missingIds = {};
-  const dead = new Set();
-  const kindHit = {};
   const sess = dlSession.create();
   let unresolved = 0;
   let stopped = false;
@@ -74,21 +70,18 @@ async function runGachaDownload(progress, opts) {
         stopped = true;
         break;
       }
-      const use = g.files.filter((f) => !dead.has(f.kindKey));
-      unresolved += use.filter((f) => !f.url).length;
-      const rs = await Promise.all(use.filter((f) => f.url).map((f) => sess.saveUrl(dir, { url: f.url, subpath: f.path, label: f.name }, 'statics/接続を確認').then((r) => [f, r])));
-      for (const [f, r] of rs) {
-        if (r.status === 'got' || r.status === 'skip') kindHit[f.kindKey] = (kindHit[f.kindKey] || 0) + 1;
-        else if (r.status === 'missing') {
-          const miss = missingIds[f.kindKey] || (missingIds[f.kindKey] = []);
-          miss.push(f.gachaId);
-          if (CAN_DIE.has(f.kindKey) && !kindHit[f.kindKey] && miss.length >= DEAD_KIND_MISSES) dead.add(f.kindKey);
-        }
-      }
+      unresolved += g.files.filter((f) => !f.url).length;
+      const rs = await Promise.all(g.files.filter((f) => f.url).map((f) => sess.saveUrl(dir, { url: f.url, subpath: f.path, label: f.name }, 'statics/接続を確認').then((r) => [f, r])));
+      for (const [f, r] of rs) if (r.status === 'missing') (missingIds[f.kindKey] || (missingIds[f.kindKey] = [])).push(f.gachaId);
       done++;
       if (progress) progress(`${g.kind} ${done}/${list.length}（ID ${g.id}）${note()}`, done / list.length, sess.counters);
+      if (sess.aborted) {
+        stopped = true;
+        break;
+      }
     }
   }
+  const cdnDown = !!sess.cdnDown;
   const { ctx } = stopped
     ? { ctx: { got: 0, skip: 0, missing: 0, fail: 0, total: 0, purged: 0, stopped: true } }
     : await runBulkDownload(await gachaBundleRels(), {
@@ -99,16 +92,15 @@ async function runGachaDownload(progress, opts) {
         tick: (c, phase) => (phase === 'dl' ? everyN(20)(c) : null),
         done: doneWithSkip,
       });
-  const deadLabels = GACHA_KINDS.filter((k) => dead.has(k.key)).map((k) => k.label);
   if (Object.keys(missingIds).length) {
-    console.log('[gacha] 配信なしだったID（gacha.js の GACHA_MISSING に貼る用）', JSON.stringify(missingIds));
+    console.log('[gacha] 配信なしだったID', JSON.stringify(missingIds));
     if (dir) {
       try {
-        await fileStore.writeUnder(dir, MISSING_FILE, new TextEncoder().encode(JSON.stringify({ missingIds, dead: deadLabels }, null, 1)));
+        await fileStore.writeUnder(dir, MISSING_FILE, new TextEncoder().encode(JSON.stringify({ missingIds, cdnDown }, null, 1)));
       } catch (e) {}
     }
   }
-  if (deadLabels.length) console.log('[gacha] 1件も取れないまま404が続いたので打ち切った種別', deadLabels.join(' / '));
+  if (cdnDown) console.warn('[gacha]', sess.aborted.message);
   const missList = Object.entries(missingIds).flatMap(([k, ids]) => ids.map((id) => `${(KIND_BY_KEY.get(k) || { label: k }).label} ${id}`));
   return {
     got: sess.counters.got + ctx.got,
@@ -121,7 +113,7 @@ async function runGachaDownload(progress, opts) {
     stopped: stopped || !!ctx.stopped,
     missingIds,
     missList,
-    dead: deadLabels,
+    cdnDown,
   };
 }
 

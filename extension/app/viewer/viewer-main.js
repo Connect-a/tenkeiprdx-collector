@@ -47,7 +47,7 @@ async function loadStage(mode) {
   const host = getById('vwStage');
   host.textContent = '';
   const mod = mode === '2d' ? await import('./viewer-stage2d.js') : await import('./viewer-stage3d.js');
-  stage = mod.createStage(host, { state, entryOf, onNote: setNote, onBusy: setBusy });
+  stage = mod.createStage(host, { state, entryOf, onNote: setNote, onBusy: setBusy, onGizmo: (id) => controls.refresh(id) });
   await stage.init();
   await stage.syncAll();
 }
@@ -70,7 +70,20 @@ async function refreshFields() {
   fields = await createFieldList(state.mode);
   const sel = getById('vwField');
   sel.textContent = '';
-  for (const f of fields) sel.appendChild(el('option', { value: f.key, text: f.label }));
+  const groups = new Map();
+  for (const f of fields) {
+    let host = sel;
+    if (f.group) {
+      let og = groups.get(f.group);
+      if (!og) {
+        og = el('optgroup', { label: f.group });
+        groups.set(f.group, og);
+        sel.appendChild(og);
+      }
+      host = og;
+    }
+    host.appendChild(el('option', { value: f.key, text: f.label }));
+  }
   const want = state.scene.field;
   const cur = fields.find((f) => f.kind === want.kind && f.rel === want.rel);
   sel.value = cur ? cur.key : fields[0] ? fields[0].key : '';

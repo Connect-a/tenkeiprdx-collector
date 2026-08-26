@@ -149,7 +149,7 @@ export function createLetterPanel(deps) {
         try {
           localStorage.setItem('tp_name', nm);
         } catch (e) {}
-      } else toast('ゲームと接続すると使えるようになります。', 'err');
+      } else toast('索引を作ると使えるようになります。', 'err');
     });
     getById('letterSend').addEventListener('click', async () => {
       const btn = getById('letterSend'),

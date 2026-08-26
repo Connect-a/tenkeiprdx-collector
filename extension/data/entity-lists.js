@@ -433,23 +433,6 @@ async function gachaEntries(x) {
       parts: refs.map((r) => ({ label: bundleName(r.rel), bgRel: r.rel, assetId: r.id })),
     });
   }
-  for (const f of files) {
-    if (f.kindKey !== 'ticket') continue;
-    out.push({
-      id: 'gachaticket_' + f.gachaId,
-      name: `${f.gachaId}　${f.name}`,
-      note: '',
-      source: 'gachaticket',
-      refs: [],
-      ids: [],
-      spineIds: [],
-      iconIds: [],
-      spine: null,
-      spinelight: null,
-      icon: null,
-      parts: [{ label: f.kindLabel, file: f.path }],
-    });
-  }
   return out;
 }
 
@@ -575,7 +558,7 @@ export async function monsterStatus(listIn) {
   return { list, have, monsters: list.length, ready: list.filter((e) => monsterReady(e, have)).length, total: ids.size, refs: [...byPath.values()], missing: [...missing.values()] };
 }
 
-export const isGachaEntry = (e) => e.source === 'gacha' || e.source === 'gachaticket';
+export const isGachaEntry = (e) => e.source === 'gacha';
 
 export async function other2dStatus(listIn) {
   const list = listIn || (await other2dList());

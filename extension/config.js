@@ -1,7 +1,10 @@
 export const CFG = {
   apiBase: 'https://app-paripari-prod.tenkei-paradox.com',
   masterDataBase: 'https://cdne-paripari-prod.tenkei-paradox.com/master-data/',
+  masterDataFallbackUrl:
+    'https://cdne-paripari-prod.tenkei-paradox.com/master-data/production/masterdata_1786967983_1787688000_1.bin?sv=2021-10-04&se=2027-08-17T21%3A05%3A12Z&sr=b&sp=r&sig=PMrkK5zoAhQxj8l0DIqVH0o%2FLwjTU2XMXCHOG5dytts%3D',
   assetRootDefault: 'https://cdne-paripari-prod.tenkei-paradox.com/production/production0-864dc0b0-6f1a-4aaa-bb36-703600ea7966',
+  staticsRootDefault: 'https://cdne-paripari-prod.tenkei-paradox.com/production/2ab0a221-a24a-4ba0-aac7-86aa5c9a1a0b-statics',
   targetHosts: ['app-paripari-prod.tenkei-paradox.com', 'cdne-paripari-prod.tenkei-paradox.com'],
   receiverUrl: 'https://tenkeiprdx-collect.10bace.com',
   githubIssuesUrl: 'https://github.com/Connect-a/tenkeiprdx-collector/issues',

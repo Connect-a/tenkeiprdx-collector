@@ -311,14 +311,13 @@ function createExpression(T, st, deps) {
       mg.geo.attributes.uv.needsUpdate = true;
     }
   };
-  const evalBlend = (evs, t, loop) => {
-    const start = loop && evs.length ? evs[evs.length - 1].weight : 0;
-    let val = start;
+  const evalBlend = (evs, t) => {
+    let val = 0;
     for (let i = 0; i < evs.length; i++) {
       const e = evs[i];
       if (t < e.time) break;
       if (e.dur > 0 && t < e.time + e.dur) {
-        const prev = i > 0 ? evs[i - 1].weight : start;
+        const prev = i > 0 ? evs[i - 1].weight : 0;
         return prev + (e.weight - prev) * ((t - e.time) / e.dur);
       }
       val = e.weight;
@@ -331,7 +330,6 @@ function createExpression(T, st, deps) {
     const dur = clip.duration || 1;
     let t = st.action.time || 0;
     if (dur > 0) t = ((t % dur) + dur) % dur;
-    const isLoop = st.action.loop === T.LoopRepeat;
     let faceDriven = false;
     const fixed = st.exprFixed || EMPTY_FIXED;
     if (!st.exprFix) {
@@ -351,7 +349,7 @@ function createExpression(T, st, deps) {
       }
       for (const mt of morphObjs) {
         const infl = mt.obj.morphTargetInfluences;
-        if (!infl) continue;
+        if (!infl || fixed.has(mt.feature)) continue;
         for (let i = 0; i < infl.length; i++) infl[i] = 0;
         const baseMap = mt.feature === 'face' ? fbx.faceBaseValues : mt.feature === 'brow' ? fbx.browBaseValues : null;
         const bv = baseMap && baseMap[clip.name];
@@ -359,7 +357,7 @@ function createExpression(T, st, deps) {
         if (drivenFeat.has(mt.feature) && !fixed.has(mt.feature)) {
           const dict = mt.obj.morphTargetDictionary || {};
           for (const [tg, evs] of byTarget) {
-            const w = evalBlend(evs, t, isLoop);
+            const w = evalBlend(evs, t);
             for (const nm in dict) {
               if (nm === tg || exprBase(nm) === tg) infl[dict[nm]] = w;
             }
@@ -1542,7 +1540,11 @@ function buildInstance(model, materialBundle, opt) {
     }
     return out;
   };
+  const exprSel = { face: undefined, brow: undefined, mouth: undefined };
   const applyExpr = (feature, base) => {
+    const key = base || '';
+    if (exprSel[feature] === key) return;
+    exprSel[feature] = key;
     for (const mt of morphObjs) {
       if (mt.feature !== feature) continue;
       const infl = mt.obj.morphTargetInfluences;
@@ -1552,7 +1554,10 @@ function buildInstance(model, materialBundle, opt) {
       if (base) for (const nm in dict) if (exprBase(nm) === base) infl[dict[nm]] = 1;
     }
     if (base) st.exprFixed.add(feature);
-    else st.exprFixed.delete(feature);
+    else {
+      st.exprFixed.delete(feature);
+      expr.applyClipExpr();
+    }
   };
   const mouths = mouthGeoms.length
     ? [...new Set([defaultMouth, ...(model.clips || []).flatMap((c) => (c.events || []).filter((e) => e.type === 'mouth').map((e) => e.index))])].filter((i) => i >= 1 && i <= 25).sort((a, b) => a - b)
@@ -1594,14 +1599,18 @@ function buildInstance(model, materialBundle, opt) {
       for (const rig of weaponRigs) if (rig.cur) rig.cur.paused = !!on;
     },
     setMouth(i) {
+      const key = i == null || i === '' ? '' : String(Number(i) || defaultMouth);
+      if (exprSel.mouth === key) return;
+      exprSel.mouth = key;
       st.mouthCellKey = '';
-      if (i == null || i === '') {
+      if (!key) {
         st.exprFixed.delete('mouth');
         expr.applyMouthIndex(defaultMouth);
+        expr.applyClipExpr();
         return;
       }
       st.exprFixed.add('mouth');
-      expr.applyMouthIndex(Number(i) || defaultMouth);
+      expr.applyMouthIndex(Number(key));
     },
     get paused() {
       return !st.playing;

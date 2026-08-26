@@ -96,6 +96,8 @@ export function createStageCore(hostEl, deps) {
     },
     syncField: () => impl.syncField(),
     snapshot: () => impl.snapshot(),
+    selected: () => (impl.selected ? impl.selected() : null),
+    select: (id) => impl.select && impl.select(id),
     resetCamera: () => impl.resetCamera && impl.resetCamera(),
     lockCamera: () => impl.lockCamera && impl.lockCamera(),
     dispose() {

@@ -1,6 +1,6 @@
 import { collectionRepository } from '../../data/collection.js';
 import { episodeCounts, questSort } from '../../data/character-meta.js';
-import { SK, XPOS_CATEGORIES } from '../../core/constants.js';
+import { XPOS_CATEGORIES } from '../../core/constants.js';
 import { settings } from '../../core/settings.js';
 import { getById, el, append } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
@@ -274,25 +274,42 @@ export async function renderRoster(opts) {
   buildSortControls();
   buildExModeControls();
 
-  const capturing = !!(await chrome.storage.local.get(SK.capturing)).capturing;
+  let hasIndex = false;
+  try {
+    hasIndex = await collectionRepository.indexReady();
+  } catch (e) {}
   if (stale()) return;
-  const hasData = playerState.owned.size > 0 || playerState.dl.length > 0;
 
-  const showControls = playerState.fsGranted && hasData;
+  const showControls = playerState.fsGranted && hasIndex;
   const setD = (id, v) => {
     const node = getById(id);
     if (node) node.style.display = v;
   };
 
   if (!showControls) {
-    for (const id of ['rosterSearch', 'rosterType', 'rosterOwn', 'rosterGroup', 'rosterRank', 'bulkOpen', 'sharedDl', 'rostercount', 'rosterSortLbl', 'rosterSort', 'rosterSortDescLabel', 'exModeLabel', 'exFilterRow']) setD(id, 'none');
+    for (const id of [
+      'rosterSearch',
+      'rosterType',
+      'rosterOwn',
+      'rosterGroup',
+      'rosterRank',
+      'bulkOpen',
+      'sharedDl',
+      'rostercount',
+      'rosterSortLbl',
+      'rosterSort',
+      'rosterSortDescLabel',
+      'exModeLabel',
+      'exFilterRow',
+    ])
+      setD(id, 'none');
   } else {
     for (const id of ['rosterSearch', 'rosterType', 'bulkOpen', 'sharedDl', 'rostercount']) setD(id, '');
     setD('rosterOwn', playerState.rosterKind === 'character' ? '' : 'none');
     for (const id of ['rosterSortLbl', 'rosterSort', 'rosterSortDescLabel', 'exModeLabel']) setD(id, playerState.rosterKind === 'character' ? '' : 'none');
   }
 
-  if (!playerState.fsGranted || !hasData) grid.appendChild(buildOnboard({ fsGranted: playerState.fsGranted, capturing, hasData }));
+  if (!showControls) grid.appendChild(buildOnboard({ fsGranted: playerState.fsGranted, hasIndex }));
   if (!playerState.fsGranted) {
     getById('rostercount').textContent = '';
     return;

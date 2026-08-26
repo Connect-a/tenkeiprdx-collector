@@ -6,7 +6,6 @@ import { playerState } from './player-state.js';
 import { updateFsUi, updateStorage } from '../views/fs-ui.js';
 import { renderRoster } from '../views/roster-ui.js';
 import { refreshDownloadSection, markDownloadSectionDirty } from '../views/download-section.js';
-import { ensureUserState } from './user-state-guard.js';
 
 let _scan = null;
 let _scanPending = false;
@@ -103,7 +102,6 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
       try {
         playerState.owned = await userStateService.ownedLevels();
       } catch (e) {}
-      if (playerState.dl.length) ensureUserState().catch(() => {});
     } else {
       playerState.owned = new Map();
     }

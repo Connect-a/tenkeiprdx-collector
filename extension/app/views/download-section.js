@@ -46,7 +46,7 @@ async function setPhantom(key, n) {
 }
 
 const purgedText = (r) => (r && r.purged ? `・壊れた分を削除${r.purged}件` : '');
-const unresolvedText = (r) => (r && r.unresolved ? `・取り先が分からない分${r.unresolved}件（ゲームと接続して索引を作り直してください）` : '');
+const unresolvedText = (r) => (r && r.unresolved ? `・取り先が分からない分${r.unresolved}件（「索引を作り直す」を実行してからやり直してください）` : '');
 const summary = (r) =>
   `新規${r.got}件` +
   (r.skip != null ? `・既にあった分${r.skip}件` : '') +
@@ -120,7 +120,7 @@ const JOBS = [
       `新規${r.got}件・既にあった分${r.skip}件` +
       (r.missing ? `・配信なし${r.missing}件` : '') +
       (r.missList && r.missList.length ? (r.missList.length <= 20 ? `（${r.missList.join('・')}）` : '（内訳は _共有リソース/statics/_gacha_missing.json）') : '') +
-      (r.dead && r.dead.length ? `・${r.dead.join('と')}は配信なしと判断して打ち切り` : '') +
+      (r.cdnDown ? '・404が続いたため中断しました（配信停止の可能性）' : '') +
       (r.failed ? `・失敗${r.failed}件` : ''),
     status: () => assetAcquirer.gachaStatus(),
   },
@@ -202,22 +202,19 @@ function jobRow(job) {
         btn.classList.add('rec');
         syncRowButtons();
         markChecking(badge, spin);
-        note.textContent = '保存済みを確認しています…';
+        note.textContent = '索引を確認しています…';
         await new Promise((r) => requestAnimationFrame(r));
-        let base = 0;
-        let total = 0;
         try {
-          const st0 = job.status ? await job.status() : null;
-          if (st0) {
-            base = st0.have || 0;
-            total = st0.total || 0;
-          }
+          await collectionRepository.ensureIndexes((m) => {
+            note.textContent = m;
+          });
         } catch (e) {}
+        note.textContent = '保存済みを確認しています…';
         try {
           const r = await job.run(
             (m, f, c) => {
               note.textContent = m;
-              if (c) paint(badge, spin, base + (c.got || 0), total, 0, 0, true);
+              if (c) paint(badge, spin, (c.skip || 0) + (c.got || 0), c.total || 0, 0, 0, true);
             },
             { shouldAbort: () => stopReq },
           );
@@ -257,7 +254,8 @@ function jobRow(job) {
 function indexRow(onBuilt, rebuild) {
   const note = el('span', 'note dim');
   const btn = el('button', {
-    class: rebuild ? 'btn xs' : 'btn xs primary',
+    class: 'btn primary',
+    style: { flex: '1' },
     text: rebuild ? '索引を作り直す' : '索引を作成',
     on: {
       click: async () => {
@@ -279,8 +277,9 @@ function indexRow(onBuilt, rebuild) {
       },
     },
   });
-  if (rebuild) return el('div', 'dlrow', [el('div', 'dlrow-head', [btn]), note]);
-  return el('div', 'dlrow', [el('div', 'note', 'どこに何があるかの索引がまだありません。保存先に masterdata.bin があれば接続なしで作れます。'), el('div', 'dlrow-head', [btn]), note]);
+  const wrap = { style: { marginTop: '12px' } };
+  if (rebuild) return el('div', wrap, [el('div', 'connbar', [btn]), note]);
+  return el('div', wrap, [el('div', 'note', 'どこに何があるかの索引がまだありません。配信元から取得して作ります。'), el('div', 'connbar', [btn]), note]);
 }
 
 export function renderIndexRebuild() {

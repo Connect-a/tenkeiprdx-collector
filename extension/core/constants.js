@@ -30,6 +30,8 @@ export const DEFAULT_PLAYER_NAME = 'おーじ';
 
 export const FAIL_CAP = 20;
 
+export const MISS_STREAK_CAP = 10;
+
 export const DL_CONC = { asset: 32, decode: 8 };
 
 export const MOTION_VOICE = {
@@ -74,9 +76,6 @@ export const SK = {
   indexCache: 'indexCache',
   apiAuth: 'apiAuth',
   apiAuthBad: 'apiAuthBad',
-  capturing: 'capturing',
-  captureLive: 'captureLive',
-  captureError: 'captureError',
   userRaw: 'userRaw',
   cdnMissing: 'cdnMissing',
   missingScenes: 'missingScenes',
