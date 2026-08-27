@@ -51,20 +51,16 @@ function propValue(T, mat, p) {
   const colors = (mat && mat.allColors) || {};
   const st = (mat && mat.texST) || {};
   if (p.type === 'float') return Number(floats[p.name]) || 0;
+  const n = p.type === 'vec2' ? 2 : p.type === 'vec3' ? 3 : 4;
   const m = /^(_.*)_ST$/.exec(p.name);
-  if (m && st[m[1]]) return st[m[1]].slice();
+  if (m && st[m[1]]) return st[m[1]].slice(0, n);
   const c = colors[p.name];
-  if (c) return p.type === 'vec3' ? [c[0], c[1], c[2]] : [c[0], c[1], c[2], c[3]];
+  if (c) return [c[0], c[1], c[2], c[3]].slice(0, n);
   const f = floats[p.name];
-  if (f != null) return p.type === 'vec2' ? [Number(f), Number(f)] : p.type === 'vec3' ? [Number(f), Number(f), Number(f)] : [Number(f), Number(f), Number(f), Number(f)];
-  return p.type === 'vec2' ? [0, 0] : p.type === 'vec3' ? [0, 0, 0] : [0, 0, 0, 0];
+  if (f != null) return new Array(n).fill(Number(f));
+  return new Array(n).fill(0);
 }
 
-// 実ゲームはガンマ色空間(URPのGLSLに UNITY_COLORSPACE_GAMMA 由来の LinearToSRGB / RGBM指数1 が焼かれている)。
-// three は出力で sRGB エンコードするので、実シェーダの出力をリニアへ戻してから渡す。
-const TO_LINEAR_FN = 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
-
-// 霧。焼いたバリアントは fog 無しなので、実ゲームの fog GLSL と同じ式を後段で掛ける（設計資料_viewer.md）。
 const FOG_FN =
   'uniform vec4 tpFogParams;\nuniform vec4 tpFogColor;\nuniform vec4 tpFogControl;\nin highp float tpFogZ;\n' +
   'vec3 tpMixFog(vec3 c){\n' +
@@ -78,16 +74,47 @@ const FOG_FN =
   '  return mix(tpFogColor.rgb, c, fi);\n' +
   '}\n';
 
-function toLinearOutput(frag, fog) {
+const CHAR_SHADOW_FN =
+  'uniform highp sampler2DShadow tpCharShadowMap;\nuniform mat4 tpCharShadowMatrix;\nuniform float tpCharShadowStrength;\nin highp vec3 tpCharW;\n' +
+  'float tpCharShadow(){\n' +
+  '  if (tpCharShadowStrength <= 0.0) return 1.0;\n' +
+  '  vec4 c = tpCharShadowMatrix * vec4(tpCharW, 1.0);\n' +
+  '  c.xyz /= c.w;\n' +
+  '  if (c.x <= 0.0 || c.x >= 1.0 || c.y <= 0.0 || c.y >= 1.0 || c.z >= 1.0) return 1.0;\n' +
+  '  return mix(1.0, texture(tpCharShadowMap, c.xyz), tpCharShadowStrength);\n' +
+  '}\n';
+
+function wrapOutput(frag, fog, charShadow) {
+  if (!fog && !charShadow) return frag;
   if (!/\bvoid\s+main\s*\(\s*\)/.test(frag) || !/\bSV_Target0\b/.test(frag)) return frag;
   const body = frag.replace(/\bvoid\s+main\s*\(\s*\)/, 'void tpUnityMain()');
-  const out = fog ? 'SV_Target0.rgb=tpToLinear(tpMixFog(SV_Target0.rgb));' : 'SV_Target0.rgb=tpToLinear(SV_Target0.rgb);';
-  return body + '\n' + TO_LINEAR_FN + (fog ? FOG_FN : '') + 'void main(){tpUnityMain();' + out + '}\n';
+  return (
+    body +
+    '\n' +
+    (fog ? FOG_FN : '') +
+    (charShadow ? CHAR_SHADOW_FN : '') +
+    'void main(){tpUnityMain();' +
+    (charShadow ? 'SV_Target0.rgb=SV_Target0.rgb*tpCharShadow();' : '') +
+    (fog ? 'SV_Target0.rgb=tpMixFog(SV_Target0.rgb);' : '') +
+    '}\n'
+  );
 }
 
-function addFogVarying(vert) {
+function addVaryings(vert, fog, charShadow) {
   if (!/\bvoid\s+main\s*\(\s*\)/.test(vert) || !/gl_Position/.test(vert)) return vert;
-  return vert.replace(/\bvoid\s+main\s*\(\s*\)/, 'out highp float tpFogZ;\nvoid main()').replace(/(gl_Position\s*=[^;]*;)/g, '$1\n    tpFogZ = gl_Position.w;');
+  let out = vert.replace(/\bvoid\s+main\s*\(\s*\)/, (fog ? 'out highp float tpFogZ;\n' : '') + (charShadow ? 'out highp vec3 tpCharW;\n' : '') + 'void main()');
+  if (fog) out = out.replace(/(gl_Position\s*=[^;]*;)/g, '$1\n    tpFogZ = gl_Position.w;');
+  if (charShadow) out = out.replace(/(gl_Position\s*=[^;]*;)/g, '$1\n    tpCharW = (modelMatrix * vec4(position, 1.0)).xyz;');
+  return out;
+}
+
+function fullHdrLightmap(frag, isFullHdr) {
+  if (!isFullHdr || !/texture\(unity_Lightmap,/.test(frag)) return frag;
+  const m = /(\bu_xlat\w*)\s*=\s*texture\(unity_Lightmap,/.exec(frag);
+  if (!m) return frag;
+  const re = new RegExp('\\b' + m[1] + '\\.w\\s*\\*\\s*5\\.0\\b', 'g');
+  const out = frag.replace(re, '1.0');
+  return out === frag ? frag : out;
 }
 
 export function makeFieldMaterial(T, shaderName, mat, deps) {
@@ -96,7 +123,6 @@ export function makeFieldMaterial(T, shaderName, mat, deps) {
   if (!g || !g.vert || !g.frag) return null;
   const scene = deps.scene || {};
   const uniforms = {};
-  // 影を受けないかはキーワードで決まる（プロパティ _ReceiveShadows は Inspector 用の残骸）。
   const noShadow = !!(mat && mat.keywords && mat.keywords.has('_RECEIVE_SHADOWS_OFF'));
   for (const name of g.globals) {
     const v = scene[name] !== undefined ? scene[name] : (GLOBAL_INIT[name] || zeroVec4)();
@@ -128,24 +154,41 @@ export function makeFieldMaterial(T, shaderName, mat, deps) {
     const pid = ((mat && mat.texByName) || {})[s];
     uniforms[s] = { value: (pid && deps.textureOf(pid)) || deps.white() };
   }
-  // 焼いたバリアント自身が霧を持っているなら二重に掛けない。
   const fog = !!deps.fogMode && !g.globals.includes('unity_FogParams');
   if (fog) {
     uniforms.tpFogParams = { value: deps.fogParams || [0, 0, 0, 0] };
-    uniforms.tpFogColor = { value: deps.fogColor || [0, 0, 0, 1] };
+    const fc = deps.fogColor || [0, 0, 0];
+    uniforms.tpFogColor = { value: [fc[0] || 0, fc[1] || 0, fc[2] || 0, 1] };
     uniforms.tpFogControl = { value: [deps.fogMode, 0.05, 0, 0] };
   }
-  const dst = mat && mat.dstBlend != null ? Number(mat.dstBlend) : 0;
+  const st = g.state || null;
+  const floats = (mat && mat.allFloats) || {};
+  const stVal = (v, fb) => {
+    if (v == null) return fb;
+    if (typeof v === 'string') return floats[v] == null ? fb : Number(floats[v]);
+    return Number(v);
+  };
+  const src = stVal(st && st.src, mat && mat.srcBlend != null ? Number(mat.srcBlend) : 1);
+  const dst = stVal(st && st.dst, mat && mat.dstBlend != null ? Number(mat.dstBlend) : 0);
   const transparent = dst !== 0;
+  const zwrite = stVal(st && st.zw, mat && mat.zwrite === 0 ? 0 : 1) !== 0;
+  const cull = stVal(st && st.cull, null);
+  const charShadow = !!deps.charShadow;
+  if (charShadow) {
+    uniforms.tpCharShadowMap = { value: deps.charShadow.map };
+    uniforms.tpCharShadowMatrix = { value: new T.Matrix4() };
+    uniforms.tpCharShadowStrength = { value: 0 };
+  }
+  const lm = uniforms.unity_Lightmap && uniforms.unity_Lightmap.value;
   const m = new T.RawShaderMaterial({
     glslVersion: T.GLSL3,
-    vertexShader: '// FIELD ' + shaderName + '\n' + (fog ? addFogVarying(g.vert) : g.vert),
-    fragmentShader: toLinearOutput(g.frag, fog),
+    vertexShader: '// FIELD ' + shaderName + '\n' + addVaryings(g.vert, fog, charShadow),
+    fragmentShader: fullHdrLightmap(wrapOutput(g.frag, fog, charShadow), lm && lm.userData && lm.userData.lightmapRgbm === false),
     uniforms,
-    side: deps.side(mat),
+    side: cull == null ? deps.side(mat) : cull === 0 ? T.DoubleSide : cull === 1 ? T.FrontSide : T.BackSide,
     transparent,
-    depthWrite: mat && mat.zwrite === 0 ? false : true,
-    blending: transparent && Number(mat.srcBlend) === 1 && dst === 1 ? T.AdditiveBlending : T.NormalBlending,
+    depthWrite: zwrite,
+    blending: transparent && src === 1 && dst === 1 ? T.AdditiveBlending : T.NormalBlending,
   });
   m.userData.fieldGlobals = g.globals;
   m.userData.fieldScene = needScene;
@@ -153,7 +196,7 @@ export function makeFieldMaterial(T, shaderName, mat, deps) {
 }
 
 export function updateFieldUniforms(mats, T, ctx) {
-  const { camera, time, width, height, opaque, depth, shadow } = ctx;
+  const { camera, time, width, height, opaque, depth, shadow, charShadow } = ctx;
   const shadowMap = shadow && shadow.map ? shadow.map.depthTexture : null;
   const shadowRows = shadow && shadow.matrix ? shadow.matrix.elements : null;
   const vp = new T.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -177,13 +220,18 @@ export function updateFieldUniforms(mats, T, ctx) {
       else if (name === 'hlslcc_mtx4x4unity_MatrixInvVP') slot.value = cols(invVP);
       else if (name === 'hlslcc_mtx4x4unity_MatrixP') slot.value = cols(camera.projectionMatrix);
       else if (name === 'hlslcc_mtx4x4_MainLightWorldToShadow' && shadowRows) {
-        // カスケード0の1枚だけを使う（材質側で _CascadeShadowSplitSphereRadii を巨大にして固定してある）。
         const a = slot.value.length === 80 ? slot.value : new Float32Array(80);
         a.set(shadowRows.subarray ? shadowRows.subarray(0, 16) : shadowRows.slice(0, 16), 0);
         slot.value = a;
       } else if (name === '_MainLightShadowmapSize' && shadow && shadow.mapSize) slot.value = [1 / shadow.mapSize.x, 1 / shadow.mapSize.y, shadow.mapSize.x, shadow.mapSize.y];
     }
     if (u.tpFogControl) u.tpFogControl.value = [u.tpFogControl.value[0], near, 0, 0];
+    if (u.tpCharShadowMap) {
+      const on = !!(charShadow && charShadow.map && charShadow.strength > 0);
+      u.tpCharShadowMap.value = charShadow && charShadow.map ? charShadow.map : null;
+      u.tpCharShadowStrength.value = on ? charShadow.strength : 0;
+      if (on) u.tpCharShadowMatrix.value.copy(charShadow.matrix);
+    }
     for (const s of m.userData.fieldScene || []) {
       if (s === '_CameraOpaqueTexture' && u[s]) u[s].value = opaque;
       if (s === '_CameraDepthTexture' && u[s]) u[s].value = depth;

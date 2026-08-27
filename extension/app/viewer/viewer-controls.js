@@ -1,4 +1,5 @@
 import { el } from '../../core/dom.js';
+import { buildGroupedVisPanel } from '../../core/vis-panel.js';
 
 const SPEEDS = [
   [0.25, '0.25x'],
@@ -24,19 +25,6 @@ function selectRow(label, options, value, onChange, title) {
   return { row: el('label', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), sel]), sel };
 }
 
-function radioRow(label, name, options, value, onChange) {
-  const group = el('span', 'vw-radios');
-  for (const [v, t] of options) {
-    const input = el('input', { type: 'radio', name, value: String(v) });
-    input.checked = String(v) === String(value);
-    input.addEventListener('change', () => {
-      if (input.checked) onChange(String(v));
-    });
-    group.appendChild(el('label', 'vw-radio', [input, el('span', '', t)]));
-  }
-  return el('div', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), group]);
-}
-
 function slider(label, min, max, step, value, onInput) {
   const input = el('input', { class: 'vw-range', type: 'range', min: String(min), max: String(max), step: String(step), value: String(value) });
   input.addEventListener('input', () => onInput(Number(input.value)));
@@ -47,13 +35,36 @@ export function createControls(hostEl, deps) {
   const { state, stage, nameOf } = deps;
   const ranges = new Map();
   const picks = new Map();
+  let openVis = null;
+  const visPanel = el('div', 'spine-vispanel vw-vispanel');
+  const visHost = el('div', { class: 'vw-vishost', style: { display: 'none' } }, [visPanel]);
+  const closeVis = () => {
+    if (!openVis) return;
+    visHost.style.display = 'none';
+    visPanel.textContent = '';
+    openVis.btn.classList.add('active');
+    openVis = null;
+  };
 
   function card(c) {
     const st = stage();
     const ui = (st && st.controlsFor && st.controlsFor(c.id)) || { motions: [], selects: [], sliders: [] };
     const box = el('div', 'vw-card');
     const off = el('button', { class: 'vw-off', text: '✕', title: 'このキャラをフィールドから外します' });
-    box.appendChild(el('div', 'vw-cardhd', [el('span', 'vw-cardname', nameOf(c.id)), el('span', 'vw-cardid', '#' + c.id), off]));
+    const head = [el('span', 'vw-cardname', nameOf(c.id))];
+    if (ui.control) {
+      const cb = el('input', { type: 'checkbox' });
+      cb.checked = !!c.control;
+      cb.addEventListener('change', () => {
+        if (cb.checked) for (const o of state.scene.chars) if (String(o.id) !== String(c.id) && o.control) state.update(o.id, { control: false });
+        state.update(c.id, { control: cb.checked });
+        if (st && st.syncChar) st.syncChar(c.id);
+        rebuild();
+      });
+      head.push(el('label', { class: 'vw-radio vw-ctlbox', title: '画面右上の操作説明を参照。ONにできるのは1人まで。' }, [cb, el('span', '', 'コントロール')]));
+    }
+    head.push(off);
+    box.appendChild(el('div', 'vw-cardhd', head));
     const body = el('div', 'vw-cardbody');
     box.appendChild(body);
 
@@ -81,21 +92,6 @@ export function createControls(hostEl, deps) {
     motion.appendChild(selectRow('速度', SPEEDS, c.speed, (v) => apply({ speed: Number(v) })).row);
     motion.appendChild(pause);
     body.appendChild(motion);
-
-    if (ui.shadow) {
-      const shadowRow = radioRow('影', 'vwshadow-' + c.id, ui.shadow, c.shadow, (v) => apply({ shadow: v }));
-      if (ui.control) {
-        const cb = el('input', { type: 'checkbox' });
-        cb.checked = !!c.control;
-        cb.addEventListener('change', () => {
-          if (cb.checked) for (const o of state.scene.chars) if (String(o.id) !== String(c.id) && o.control) state.update(o.id, { control: false });
-          apply({ control: cb.checked });
-          rebuild();
-        });
-        shadowRow.appendChild(el('label', { class: 'vw-radio vw-ctlbox', title: 'WASDで移動、スペースで攻撃、1〜9でモーション再生。ONにできるのは1人まで。' }, [cb, el('span', '', 'コントロール')]));
-      }
-      body.appendChild(shadowRow);
-    }
 
     const row = el('div', 'vw-row');
     for (const s of ui.selects) {
@@ -147,9 +143,25 @@ export function createControls(hostEl, deps) {
       inputs.set(key, s.input);
       pos.appendChild(s.row);
     }
+    if (ui.vis && st && st.visInfo) {
+      const btn = el('button', { class: 'btn xs vw-visbtn active', text: '表示制御', title: '部品ごとに 表示／半透明／非表示 を切り替えます' });
+      btn.addEventListener('click', () => {
+        const mine = openVis && openVis.id === String(c.id);
+        closeVis();
+        if (mine) return;
+        const info = st.visInfo(c.id);
+        visPanel.textContent = '';
+        if (!info) visPanel.appendChild(el('div', 'note dim', '（読み込み中… もう一度開いてください）'));
+        else buildGroupedVisPanel(visPanel, { title: nameOf(c.id) + ' の表示制御', groups: info.groups, alphaOf: info.alphaOf, onSet: info.set, onResetAll: info.resetAll });
+        visHost.style.display = '';
+        btn.classList.remove('active');
+        openVis = { id: String(c.id), btn };
+      });
+      pos.appendChild(btn);
+    }
     ranges.set(String(c.id), inputs);
     picks.set(String(c.id), sels);
-    if (ui.sliders.length) body.appendChild(pos);
+    if (pos.childNodes.length) body.appendChild(pos);
 
     off.addEventListener('click', () => {
       state.remove(c.id);
@@ -161,6 +173,9 @@ export function createControls(hostEl, deps) {
   }
 
   function rebuild() {
+    openVis = null;
+    visHost.style.display = 'none';
+    visPanel.textContent = '';
     hostEl.textContent = '';
     ranges.clear();
     picks.clear();
@@ -170,6 +185,7 @@ export function createControls(hostEl, deps) {
       return;
     }
     for (const c of list) hostEl.appendChild(card(c));
+    hostEl.appendChild(visHost);
   }
 
   function refresh(id) {

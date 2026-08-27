@@ -55,8 +55,10 @@
 }
 .vw-pickhead {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
+  gap: 4px;
   font-size: 12px;
   color: #9aa4b6;
 }
@@ -91,6 +93,16 @@
 .vw-pickid {
   color: #7c8798;
   font-size: 11px;
+}
+.vw-pickgroup {
+  margin: 8px 0 2px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #9fb2d0;
+  border-bottom: 1px solid #3a4152;
+}
+.vw-pickgroup:first-child {
+  margin-top: 0;
 }
 
 .vw-stagewrap {
@@ -226,10 +238,8 @@
   gap: 8px;
   margin-bottom: 4px;
 }
-.vw-cardhd .vw-cardid {
-  margin-right: auto;
-}
 .vw-off {
+  margin-left: auto;
   background: none;
   border: none;
   color: #7c8798;
@@ -362,6 +372,7 @@
 
 .vw-kinds {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
 }
 .vw-kind {
@@ -369,7 +380,7 @@
   color: #9aa4b6;
   border: 1px solid #3a4152;
   border-radius: 5px;
-  padding: 2px 10px;
+  padding: 2px 7px;
   font-size: 12px;
   cursor: pointer;
 }
@@ -380,4 +391,17 @@
 }
 .rgsel option:disabled {
   color: #6b7382;
+}
+.vw-visbtn {
+  justify-self: start;
+}
+.vw-vishost {
+  flex: 0 0 100%;
+  min-width: 100%;
+  order: 99;
+}
+.vw-vispanel {
+  max-width: 860px;
+  max-height: none;
+  margin-top: 0;
 }

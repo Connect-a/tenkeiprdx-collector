@@ -238,18 +238,27 @@ function parseSerializedFile(sf) {
     const t = types[typeID] || {};
     objects.push({ pathID: pathID.toString(), classID: t.classID, nodes: t.nodes, byteStart: byteStart + Number(dataOffset), byteSize });
   }
-  // m_Externals(FileID 1..N = externals[0..N-1])。m_FileID>0 の参照先解決に使う。失敗時は空。
   const externals = [];
   try {
     if (version >= 11) {
       const scriptCount = rI32();
-      for (let i = 0; i < scriptCount; i++) { rI32(); p = (p + 3) & ~3; rI64(); }
+      for (let i = 0; i < scriptCount; i++) {
+        rI32();
+        p = (p + 3) & ~3;
+        rI64();
+      }
     }
     const extCount = rI32();
     for (let i = 0; i < extCount; i++) {
       if (version >= 6) rStr();
       let guid = '';
-      if (version >= 5) { for (let b = 0; b < 16; b++) { const v = rU8(); guid += v.toString(16).padStart(2, '0'); } rI32(); }
+      if (version >= 5) {
+        for (let b = 0; b < 16; b++) {
+          const v = rU8();
+          guid += v.toString(16).padStart(2, '0');
+        }
+        rI32();
+      }
       const pathName = rStr();
       externals.push({ guid, pathName });
     }

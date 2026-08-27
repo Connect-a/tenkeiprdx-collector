@@ -271,8 +271,12 @@ function create(deps) {
       lastFxIdx = -1;
     },
     dispose: () => {
-      try { if (vfxOverlay && vfxOverlay.dispose) vfxOverlay.dispose(); } catch (e) {}
-      try { if (ambientOverlay && ambientOverlay.dispose) ambientOverlay.dispose(); } catch (e) {}
+      try {
+        if (vfxOverlay && vfxOverlay.dispose) vfxOverlay.dispose();
+      } catch (e) {}
+      try {
+        if (ambientOverlay && ambientOverlay.dispose) ambientOverlay.dispose();
+      } catch (e) {}
       vfxOverlay = null;
       ambientOverlay = null;
     },

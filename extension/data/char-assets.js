@@ -19,7 +19,9 @@ async function buildWeapons(read, list) {
       const mb = w.model ? await read(w.model) : null;
       if (!mb) continue;
       const matB = w.materials ? await read(w.materials) : null;
-      out.push({ id: w.id, model: unityMesh.parseModelBundle(mb), materials: matB ? unityMesh.parseMaterialBundle(matB) : EMPTY_MAT, slot: w.slot || 'wp_2', scale: w.scale || 1 });
+      const model = unityMesh.parseModelBundle(mb);
+      if ((w.deps || []).length) await mergeMeshDeps(model, read, w.deps);
+      out.push({ id: w.id, model, materials: matB ? unityMesh.parseMaterialBundle(matB) : EMPTY_MAT, slot: w.slot || 'wp_2', scale: w.scale || 1 });
     } catch (e) {}
   }
   return out;

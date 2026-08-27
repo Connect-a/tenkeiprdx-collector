@@ -14,6 +14,8 @@ export function createPicker(hostEl, deps) {
   const kindBtns = [
     ['character', 'キャラ'],
     ['monster', 'モンスター'],
+    ['other3d', 'その他3D'],
+    ['ex', 'EX'],
   ].map(([k, label]) => {
     const b = el('button', { class: 'vw-kind' + (k === kind ? ' active' : ''), text: label });
     b.addEventListener('click', () => {
@@ -22,6 +24,7 @@ export function createPicker(hostEl, deps) {
       for (const x of kindBtns) x.classList.toggle('active', x === b);
       if (onKind) onKind(k);
     });
+    b.dataset.kind = k;
     kindBar.appendChild(b);
     return b;
   });
@@ -46,8 +49,15 @@ export function createPicker(hostEl, deps) {
     list.textContent = '';
     rows.clear();
     const shown = items.filter(matches);
+    let group = null;
     for (const it of shown) {
-      const row = el('div', { class: 'vw-pickrow', title: it.title || '' }, [el('span', 'vw-pickname', it.displayName), el('span', 'vw-pickid', '#' + it.id)]);
+      if (it.group && it.group !== group) {
+        group = it.group;
+        list.appendChild(el('div', 'vw-pickgroup', group));
+      }
+      const cells = [el('span', 'vw-pickname', it.displayName)];
+      if (it.kind !== 'ex') cells.push(el('span', 'vw-pickid', '#' + it.id));
+      const row = el('div', { class: 'vw-pickrow', title: it.title || '' }, cells);
       row.addEventListener('click', () => toggle(it));
       rows.set(it.id, row);
       syncRow(it, row);
@@ -83,11 +93,21 @@ export function createPicker(hostEl, deps) {
 
   return {
     setItems(list0) {
-      items = (list0 || []).slice().sort((a, b) => (kanaKey(a.displayName) > kanaKey(b.displayName) ? 1 : -1));
+      items = (list0 || []).slice().sort((a, b) => (a.groupNo || 0) - (b.groupNo || 0) || (kanaKey(a.displayName) > kanaKey(b.displayName) ? 1 : -1));
       paint();
     },
     itemOf: (id) => items.find((x) => String(x.id) === String(id)) || null,
     kind: () => kind,
+    setMode(mode) {
+      const is2d = mode === '2d';
+      const hidden = is2d ? 'other3d' : 'ex';
+      for (const b of kindBtns) if (b.dataset.kind === 'ex' || b.dataset.kind === 'other3d') b.style.display = b.dataset.kind === hidden ? 'none' : '';
+      if (kind === hidden) {
+        kind = 'character';
+        for (const x of kindBtns) x.classList.toggle('active', x.dataset.kind === kind);
+      }
+      return kind;
+    },
     refreshMarks,
     focusSearch: () => fb.input.focus(),
   };

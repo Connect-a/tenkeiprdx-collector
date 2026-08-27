@@ -46,7 +46,7 @@ export function createStageCore(hostEl, deps) {
       await impl.init();
       raf = requestAnimationFrame(loop);
     },
-    controlsFor: (id) => impl.controlsFor(core.live(id)),
+    controlsFor: (id) => impl.controlsFor(core.live(id), deps.entryOf ? deps.entryOf(id) : null),
     async addChar(id) {
       const key = String(id);
       if (items.has(key)) return;
@@ -108,6 +108,8 @@ export function createStageCore(hostEl, deps) {
     select: (id) => impl.select && impl.select(id),
     resetCamera: () => impl.resetCamera && impl.resetCamera(),
     lockCamera: () => impl.lockCamera && impl.lockCamera(),
+    visInfo: (id) => (impl.visInfo ? impl.visInfo(id) : null),
+    syncShadow: () => impl.syncShadow && impl.syncShadow(),
     dispose() {
       alive = false;
       cancelAnimationFrame(raf);

@@ -1,7 +1,3 @@
-// クレジット/ロゴ用に共有リソースDLで取得する aa(StreamingAssets) バンドル群。
-// 取得は共有DL時のみ、クレジット/表示時は共有から読むだけ（ライブ取得しない）。
-// path は base_catalog の RuntimePath 由来（prod0固定）で origin.assets からの相対。
-
 export const TITLE_AA_CACHE = 'statics/titlesprites_aa.bundle';
 export const LOGO_AA_CACHE = 'statics/logosprites_aa.bundle';
 
@@ -18,7 +14,5 @@ export const AA_BUNDLES = [
   },
 ];
 
-// クレジットのタイトルロゴ Sprite（Xなし normal を優先、無ければ adult=FANZA "X"版）。
 export const TITLE_SPRITE_NAMES = ['img_start_title_normal', 'img_start_title_adult'];
-// logosprites 内の Sprite（ゲームロゴ／DMM／FANZA）。
 export const LOGO_SPRITE_NAMES = ['01_00_logo', '01_00_dmm', 'fanza'];

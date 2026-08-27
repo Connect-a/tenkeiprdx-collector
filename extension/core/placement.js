@@ -1,4 +1,4 @@
-import { bundleName, APP_REL } from './paths.js';
+import { bundleName, relKey, APP_REL } from './paths.js';
 
 const ASSET_DIR = 'assets';
 const CAT_RE = /^([a-z0-9()]+_(?:assets|scenes)_[a-z0-9()]+)\//i;
@@ -12,6 +12,10 @@ export const catOf = (rel) => {
 const BAD_NAME = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\ufeff<>:"\\|?*]/g;
 const safeName = (s) => String(s).replace(BAD_NAME, '_');
 
+let NAME_ALIAS = {};
+export const setNameAlias = (map) => {
+  NAME_ALIAS = map || {};
+};
 const fileFor = (rel, platform) => `${safeName(bundleName(String(rel)))}.${platform}.bundle`;
 
 const ownerSeg = (rel) => {
@@ -31,7 +35,11 @@ const shortCat = (rel) => {
 };
 
 export const PLACE = {
-  mirror: (rel) => `${ASSET_DIR}/${catOf(rel) || 'misc'}/`,
+  mirror: (rel) => {
+    const dir = `${ASSET_DIR}/${catOf(rel) || 'misc'}/`;
+    const a = NAME_ALIAS[relKey(String(rel))];
+    return a ? { dir, name: a } : dir;
+  },
   flat: (rel) => (shortCat(rel) ? shortCat(rel) + '_' : '') + ownerSeg(rel),
   visual: (cat) => () => `visual/${cat}/`,
   episode: (epDir, slot) => () => `${epDir}/${slot}/`,

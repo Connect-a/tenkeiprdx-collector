@@ -1,4 +1,5 @@
 import { utilHelpers } from '../core/util.js';
+import { SCENE_TEXT_IN_FRAME_FIELD } from '../core/constants.js';
 import { fsb5 } from './fsb5.js';
 import { fsb5Vorbis } from './fsb5-vorbis.js';
 import { vorbisSetup } from './vorbis-setup.js';
@@ -307,6 +308,8 @@ function decodeSceneCommands(decoded) {
   const scene = decoded && decoded[0];
   const cmds = scene && scene[4];
   if (!Array.isArray(cmds)) return [];
+  const sid = scene[0] != null ? String(scene[0]) : '';
+  const salvage = new Set(SCENE_TEXT_IN_FRAME_FIELD.filter((e) => String(e.sceneId) === sid).map((e) => Number(e.order)));
   return cmds.map((c) => ({
     order: c[0],
     effect: c[1],
@@ -318,7 +321,7 @@ function decodeSceneCommands(decoded) {
     stillAnim: c[8],
     stillSpeed: c[9],
     speaker: c[10],
-    text: c[12],
+    text: c[12] == null && salvage.has(Number(c[0])) ? c[11] : c[12],
     fontSize: c[13],
     center: c[15],
     camStartX: c[16],

@@ -71,7 +71,7 @@ export function createPartControl(T, targets) {
     const um = t.unityMesh;
     if (!um || !um.indices || !um.skinIndex || !um.skinWeight || !um.boneNameHashes) continue;
     const boneIds = Array.from(um.boneNameHashes, (h) => idOf(t.boneName(h)));
-    const triBone = dominantTriBones(um, (b) => boneIds[b] != null ? boneIds[b] : 0);
+    const triBone = dominantTriBones(um, (b) => (boneIds[b] != null ? boneIds[b] : 0));
     const subs = um.submeshes && um.submeshes.length ? um.submeshes : [{ indexStart: 0, indexCount: um.indices.length }];
     entries.push({ obj: t.obj, outline: t.outline, indices: um.indices, triBone, subs, baseMats: t.mats, outlineMat: t.outline ? t.outline.material : null });
   }

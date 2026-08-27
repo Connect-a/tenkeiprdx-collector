@@ -34,7 +34,10 @@ export function createZoomOverlay({ id, title, lines, load, emptyText }) {
     const prev = el('button', { class: 'btn xs', text: '◀', title: '前 (←)', on: { click: () => step(-1) } });
     const next = el('button', { class: 'btn xs', text: '▶', title: '次 (→)', on: { click: () => step(1) } });
     const root = el('div', { class: 'modalback', id }, [
-      el('div', 'modal itemmodal', [el('div', 'modalhd', [name, el('button', { class: 'btn xs', text: '閉じる', on: { click: close } })]), el('div', 'modalbody itemzoombody', [pic, el('div', 'itemzoomnav', [prev, text, next])])]),
+      el('div', 'modal itemmodal', [
+        el('div', 'modalhd', [name, el('button', { class: 'btn xs', text: '閉じる', on: { click: close } })]),
+        el('div', 'modalbody itemzoombody', [pic, el('div', 'itemzoomnav', [prev, text, next])]),
+      ]),
     ]);
     root.addEventListener('click', (ev) => {
       if (ev.target === root) close();

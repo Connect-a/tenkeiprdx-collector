@@ -236,9 +236,12 @@ function create(deps) {
     if (!bgm.isPlaying() || !(sec > 0)) return stopBgm();
     const gen = st.bgmGen;
     bgm.fade(0, sec);
-    setTimeout(() => {
-      if (gen === st.bgmGen) stopBgm();
-    }, sec * 1000 + 150);
+    setTimeout(
+      () => {
+        if (gen === st.bgmGen) stopBgm();
+      },
+      sec * 1000 + 150,
+    );
   }
   async function playBgm(fr) {
     if (!bgmEnabled()) {

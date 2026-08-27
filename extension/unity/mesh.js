@@ -526,7 +526,6 @@ function readMaterialObj(sf, LE, o) {
   };
   const vec1 = {};
   for (const p of floats) if (typeof p[0] === 'string' && p[0].indexOf('Vector1') === 0) vec1[p[0]] = Number(p[1]);
-  // 全 material prop(色/float)を name→値 で公開(実行時に実ゲームGLSLの uniform を各オーラ材質で上書きするため)。
   const allColors = {},
     allFloats = {};
   for (const p of colors) if (typeof p[0] === 'string') allColors[p[0]] = getColor(p[0]);
@@ -605,6 +604,37 @@ function baseMotionMap(list) {
   return m;
 }
 
+function avatarOfSkin(transforms, renderers, animators, avatarByPid) {
+  if (!animators.length) return null;
+  const trByPid = new Map(transforms.map((t) => [String(t.pathID), t]));
+  const trByGo = new Map(transforms.map((t) => [String(t.gameObjectPathID), t]));
+  const rootOf = (pid) => {
+    let t = trByPid.get(String(pid));
+    for (let i = 0; t && i < 128; i++) {
+      const up = trByPid.get(String(t.fatherPathID));
+      if (!up) break;
+      t = up;
+    }
+    return t ? String(t.pathID) : null;
+  };
+  const skinRoots = new Set();
+  for (const r of renderers) {
+    const own = r.goPathID ? trByGo.get(String(r.goPathID)) : null;
+    const b = (own && own.pathID) || r.rootBonePathID || (r.bones || [])[0];
+    const rt = b ? rootOf(b) : null;
+    if (rt) skinRoots.add(rt);
+  }
+  if (!skinRoots.size) return null;
+  for (const an of animators) {
+    const av = avatarByPid.get(String(an.avatar));
+    if (!av || !an.go) continue;
+    const t = trByGo.get(String(an.go));
+    const rt = t ? rootOf(t.pathID) : null;
+    if (rt && skinRoots.has(rt)) return av;
+  }
+  return null;
+}
+
 function parseModelBundle(bytes) {
   const co = openCab(bytes);
   if (!co) return { meshes: [], renderers: [], materials: [], transforms: [], gameObjects: {}, avatar: null, clips: [], actionPoints: null, fbx: null };
@@ -617,6 +647,8 @@ function parseModelBundle(bytes) {
   const meshFilterByGO = {};
   const meshRenderers = [];
   let avatar = null;
+  const avatarByPid = new Map();
+  const animators = [];
   const clips = [];
   let fbxActionPointRefs = null;
   let fbx = null;
@@ -648,6 +680,7 @@ function parseModelBundle(bytes) {
       try {
         const av = unitySf.readObject(sf, sfp.LE, o);
         avatar = ANIM_MOD ? ANIM_MOD.parseAvatar(av) : null;
+        if (avatar) avatarByPid.set(String(o.pathID), avatar);
       } catch (e) {}
       continue;
     } else if (o.classID === 74) {
@@ -678,7 +711,14 @@ function parseModelBundle(bytes) {
           materialPathIDs: mats,
           bones,
           rootBonePathID: r.m_RootBone ? String(r.m_RootBone.m_PathID) : null,
+          goPathID: r.m_GameObject ? String(r.m_GameObject.m_PathID) : null,
         });
+      } catch (e) {}
+    } else if (o.classID === 95) {
+      try {
+        const an = unitySf.readObject(sf, sfp.LE, o);
+        const apid = an.m_Avatar && an.m_Avatar.m_PathID;
+        if (apid) animators.push({ go: an.m_GameObject ? String(an.m_GameObject.m_PathID) : null, avatar: String(apid) });
       } catch (e) {}
     } else if (o.classID === 33) {
       try {
@@ -723,6 +763,10 @@ function parseModelBundle(bytes) {
     if (!mp) continue;
     if (renderers.some((r) => String(r.meshPathID) === mp)) continue;
     renderers.push({ smrPathID: mr.pathID, meshPathID: mp, materialPathIDs: mr.materialPathIDs, bones: [], rootBonePathID: null });
+  }
+  if (avatarByPid.size > 1) {
+    const picked = avatarOfSkin(transforms, renderers, animators, avatarByPid);
+    if (picked) avatar = picked;
   }
   let actionPoints = null;
   if (fbxActionPointRefs) {
@@ -993,7 +1037,6 @@ function decodeAtlasSprite(bytes, spriteName, parsed) {
     if (!sprite) return null;
     let rect = sprite.m_RD && sprite.m_RD.textureRect;
     let texPathID = sprite.m_RD && sprite.m_RD.texture ? String(sprite.m_RD.texture.m_PathID || '0') : '0';
-    // SpriteAtlas パック済みの場合、m_RD.textureRect は未パック座標なので m_RenderDataMap から実パック矩形を引く。
     if (sprite.m_RenderDataKey) {
       const sa = sfp.objects.find((o) => o.classID === 687078895);
       if (sa) {

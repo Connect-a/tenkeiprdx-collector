@@ -4,6 +4,7 @@ import { el, filterBox } from '../../core/dom.js';
 import { applyVisFilter, syncPartsBtn } from '../../core/vis-panel.js';
 import { episodeIdOf } from '../../data/character-meta.js';
 import { playEndCredits, END_CREDIT_EPISODE_ID } from '../../engine/story/end-credits.js';
+import { playDokidokiIntro, DOKIDOKI_EPISODE_ID } from '../../engine/story/dokidoki-intro.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { assetStore } from '../../data/asset-store.js';
 import { unityMesh } from '../../unity/mesh.js';
@@ -126,12 +127,21 @@ export function createStoryPanel(deps) {
     applyPan();
     if (player && player.setUserZoom) player.setUserZoom(1);
   };
+  function updateBgHiddenNotice() {
+    const n = getById('bgHiddenNotice');
+    if (!n) return;
+    const ctr = getById('controls');
+    const inStory = ctr && ctr.style.display !== 'none';
+    n.style.display = inStory && settings.get('stillBackImgHidden') ? '' : 'none';
+  }
   const setBackImgHidden = (on) => {
     if (hud && hud.bgEl) hud.bgEl.style.display = on ? 'none' : '';
     settings.set('stillBackImgHidden', !!on);
+    updateBgHiddenNotice();
   };
   const applyStageToggles = () => {
     if (hud && hud.bgEl) hud.bgEl.style.display = settings.get('stillBackImgHidden') ? 'none' : '';
+    updateBgHiddenNotice();
   };
 
   let _mosaicCb = null;
@@ -291,7 +301,10 @@ export function createStoryPanel(deps) {
         el('label', { class: 'stillmosaic', title: MOSAIC_TITLE }, [mosaicCb, el('span', { text: 'モザイク' })]),
         makeBgCheckbox(),
         el('label', { class: 'stillspeed', title: 'この一枚絵のアニメ再生速度（0×で停止）' }, [el('span', { text: 'アニメ速度' }), speedSel]),
-        el('label', { class: 'stillclean', title: '半透明の重なり（自己二重ブレンド）を消してクリーンに合成します。前後関係は描画順の連続ラン単位で保持。' }, [cleanCb, el('span', { text: 'クリーン半透明' })]),
+        el('label', { class: 'stillclean', title: '半透明の重なり（自己二重ブレンド）を消してクリーンに合成します。前後関係は描画順の連続ラン単位で保持。' }, [
+          cleanCb,
+          el('span', { text: 'クリーン半透明' }),
+        ]),
       ]),
     );
     const body = el('div', 'stillbody');
@@ -378,6 +391,16 @@ export function createStoryPanel(deps) {
   let _creditsRunning = false;
   let _creditsCancel = null;
   let _creditsShownFor = null;
+  let _dokidokiIntro = null;
+  function cancelDokidokiIntro() {
+    if (_dokidokiIntro) {
+      const it = _dokidokiIntro;
+      _dokidokiIntro = null;
+      try {
+        it.cancel();
+      } catch (e) {}
+    }
+  }
   function cancelEndCredits() {
     if (_creditsCancel) {
       const fn = _creditsCancel;
@@ -404,7 +427,7 @@ export function createStoryPanel(deps) {
   async function maybePlayEndCredits() {
     if (_creditsRunning || !curEp) return;
     if (String(episodeIdOf(curEp)) !== String(END_CREDIT_EPISODE_ID)) return;
-    if (_creditsShownFor === String(episodeIdOf(curEp))) return; // 同一話の再生では一度だけ（再送りで再トリガしない）
+    if (_creditsShownFor === String(episodeIdOf(curEp))) return;
     const host = getById('stage');
     if (!host) return;
     _creditsRunning = true;
@@ -544,6 +567,7 @@ export function createStoryPanel(deps) {
   async function playEpisode(ep, seekText) {
     if (!playerState.cur || !ep) return;
     cancelEndCredits();
+    cancelDokidokiIntro();
     _creditsShownFor = null;
     const fk = playerState.cur.folderKey;
     if (fk !== _lastFolderKey) {
@@ -573,9 +597,41 @@ export function createStoryPanel(deps) {
       notify('R18版のデータが保存先にありません（その他エピソードから取得してください）', 'err');
       return;
     }
+    const isDokidoki = String(episodeIdOf(ep)) === String(DOKIDOKI_EPISODE_ID) && !seekText;
+    if (isDokidoki) {
+      let bgRel = null,
+        bgmRel = null,
+        seRel = null;
+      try {
+        const idx = await ensureIndexes();
+        const sai = idx.assets.sceneAssetIndex || {};
+        const shared = idx.assets.sharedIndex || [];
+        bgRel = sai['bg_eventstill_2093'] || shared.find((r) => /(^|\/)bg_eventstill_2093(_|\.)/.test(r)) || null;
+        bgmRel = sai['bgm_2014'] || shared.find((r) => /(^|\/)bgm_2014(_|\.)/.test(r)) || null;
+        seRel = shared.find((r) => /click\.wav/i.test(r)) || null;
+      } catch (e) {}
+      hud.setReady(true);
+      const intro = playDokidokiIntro({
+        host,
+        bgRel,
+        bgmRel,
+        seRel,
+        volume: () => masterVol() * (scenarioSettings ? scenarioSettings.volumeOf('bgm') : 1),
+        bgmEnabled: audioScene.storyAudible,
+        reportBgm: (playing) => audioScene.report('story', playing),
+      });
+      _dokidokiIntro = intro;
+      await intro.started;
+      if (_dokidokiIntro !== intro) return;
+      _dokidokiIntro = null;
+      hud.setReady(false);
+    }
+    try {
+      await hud.theme(isDokidoki ? 'tokimeki' : null);
+    } catch (e) {}
     let n = 0;
     try {
-      n = await p.open(src.handle, src.meta, src.ep, { seekText });
+      n = await p.open(src.handle, src.meta, src.ep, { seekText, noIntro: isDokidoki, initBgm: isDokidoki ? 'bgm_2014' : null });
     } catch (e) {
       console.error('[tp] ストーリー描画に失敗', e);
     }
@@ -609,6 +665,7 @@ export function createStoryPanel(deps) {
   function jumpFrac(frac) {
     if (!player || !player.count) return;
     cancelEndCredits();
+    _creditsShownFor = null;
     const i = Math.round(Math.min(1, Math.max(0, frac)) * (player.count - 1));
     player.render(i);
   }
@@ -616,6 +673,7 @@ export function createStoryPanel(deps) {
   function go(d) {
     if (!hud) return;
     cancelEndCredits();
+    _creditsShownFor = null;
     if (d < 0) hud.back();
     else hud.advance();
   }

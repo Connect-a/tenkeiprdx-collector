@@ -187,6 +187,7 @@ function decodeClipObj(clipObj) {
     if (b.attr === 1) e.pos = b.start;
     else if (b.attr === 2) e.rot = b.start;
     else if (b.attr === 3) e.scale = b.start;
+    else if (b.attr === 4) e.euler = b.start;
   }
   const buildTracks = (fps) => {
     const rate = fps || sampleRate || 30;
@@ -248,6 +249,46 @@ function decodeClipObj(clipObj) {
           vals[i * 3 + 2] = sampleCurve(e.scale + 2, t);
         }
         tracks.push({ boneHash: e.path, type: 'scale', times, values: vals });
+      }
+      if (e.euler != null && e.rot == null) {
+        const vals = new Float32Array(frames * 4);
+        let px = 0,
+          py = 0,
+          pz = 0,
+          pw = 0;
+        for (let i = 0; i < frames; i++) {
+          const t = startTime + times[i];
+          const rx = (sampleCurve(e.euler, t) * Math.PI) / 180;
+          const ry = (sampleCurve(e.euler + 1, t) * Math.PI) / 180;
+          const rz = (sampleCurve(e.euler + 2, t) * Math.PI) / 180;
+          const cx = Math.cos(rx / 2),
+            sx = Math.sin(rx / 2);
+          const cy = Math.cos(ry / 2),
+            sy = Math.sin(ry / 2);
+          const cz = Math.cos(rz / 2),
+            sz = Math.sin(rz / 2);
+          const qx = [sx, 0, 0, cx],
+            qy = [0, sy, 0, cy],
+            qz = [0, 0, sz, cz];
+          let q = qMul(qy, qx);
+          q = qMul(q, qz);
+          let [x, y, z, w] = q;
+          if (i > 0 && x * px + y * py + z * pz + w * pw < 0) {
+            x = -x;
+            y = -y;
+            z = -z;
+            w = -w;
+          }
+          px = x;
+          py = y;
+          pz = z;
+          pw = w;
+          vals[i * 4] = x;
+          vals[i * 4 + 1] = y;
+          vals[i * 4 + 2] = z;
+          vals[i * 4 + 3] = w;
+        }
+        tracks.push({ boneHash: e.path, type: 'rot', times, values: vals });
       }
     }
     if (loopBlend) for (const tr of tracks) applyLoopBlend(tr, frames);

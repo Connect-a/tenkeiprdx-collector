@@ -262,6 +262,17 @@ function create(opts) {
           } catch (e) {}
         }
       }
+      if (!cv) {
+        try {
+          const idx = await ensureIndexes();
+          const rel = (idx.assets.sceneAssetIndex || {})[bgId];
+          if (rel) {
+            const pack = await scenarioUi.loadPack(rel);
+            const sp = pack && (pack.get(bgId) || Object.values(pack.sprites || {})[0]);
+            if (sp && sp.canvas) cv = sp.canvas;
+          }
+        } catch (e) {}
+      }
       if (cv) ST.bgCache.set(bgId, cv);
     }
     return cv;
@@ -392,7 +403,10 @@ function create(opts) {
       }
     };
     if (isBeat) ST.autoTimer = setTimeout(advance, fr.auto);
-    else autoWaitImpl(myToken).then((ok) => { if (myToken === ST.autoToken && gen === ST.gen && ok !== false) advance(); });
+    else
+      autoWaitImpl(myToken).then((ok) => {
+        if (myToken === ST.autoToken && gen === ST.gen && ok !== false) advance();
+      });
   }
   async function renderFrame(opts) {
     const gen = ++ST.gen;
@@ -602,10 +616,10 @@ function create(opts) {
         ST.sceneById = new Map((ep.scenes || []).map((s) => [String(s.sceneId), s]));
         ST.choiceGroups = ep.choiceGroups;
         ST.visited = new Set();
-        ST.carryBgm = null;
+        ST.carryBgm = (options && options.initBgm) || null;
         await extendChoiceChain(String((ep.scenes[0] || {}).sceneId), frames);
       } else {
-        let carryBgm = null;
+        let carryBgm = (options && options.initBgm) || null;
         for (const s of ep.scenes || []) {
           const r = await loadAndAppendScene(s, frames, carryBgm);
           carryBgm = r.carry;

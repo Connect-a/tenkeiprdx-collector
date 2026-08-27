@@ -9,6 +9,7 @@ import { errText } from '../../core/messages.js';
 import { failureReport, failureText, hasFailures } from '../../core/failure-report.js';
 import { refreshLists, folderHandle } from '../runtime/state-refresh.js';
 import { openCharacter, appendDetailInfo } from './detail-view.js';
+import { switchTab } from './shell-ui.js';
 import { closeRoster } from './roster-view.js';
 import { audioScene } from '../runtime/audio-scene.js';
 
@@ -75,8 +76,11 @@ export async function runDownload(folderKey, triggerBtn) {
     };
     await downloadRunner.run([target], { report });
     await refreshLists(['fs', 'owned']);
-    if (folderHandle(String(folderKey))) await openCharacter(String(folderKey));
-    else setProgress('ダウンロードは終わりましたが、保存できたデータがありませんでした。', 1);
+    if (folderHandle(String(folderKey))) {
+      await openCharacter(String(folderKey));
+      const activeTab = document.querySelector('.tab.active');
+      if (activeTab && activeTab.dataset.tab) switchTab(activeTab.dataset.tab);
+    } else setProgress('ダウンロードは終わりましたが、保存できたデータがありませんでした。', 1);
     if (err) {
       setProgress(errText(err), 0);
       toast('ダウンロードを中断しました。' + errText(err), 'err');

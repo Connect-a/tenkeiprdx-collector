@@ -33,7 +33,9 @@ const skillFxUniqueRels = async () => (await ensureIndexes()).assets.skillFxUniq
 const miniGameRels = async () => (await ensureIndexes()).assets.miniGameRels || [];
 const sharedResourceRels = async () => {
   const unique = new Set(await skillFxUniqueRels());
-  return [...new Set([...(await sharedIndex()), ...(await vfxAllRels()), ...(await skillFxSharedRels()), ...(await miniGameRels()), ...(await collectOrphanEventstillRels())])].filter((rel) => !unique.has(rel));
+  return [...new Set([...(await sharedIndex()), ...(await vfxAllRels()), ...(await skillFxSharedRels()), ...(await miniGameRels()), ...(await collectOrphanEventstillRels())])].filter(
+    (rel) => !unique.has(rel),
+  );
 };
 
 async function collectOrphanEventstillRels() {
@@ -115,7 +117,6 @@ async function sharedStatus() {
   try {
     const list = await sharedResourceRels();
     const have = await assetStore.presentIds(DIRS.shared, list);
-    // クレジット/ロゴ用 aa バンドルも件数に含める＝欠けると「一部 N/M」表示になり見て分かる。
     let extraHave = 0;
     try {
       const dir = await fileStore.getDir(DIRS.shared, { create: false });

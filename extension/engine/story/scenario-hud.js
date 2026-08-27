@@ -317,7 +317,14 @@ function create(host, opts) {
     });
   };
 
-  async function theme() {
+  let dateEl = null;
+  function ensureDateEl() {
+    if (dateEl) return dateEl;
+    dateEl = mk('img', 'advDatePanel', ui);
+    dateEl.style.cssText = 'position:absolute;right:6px;top:150px;width:74px;height:282px;pointer-events:none;display:none;image-rendering:auto';
+    return dateEl;
+  }
+  async function theme(skinKey) {
     if (!scenarioUi) return false;
     const scAtlas = await scenarioUi.loadStage('scenarioUi'),
       adv = await scenarioUi.loadStage('adventureUi');
@@ -343,8 +350,36 @@ function create(host, opts) {
       if (tbg) titleWrap.style.background = 'url(' + tbg + ') 0 0 / 100% 100% no-repeat';
       autoSprites = { auto_on: g('btn_adventure_auto_on'), auto_off: g('btn_adventure_auto_off') };
     }
+    const tk = skinKey === 'tokimeki' ? await scenarioUi.loadStage('tokimeki') : null;
+    if (tk) {
+      const tb = tk.get('img_adventure_text_bg'),
+        nb = tk.get('img_adventure_character_name_bg'),
+        nx = tk.get('img_adventure_icon_next'),
+        sk = tk.get('btn_adventure_skip'),
+        dt = tk.get('img_event_aprilfool_adventure_date');
+      if (tb) {
+        const composed = scenarioUi.compose9Slice(tb, 1144, 200);
+        if (composed) {
+          textboxBg.style.background = 'url(' + composed + ') 0 0 / 100% 100% no-repeat';
+          textboxBg.style.border = 'none';
+        } else scenarioUi.apply9Slice(textboxBg, tb, { scale: 1 });
+      }
+      if (nb) scenarioUi.apply9Slice(speaker, nb, { slice: { t: 0, b: 0 }, scale: 1 });
+      if (nx) {
+        nextIcon.src = nx.dataUrl;
+        nextIcon.style.display = 'block';
+      }
+      if (sk) btnSkip.src = sk.dataUrl;
+      autoSprites = { auto_on: (tk.get('btn_adventure_auto_on') || {}).dataUrl, auto_off: (tk.get('btn_adventure_auto_off') || {}).dataUrl };
+      if (dt) {
+        ensureDateEl().src = dt.dataUrl;
+        dateEl.style.display = 'block';
+      }
+    } else if (dateEl) {
+      dateEl.style.display = 'none';
+    }
     refreshBtns();
-    return !!(scAtlas || adv);
+    return !!(scAtlas || adv || tk);
   }
 
   return {

@@ -10,11 +10,11 @@ import { utilHelpers } from '../../core/util.js';
 import { el, append } from '../../core/dom.js';
 import { buildGroupedVisPanel } from '../../core/vis-panel.js';
 import { createPartControl } from './model-parts.js';
+import { makeJumpClip } from './jump-motion.js';
 import * as THREE_NS from '../../vendor/three.module.js';
 const { sharedBgTexture, setSharedBgFromRgba, buildTextureMap, MOUTH_EXPRESSIONS, remapMouthUV, makeDataTexture, TP_TO_LINEAR, buildPostPass, buildThreeSkeleton, mat4FromBindpose, buildThreeClip } =
   model3dLib;
 
-// ガンマ色空間の実ゲームに合わせ、色は生値のまま演算して出力直前だけリニアへ戻す。
 const rawColor = (T, a) => new T.Color(a[0], a[1], a[2]);
 const gammaOut = (mat, cacheKey) => {
   const prev = mat.onBeforeCompile;
@@ -190,7 +190,6 @@ function createMaterialFactory(T, deps) {
     if (texCache.has(key)) return texCache.get(key);
     const ownTex = name ? tmap.byName.get(name) : null;
     const isMouth = /mouth|month/i.test(name || '');
-    // キャラ材質は全て ToonShader・_Cull=2(Back)・完全不透明。three は巻きが反転するので BackSide（設計資料_viewer.md）。
     const params = { side: T.BackSide };
     if (isMouth && mouthAtlasTex) {
       params.map = mouthAtlasTex;
@@ -258,7 +257,7 @@ function createPlayback(T, st, deps) {
     next.enabled = true;
     next.setEffectiveWeight(1);
     next.play();
-    if (st.action && st.action !== next) next.crossFadeFrom(st.action, XFADE, false);
+    if (st.action && st.action !== next) next.crossFadeFrom(st.action, (clips[idx] && clips[idx].xfade) || XFADE, false);
     st.action = next;
     st.curClip = clips[idx];
     syncWeapons(clips[idx] && clips[idx].name, loopOnce);
@@ -268,7 +267,7 @@ function createPlayback(T, st, deps) {
     if (!clips.length) return;
     if (!st.mixer) st.mixer = new T.AnimationMixer(root);
     st.mixer.timeScale = st.playSpeed;
-    startAction(idx, false);
+    startAction(idx, !!(clips[idx] && clips[idx].once));
     st.mixer.update(0);
     st.playing = true;
     if (st.playBtn) st.playBtn.textContent = '⏸';
@@ -1156,7 +1155,6 @@ function render(hostEl, model, materialBundle, opt) {
     return { ok: false, reason: 'no-renderable-unityMesh' };
   }
   const { root, skelBones, radius, center, box, meshGroups, mouthGeoms, morphObjs, objBySmr, attachBase, weaponObjs, weaponRigs, stats } = built;
-  // 深度プリパスの床面を足元(bbox最小Y)に置く＝床から立ち上る soft-particle オーラの床際フェード用(box確定後に設定)。
   if (postPass && postPass.setFloorY && box && isFinite(box.min.y)) postPass.setFloorY(box.min.y);
 
   const state = { yaw: ((fbx.rotationOverrideY || 0) * Math.PI) / 180, pitch: 0.05, dist: radius * 2.2, target: center.clone() };
@@ -1248,7 +1246,6 @@ function render(hostEl, model, materialBundle, opt) {
   }
 
   let auraFx = null;
-  // オーラは常に loop サブツリー(定常状態=玉/リング)を表示する必要があるため animGate は常に無視する。
   const buildAura = (bytes, texByMatPid) => {
     if (auraFx) {
       try {
@@ -1395,7 +1392,6 @@ function render(hostEl, model, materialBundle, opt) {
       }
       if (auraFx) auraFx.update(dt);
       if (!glLost) {
-        // オーラに soft-particle(靄/メテオ)があればシーン深度プリパスを実行して供給する。
         const needDepth = auraFx && auraFx.setDepthTexture;
         if (postPass) postPass.render(scene, camera, needDepth ? auraFx.group : null, needDepth ? (tex) => auraFx.setDepthTexture(tex) : null);
         else renderer.render(scene, camera);
@@ -1517,7 +1513,9 @@ function buildInstance(model, materialBundle, opt) {
     return { ok: false, reason: 'no-renderable-unityMesh' };
   }
   const { root, skelBones, radius, center, box, morphObjs, mouthGeoms, objBySmr, attachBase, weaponObjs, weaponRigs } = built;
-  const clips = skinnable && model.clips && model.clips.length ? model.clips : [];
+  const baseClips = skinnable && model.clips && model.clips.length ? model.clips : [];
+  const extraClips = baseClips.length ? [makeJumpClip(model, baseClips)].filter(Boolean) : [];
+  const clips = extraClips.length ? [...baseClips, ...extraClips] : baseClips;
   const validBones = new Set(((model.avatar && model.avatar.hashes) || []).map((h) => h >>> 0));
   const clipCache = new Map();
   const getThreeClip = (i) => {

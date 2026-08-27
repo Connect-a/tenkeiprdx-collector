@@ -138,7 +138,9 @@ export async function otherList() {
       .map((w) => {
         const wa = ai[String(w.weaponId)] || {};
         const model = (wa.model || [])[0] || null;
-        return model ? { model, materials: resolveVariationMaterial(matVar, String(w.weaponId), w.variation, wa.materials || []), slot: w.slot || 'wp_2', scale: w.scale || 1 } : null;
+        const mats = resolveVariationMaterial(matVar, String(w.weaponId), w.variation, wa.materials || []);
+        const deps = (modelDeps[String(w.weaponId)] || []).filter((r) => r !== model && r !== mats);
+        return model ? { model, materials: mats, deps, slot: w.slot || 'wp_2', scale: w.scale || 1 } : null;
       })
       .filter(Boolean);
 
@@ -243,7 +245,9 @@ export async function monsterList() {
       const wOwner = sole && sole.kind === 'monster' && sole.id === em.id ? em.id : w.weaponId;
       push('model', wm, wOwner);
       push('materials', wmat, wOwner);
-      weapons.push({ model: wm, materials: wmat, slot: w.slot || 'wp_2', scale: w.scale || 1 });
+      const wdeps = (modelDeps[String(w.weaponId)] || []).filter((r) => r !== wm && r !== wmat);
+      for (const rel of wdeps) push('meshdep', rel, wOwner);
+      weapons.push({ model: wm, materials: wmat, deps: wdeps, slot: w.slot || 'wp_2', scale: w.scale || 1 });
     }
 
     const altModels = [];
@@ -307,6 +311,46 @@ function builtinEntries(x) {
     out.push({ id: 'ui_' + key, name: BUILTIN_LABEL[key] || key, source: 'ui', spine: null, spinelight: null, icon: rel, refs: [ref], ids: [ref.id], spineIds: [], iconIds: [ref.id] });
   }
   return out.sort((a, b) => (a.name > b.name ? 1 : -1));
+}
+
+const MINIGAME_ORDER = ['donutshop', 'eatfull', 'macaronrun', 'karuta', 'minipara', 'paradotchi', 'otopara', 'hagoita', 'tenkeiparadise', 'common'];
+const MINIGAME_LABEL = { tenkeiparadise: '天啓パラダイス', common: '共通UI' };
+const MINIGAME_AUDIO_RE = /^minigames_assets_bgm\//i;
+
+const miniGameKeyOf = (rel) => {
+  const m = String(rel).match(/^minigames_(?:assets|scenes)_([a-z0-9]+)/i);
+  const seg = m ? m[1].toLowerCase() : '';
+  return MINIGAME_ORDER.find((k) => k !== 'common' && seg.startsWith(k)) || 'common';
+};
+
+function miniGameEntries(x) {
+  const groups = new Map();
+  for (const rel of x.assets.miniGameRels || []) {
+    if (MINIGAME_AUDIO_RE.test(rel)) continue;
+    const k = miniGameKeyOf(rel);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(rel);
+  }
+  const out = [];
+  for (const k of MINIGAME_ORDER) {
+    const rels = (groups.get(k) || []).sort();
+    if (!rels.length) continue;
+    const refs = rels.map((rel) => ({ rel, id: assetStore.idOf(rel) }));
+    out.push({
+      id: 'minigame_' + k,
+      name: MINIGAME_LABEL[k] || k,
+      note: `${refs.length}バンドル`,
+      source: 'minigame',
+      spine: null,
+      spinelight: null,
+      icon: refs[0].rel,
+      refs,
+      ids: refs.map((r) => r.id),
+      spineIds: [],
+      iconIds: refs.map((r) => r.id),
+    });
+  }
+  return out;
 }
 
 const WORLDMAP_COUNTRY = {
@@ -500,7 +544,18 @@ export async function other2dList() {
   });
   const titleLogo = aaLogo('titlelogo', 'タイトルロゴ', TITLE_AA_CACHE, TITLE_SPRITE_NAMES);
   const gameLogo = aaLogo('logosprites', 'ロゴ（ゲーム／DMM／FANZA）', LOGO_AA_CACHE, LOGO_SPRITE_NAMES);
-  return [...out.sort(byIdAsc), ...builtinEntries(x), ...uiPanelEntries(x), ...worldMapEntries(x), ...missionEntries(x), ...statics, titleLogo, gameLogo, ...(await gachaEntries(x))];
+  return [
+    ...out.sort(byIdAsc),
+    ...builtinEntries(x),
+    ...uiPanelEntries(x),
+    ...worldMapEntries(x),
+    ...missionEntries(x),
+    ...miniGameEntries(x),
+    ...statics,
+    titleLogo,
+    gameLogo,
+    ...(await gachaEntries(x)),
+  ];
 }
 
 function other3dCoreRefs(entry) {
@@ -511,6 +566,7 @@ function other3dCoreRefs(entry) {
   for (const w of entry.weapons || []) {
     if (w.model) out.push(w.model);
     if (w.materials) out.push(w.materials);
+    for (const d of w.deps || []) out.push(d);
   }
   if (entry.mouth) out.push(entry.mouth);
   return out;

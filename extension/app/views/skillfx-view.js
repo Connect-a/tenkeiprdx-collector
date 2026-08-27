@@ -10,11 +10,7 @@ const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 let _mods = null;
 const loadMods = async () => {
   if (!_mods) {
-    const [sv, vp, three] = await Promise.all([
-      import('../../engine/render/scene-vfx.js'),
-      import('../../engine/render/vfx-parse.js'),
-      import('../../vendor/three.module.js'),
-    ]);
+    const [sv, vp, three] = await Promise.all([import('../../engine/render/scene-vfx.js'), import('../../engine/render/vfx-parse.js'), import('../../vendor/three.module.js')]);
     _mods = { sceneVfx: sv.sceneVfx, vfxParse: vp.vfxParse, THREE: three };
   }
   return _mods;
@@ -158,7 +154,10 @@ export function createSkillFxView() {
     if (entry.seRel) {
       const url = await loadSeUrl(src, entry.seRel);
       if (gen !== _gen) {
-        if (url) try { URL.revokeObjectURL(url); } catch (er) {}
+        if (url)
+          try {
+            URL.revokeObjectURL(url);
+          } catch (er) {}
         return;
       }
       if (url) {

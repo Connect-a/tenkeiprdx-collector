@@ -1,6 +1,7 @@
 import { OTHER_EPISODE_SUBTYPE, R18_ALT_EPISODES, R18_ALT_OWNER } from '../core/constants.js';
 import { utilHelpers } from '../core/util.js';
-import { toRel, APP_DIR, APP_PREFIX, bundleName } from '../core/paths.js';
+import { toRel, APP_DIR, APP_PREFIX, bundleName, relKey } from '../core/paths.js';
+import { catOf } from '../core/placement.js';
 const num = utilHelpers.num;
 const str = (x) => (typeof x === 'string' && x.trim() ? x : undefined);
 const int = (x) => (typeof x === 'number' ? x : typeof x === 'bigint' ? Number(x) : undefined);
@@ -492,8 +493,8 @@ function buildHomeIndex(acc) {
     const order = int(p[9]) || 0;
     const icon = str(p[4]);
     if (ty === 4) {
-      const lines = p.find((v) => Array.isArray(v) && v.length && Array.isArray(v[0]) && typeof v[0][0] === 'string' && /^[cs]_/.test(v[0][0]));
-      homeIndex.sceneIllust.push({ id, name, still: icon, stillAdult: str(p[7]) || null, order, lines: (lines || []).map((l) => ({ voiceId: l[0], text: l[1], order: num(l[2]) })) });
+      const lines = (Array.isArray(p[6]) ? p[6] : []).filter((l) => Array.isArray(l) && typeof l[0] === 'string' && l[0]);
+      homeIndex.sceneIllust.push({ id, name, still: icon, stillAdult: str(p[7]) || null, order, lines: lines.map((l) => ({ voiceId: l[0], text: str(l[1]) || '', order: num(l[2]) })) });
     } else if (ty === 3) {
       homeIndex.homeBgm.push({ id, name, icon, audio: icon ? icon.replace(/_icon$/, '') : null, order });
     } else if (ty === 2 || ty === 6) {
@@ -674,6 +675,7 @@ const CAT_PREFIX = /^([a-z0-9()]+_assets_[a-z0-9()]+)\//;
 const HERO_MARK = [/^3dmodels_assets_3dmodels\/(\d{8})_/, /^spines_assets_spines\/(\d{8})_/, /^charactericons_assets_charactericons\/(\d{8})_/];
 const ICON_CAT = /^(charactericons|charactericonslight|battlecharactersicons|monstericons)_assets_[a-z0-9]+\/(\d+)_[0-9a-f]{32}\.bundle$/;
 const VFX_DL_RE = /^(vfx_assets_vfx\/|vfxmaterials_assets_vfxmaterials\/|vfxtextureassets_assets_assets\/|vfxmaterialassets_assets_)/;
+const NATIVE_VFX_RE = /^vfxassets_assets_assets\//;
 const MISSION_UI_RE = /^uispritesassets_assets_missionsprites_[0-9a-f]{16,}\.bundle$/;
 const UI_SPRITE_RE = /^uispritesassets_assets_[a-z0-9]+sprites_[0-9a-f]{16,}\.bundle$/;
 const UI_PANEL_RE = /^uicomponentspartsassets_assets_[a-z0-9]*panel.*_[0-9a-f]{16,}\.bundle$/i;
@@ -695,8 +697,36 @@ const STAGE_RULES = [
   ['bgCommon', /^backgrounds_assets_backgrounds\/bg_common_system_/],
   ['adventureUi', /^uispritesassets_assets_adventuresprites_/],
   ['scenarioUi', /^scenariolayouts_assets_scenariouiassetpacks\/default_/],
+  ['tokimeki', /^scenariolayouts_assets_scenariouiassetpacks\/tokimeki_/],
   ['emotion', /_assets_emotionsprites_/],
 ];
+
+function buildNameAlias(rels) {
+  const byName = new Map();
+  for (const rel of rels) {
+    const name = bundleName(rel);
+    if (!name) continue;
+    const k = (catOf(rel) || 'misc') + '|' + name;
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(rel);
+  }
+  const alias = {};
+  for (const [k, list] of byName) {
+    const keys = [...new Set(list.map((r) => relKey(r)))].sort();
+    if (keys.length < 2) continue;
+    const name = k.slice(k.indexOf('|') + 1);
+    const used = new Set([name]);
+    for (let i = 1; i < keys.length; i++) {
+      const seg = keys[i].split('/').slice(-2, -1)[0] || String(i);
+      let v = seg + '_' + name;
+      let n = 2;
+      while (used.has(v)) v = seg + '_' + name + '_' + n++;
+      used.add(v);
+      alias[keys[i]] = v;
+    }
+  }
+  return alias;
+}
 
 function buildAssetIndex(rels) {
   const heroSet = new Set();
@@ -770,13 +800,20 @@ function buildBgmTracks(sceneAssetIndex) {
   const seen = new Set();
   const tracks = [];
   for (const name of Object.keys(sceneAssetIndex)) {
-    const m = name.match(/^bgm_(\d+)(?:_loop|_intro)?$/);
+    const m = name.match(/^bgm_(.+?)(?:_loop|_intro)?$/);
     if (!m || seen.has(m[1])) continue;
     seen.add(m[1]);
     const base = 'bgm_' + m[1];
     if (sceneAssetIndex[base] || sceneAssetIndex[base + '_loop']) tracks.push({ id: m[1], audio: base });
   }
-  return tracks.sort((a, b) => Number(a.id) - Number(b.id));
+  return tracks.sort((a, b) => {
+    const na = Number(a.id);
+    const nb = Number(b.id);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    if (Number.isFinite(na)) return -1;
+    if (Number.isFinite(nb)) return 1;
+    return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
+  });
 }
 
 function buildNamedIndexes(rels) {
@@ -860,7 +897,7 @@ function catalogIndexes(internalIds) {
   const sceneAssetIndex = buildSceneAssetIndex(rels);
   const sharedIndex = [...rels].filter((rel) => SHARED_KEEP.some((fn) => fn(rel.replace(APP_PREFIX, '')))).sort();
 
-  return {
+  const out = {
     assetIndex: buildAssetIndex(rels),
     sceneAssetIndex,
     sharedIndex,
@@ -873,7 +910,9 @@ function catalogIndexes(internalIds) {
     battleFieldRels: [...rels].filter((rel) => BATTLEFIELD_RE.test(rel)).sort(),
     gachaBgRels: [...rels].filter((rel) => GACHA_BG_RE.test(rel)).sort(),
     systemVoiceRel: [...rels].filter((rel) => /^systemvoice_assets_/.test(rel)).sort()[0] || null,
-    gachaExtraRels: [...rels].filter((rel) => GACHA_ANY_RE.test(rel) && !GACHA_BG_RE.test(rel) && !VFX_DL_RE.test(rel) && !SHARED_KEEP.some((fn) => fn(rel.replace(APP_PREFIX, '')))).sort(),
+    gachaExtraRels: [...rels]
+      .filter((rel) => GACHA_ANY_RE.test(rel) && !GACHA_BG_RE.test(rel) && !VFX_DL_RE.test(rel) && !NATIVE_VFX_RE.test(rel) && !SHARED_KEEP.some((fn) => fn(rel.replace(APP_PREFIX, ''))))
+      .sort(),
     vfxByName: buildVfxNameMap(rels, /^vfx_assets_vfx\//),
     vfxseByName: buildVfxNameMap(rels, /^vfxse_assets_vfxse\//),
     builtinRels: [...rels].filter((rel) => APP_PREFIX.test(rel)).sort(),
@@ -883,6 +922,9 @@ function catalogIndexes(internalIds) {
     ...buildNamedIndexes(rels),
     ...buildThumbIndexes(rels),
   };
+  const MIRROR_KEYS = ['sharedIndex', 'vfxAllRels', 'battleFieldRels', 'miniGameRels', 'uiSpriteRels', 'uiPanelRels', 'worldMapRels', 'gachaBgRels', 'gachaExtraRels', 'missionUiRels', 'builtinRels'];
+  out.mirrorAlias = buildNameAlias(MIRROR_KEYS.flatMap((k) => out[k] || []));
+  return out;
 }
 
 function catalogDeps(catalogs) {

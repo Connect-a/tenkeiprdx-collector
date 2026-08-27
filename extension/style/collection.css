@@ -171,3 +171,21 @@
   border-radius: 6px;
   background: #000;
 }
+
+.monstericon.zoomable {
+  cursor: zoom-in;
+}
+
+#other2dOverlay .itemmodal {
+  max-width: min(88vw, 900px);
+}
+
+#other2dOverlay .itemzoombox {
+  min-height: min(70vh, 640px);
+}
+
+#other2dOverlay .itemzoom {
+  width: 100%;
+  height: min(70vh, 640px);
+  object-fit: contain;
+}
