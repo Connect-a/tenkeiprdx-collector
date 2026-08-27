@@ -165,3 +165,18 @@ export async function spineInputsFor(entry) {
   }
   return null;
 }
+
+const voiceNoOf = (nm) => {
+  const m = String(nm).match(/_(\d+)[a-z]*$/i);
+  return m ? parseInt(m[1], 10) : 0;
+};
+
+export async function voiceClipFor(entry, no) {
+  if (!entry || entry.kind !== 'character' || !no) return null;
+  const handle = charHandle(entry.id);
+  if (!handle) return null;
+  const names = (await fileStore.listUnder(handle, '')).filter((n) => /^voice_gallery\./i.test(n));
+  if (!names.length) return null;
+  const clips = await charAssets.extractClips(handle, names[0]);
+  return clips.find((c) => voiceNoOf(c.name) === no) || null;
+}

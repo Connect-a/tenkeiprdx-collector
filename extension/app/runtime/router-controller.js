@@ -2,7 +2,8 @@ import { collectionRepository } from '../../data/collection.js';
 import { playerState } from './player-state.js';
 import { parseRoute, routeHash, routeKey, isTargetRoute } from './router.js';
 import { openRoster } from '../views/roster-view.js';
-import { openCharacter, openStoryRoute } from '../views/detail-view.js';
+import { openCharacter, showSection } from '../views/detail-view.js';
+import { defaultSection } from '../views/shell-ui.js';
 import { showDownloadPrompt } from '../views/download-ui.js';
 import { toast } from '../ui/notifier.js';
 import { rosterModel } from '../views/roster-ui.js';
@@ -26,19 +27,17 @@ export async function navChar(dir) {
   navTo(playerState.rosterKind, String(flat[j].folderKey));
 }
 
-export function setAppliedRouteKey(v) {
-  appliedRoute = v;
-}
-
 export function navTo(rosterKind, id, opts) {
   const o = opts || {};
-  const next = routeHash(rosterKind, id || null, o.section, o.epId);
+  const wantEp = o.section === 'story' && o.epId;
+  const section = id && o.section && (o.section !== defaultSection(rosterKind) || wantEp) ? o.section : null;
+  const next = routeHash(rosterKind, id || null, section, section === 'story' ? o.epId : null);
   if (location.hash === next) {
     route(true);
     return;
   }
   try {
-    if (opts && opts.replace) history.replaceState(null, '', next);
+    if (o.replace) history.replaceState(null, '', next);
     else history.pushState(null, '', next);
     route(true);
   } catch (e) {
@@ -54,10 +53,7 @@ async function openById(id) {
     const scan = pendingScan() || beginScan();
     if (scan) await scan;
   }
-  if (known()) {
-    await openCharacter(sid);
-    return true;
-  }
+  if (known() && (await openCharacter(sid))) return true;
   try {
     const item = await collectionRepository.buildRosterItemFor(sid, { dl: playerState.dl, distSet: playerState.binlistScenes });
     if (item) {
@@ -70,27 +66,28 @@ async function openById(id) {
   return false;
 }
 
-export async function route(skipDedup) {
-  const r = parseRoute();
-  const key = routeKey(r);
-  if (!skipDedup && key === appliedRoute) return;
-  appliedRoute = key;
-
+async function apply(r) {
   if (isTargetRoute(r.rosterKind)) {
     openRoster(r.rosterKind, r.id);
     return;
   }
-
-  if (r.id) {
-    playerState.rosterKind = r.rosterKind;
-    const ok = await openById(r.id);
-    if (!ok) {
-      openRoster(r.rosterKind);
-      return;
-    }
-    if (r.section === 'story') await openStoryRoute(r.id, r.epId);
+  if (!r.id) {
+    openRoster(r.rosterKind);
     return;
   }
+  playerState.rosterKind = r.rosterKind;
+  if (playerState.viewKey() !== String(r.id) && !(await openById(r.id))) {
+    openRoster(r.rosterKind);
+    return;
+  }
+  if (playerState.viewKey() !== String(r.id)) return;
+  await showSection(r.id, r.section || defaultSection(r.rosterKind), r.epId);
+}
 
-  openRoster(r.rosterKind);
+export async function route(force) {
+  const r = parseRoute();
+  const key = routeKey(r);
+  if (!force && key === appliedRoute) return;
+  appliedRoute = key;
+  await apply(r);
 }

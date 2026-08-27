@@ -41,6 +41,15 @@ export async function hasAsset(dir, rel, place) {
   return !!(await locate(dir, rel, place));
 }
 
+export function dirsFor(items) {
+  const set = new Set();
+  for (const it of items || []) {
+    const rel = it.rel || it;
+    for (const c of diskPaths(rel, it.place)) set.add(dirOfPrefix(c.path));
+  }
+  return [...set];
+}
+
 export async function presentIds(dir, items, opts) {
   const nonEmpty = !!(opts && opts.nonEmpty);
   const have = new Map();
@@ -118,4 +127,4 @@ export async function removeAsset(dir, rel, place) {
   for (const c of diskPaths(rel, place)) await fileStore.removeUnder(d, c.path);
 }
 
-export const assetStore = { locate, readAsset, hasAsset, presentIds, acquireAsset, removeAsset, idOf };
+export const assetStore = { dirsFor, locate, readAsset, hasAsset, presentIds, acquireAsset, removeAsset, idOf };

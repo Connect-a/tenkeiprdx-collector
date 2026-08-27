@@ -3,6 +3,29 @@ import { assetStore } from '../asset-store.js';
 import { DIRS } from '../../core/constants.js';
 import { ensureIndexes } from '../index-store.js';
 import { runBulkDownload } from './acquire-bulk.js';
+import { resolveOrigin } from '../origin.js';
+import { networkClient } from '../network.js';
+import { AA_BUNDLES } from '../credits-assets.js';
+
+async function grabCreditsAaBundles(dir, c, prog) {
+  let origin = null;
+  for (const a of AA_BUNDLES) {
+    try {
+      if (await fileStore.exists(dir, a.cache)) continue;
+      if (!origin) origin = await resolveOrigin();
+      if (!origin || !origin.assets) return;
+      if (prog) prog(a.label + '（クレジット用）を取得中…');
+      const r = await networkClient.fetchBytes(origin.assets + '/' + a.path);
+      if (r.status === 'ok' && r.bytes) {
+        await fileStore.writeUnder(dir, a.cache, r.bytes);
+        if (c) c.got++;
+        if (prog) prog(a.label + '（クレジット用）を取得しました');
+      } else if (prog) {
+        prog(a.label + '（クレジット用）取得失敗: ' + (r && r.status));
+      }
+    } catch (e) {}
+  }
+}
 const sharedIndex = async () => (await ensureIndexes()).assets.sharedIndex;
 const vfxAllRels = async () => (await ensureIndexes()).assets.vfxAllRels || [];
 const skillFxSharedRels = async () => (await ensureIndexes()).assets.skillFxSharedRels || [];
@@ -48,7 +71,7 @@ async function buildSharedResources(progress, opts) {
         : c.done % 5 === 0
           ? `DL中 ${c.done}/${c.total}（新規${c.got}件・既にあった分${c.skip}件・失敗${c.fail}件）`
           : null,
-    finalize: async (c, { dir, base }) => {
+    finalize: async (c, { dir, base, prog }) => {
       try {
         const idx = await ensureIndexes();
         await ensureSharedSingletons(
@@ -62,6 +85,7 @@ async function buildSharedResources(progress, opts) {
           { includeStage: false },
         );
       } catch (e) {}
+      await grabCreditsAaBundles(dir, c, prog);
     },
     done: (c) => `完了 新規${c.got}件・既にあった分${c.skip}件・失敗${c.fail}件 / 全${c.total}件`,
   });
@@ -91,7 +115,13 @@ async function sharedStatus() {
   try {
     const list = await sharedResourceRels();
     const have = await assetStore.presentIds(DIRS.shared, list);
-    return { have: have.size, total: list.length, unknown: 0 };
+    // クレジット/ロゴ用 aa バンドルも件数に含める＝欠けると「一部 N/M」表示になり見て分かる。
+    let extraHave = 0;
+    try {
+      const dir = await fileStore.getDir(DIRS.shared, { create: false });
+      if (dir) for (const a of AA_BUNDLES) if (await fileStore.exists(dir, a.cache)) extraHave++;
+    } catch (e) {}
+    return { have: have.size + extraHave, total: list.length + AA_BUNDLES.length, unknown: 0 };
   } catch (e) {
     return { have: 0, total: 0, unknown: 0 };
   }

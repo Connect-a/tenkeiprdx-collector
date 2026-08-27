@@ -34,6 +34,7 @@ function defaultChar(id, kind) {
     face: '',
     brow: '',
     shadow: 'blob',
+    control: false,
   };
 }
 
@@ -66,6 +67,7 @@ function normalizeChar(raw) {
   c.face = str(raw.face, '');
   c.brow = str(raw.brow, '');
   c.shadow = raw.shadow === 'cast' || raw.shadow === 'none' ? raw.shadow : raw.shadow === false ? 'none' : 'blob';
+  c.control = !!raw.control;
   return c;
 }
 

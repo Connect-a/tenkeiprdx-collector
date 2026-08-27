@@ -14,7 +14,9 @@ import { voiceOut } from '../panels/voice-out.js';
 import { runDownload } from './download-ui.js';
 import { resetLineSearch } from './line-search.js';
 import { renderVoiceGallery } from './voice-gallery.js';
-import { applyKindTabs, resetVisualPanel, switchTab, syncDetailHash } from './shell-ui.js';
+import { applyKindTabs, resetVisualPanel, switchTab } from './shell-ui.js';
+import { navTo } from '../runtime/router-controller.js';
+import { migrateR18Episodes } from '../../data/acquire/r18-migrate.js';
 
 const labelSpan = (text) => el('span', 'dinfo-label', text);
 const valueSpan = (val) => el('span', 'dinfo-value', nameFix(val));
@@ -37,6 +39,7 @@ export async function appendDetailInfo(charId, rosterKind) {
           ['グループ', d.group],
           ['ランク', d.rank],
           ['種族', d.race],
+          ['CV', d.cv],
         ]),
         inlineRow([
           ['すき', d.likes],
@@ -69,20 +72,17 @@ function renderEpisodes(m) {
       box.appendChild(el('div', 'epchapter', ep.chapter));
     }
     const naLabel = ep.gate === 'locked' ? (m.rosterKind === 'main' || m.rosterKind === 'event' ? '未クリア' : '未解放') : '未取得';
+    const playable = ep.have !== 'none' || !!ep.linkTo;
     const row = el('div', {
-      class: 'eprow' + (ep.have !== 'none' ? '' : ' na'),
+      class: 'eprow' + (playable ? '' : ' na'),
       data: { epid: String(episodeIdOf(ep)) },
       html: html`<span class="lbl">${ep.label || ''}</span><span class="ti"></span><span class="cats"></span><span class="epid">#${episodeIdOf(ep)}</span
-        ><span class="vc">${ep.have !== 'none' ? ep.lineCount + '行' + (ep.voiced ? ' / 音声' + ep.voiced : '') + (ep.have === 'partial' ? ' / 続き未取得' : '') : naLabel}</span>`,
+        ><span class="vc">${ep.linkTo ? 'R18版' : ep.have !== 'none' ? ep.lineCount + '行' + (ep.voiced ? ' / 音声' + ep.voiced : '') + (ep.have === 'partial' ? ' / 続き未取得' : '') : naLabel}</span>`,
     });
     row.querySelector('.ti').textContent = ep.title || '';
     for (const n of xposNames(ep.xpos)) row.querySelector('.cats').appendChild(el('span', 'epcat', n));
-    if (ep.have !== 'none') {
-      row.addEventListener('click', () => {
-        syncDetailHash('story', String(episodeIdOf(ep)));
-        const storyPanel = getStoryPanel();
-        if (storyPanel) storyPanel.playEpisode(ep);
-      });
+    if (playable) {
+      row.addEventListener('click', () => navTo(playerState.rosterKind || 'character', String(m.id || playerState.viewKey()), { section: 'story', epId: String(episodeIdOf(ep)), replace: true }));
     }
     box.appendChild(row);
   }
@@ -104,6 +104,11 @@ export async function openCharacter(folderKey) {
   if (!handle) return;
   playerState.navId = String(folderKey);
 
+  try {
+    const { folderMeta } = await collectionRepository.folderModel();
+    await migrateR18Episodes(folderKey, (folderMeta[String(folderKey)] || {}).episodes);
+  } catch (e) {}
+
   let m = null;
   try {
     m = await assetAcquirer.charMeta(folderKey);
@@ -117,7 +122,7 @@ export async function openCharacter(folderKey) {
   getById('dlbar').style.display = 'none';
   getById('playwrap').style.display = '';
 
-  const eps = m.episodes || [];
+  const eps = (m.episodes || []).filter((e) => !e.linkTo);
   const avail = eps.filter((e) => e.have !== 'none').length;
   getById('charHead').innerHTML = html`<div class="charhead-top">
     <h2>${raw(chip(m.rosterKind))} ${nameFix(characterMeta.displayName(m) || folderKey)} <span class="hint">#${folderKey}</span></h2>
@@ -131,30 +136,43 @@ export async function openCharacter(folderKey) {
   resetLineSearch();
   renderVoiceGallery();
   applyKindTabs(m.rosterKind);
-
-  const key = playerState.viewKey();
-  if (imagePanel && imagePanel.visualsReady) await imagePanel.visualsReady();
-  if (playerState.viewKey() !== key) return;
-  ensureEpisodes(String(folderKey));
+  return true;
 }
-
-let _epLoad = null;
 
 export function ensureEpisodes(folderKey) {
-  const key = String(folderKey || playerState.viewKey() || '');
-  if (!key) return null;
-  if (!_epLoad || _epLoad.key !== key) _epLoad = { key, p: loadEpisodesDeferred(key) };
-  return _epLoad.p;
+  const cur = playerState.cur;
+  if (!cur) return null;
+  const key = String(folderKey || cur.folderKey || '');
+  if (!key || key !== String(cur.folderKey)) return null;
+  if (!cur.epLoad) cur.epLoad = loadEpisodesDeferred(key);
+  return cur.epLoad;
 }
 
-export async function openStoryRoute(folderKey, epId) {
-  switchTab('story');
-  await ensureEpisodes(String(folderKey));
-  if (!epId || playerState.viewKey() !== String(folderKey)) return;
+export function reloadEpisodes() {
+  if (!playerState.cur) return null;
+  playerState.cur.epLoad = null;
+  return ensureEpisodes();
+}
+
+export async function showSection(folderKey, section, epId) {
+  const key = String(folderKey);
+  if (playerState.viewKey() !== key) return;
+  switchTab(section);
+  if (section !== 'story') {
+    const imagePanel = getImagePanel();
+    if (imagePanel && imagePanel.visualsReady) await imagePanel.visualsReady();
+    if (playerState.viewKey() === key) ensureEpisodes(key);
+    return;
+  }
+  await ensureEpisodes(key);
+  if (playerState.viewKey() !== key || !epId) return;
+  const eps = (playerState.cur.meta && playerState.cur.meta.episodes) || [];
+  const ep = eps.find((e) => String(episodeIdOf(e)) === String(epId));
+  if (!ep || (ep.have === 'none' && !ep.linkTo)) return;
   const row = getById('eplist').querySelector(`.eprow[data-epid="${CSS.escape(String(epId))}"]`);
-  if (!row || row.classList.contains('na')) return;
-  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  row.click();
+  if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const storyPanel = getStoryPanel();
+  if (storyPanel) storyPanel.playEpisode(ep);
 }
 
 function renderRoutingWarning(m) {
@@ -225,7 +243,7 @@ function castRepairRow(ids, m) {
             note.textContent = msg;
           });
           if (r.noAsset.length) note.textContent += `／ゲーム側に立ち絵が無い ${r.noAsset.length}体（${r.noAsset.join(',')}）`;
-          await loadEpisodesDeferred(String(m.id));
+          await reloadEpisodes();
         } catch (e) {
           note.textContent = e && e.message ? e.message : String(e);
           btn.disabled = false;

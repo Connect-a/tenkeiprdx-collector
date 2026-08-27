@@ -6,6 +6,7 @@ function binlistEpisodesCovered(meta, distSet) {
   if (!meta || !distSet || !distSet.size) return 0;
   let n = 0;
   for (const ep of meta.episodes || []) {
+    if (ep.linkTo) continue;
     const ids = ep.sceneBinIds || [];
     if (ids.length && ids.every((sid) => distSet.has(String(sid)))) n++;
   }
@@ -13,7 +14,7 @@ function binlistEpisodesCovered(meta, distSet) {
 }
 
 function openEpisodeCount(meta, ctx, level) {
-  const episodes = meta.episodes || [];
+  const episodes = (meta.episodes || []).filter((e) => !e.linkTo);
   if (meta.rosterKind === 'character') return level != null ? episodes.filter((e) => ctx.openEpisodes.has(String(e.episodeId))).length : 0;
   if (meta.rosterKind === 'special') return episodes.filter((e) => e.paidMasterId == null || ctx.paidUnlocked.has(String(e.paidMasterId))).length;
   return episodes.filter((e) => ctx.clearedNodes.has(String(e.episodeId))).length;
@@ -22,7 +23,7 @@ function openEpisodeCount(meta, ctx, level) {
 function buildRosterItem(folderKey, meta, ctx) {
   const key = String(folderKey);
   const isChar = meta.rosterKind === 'character';
-  const episodes = meta.episodes || [];
+  const episodes = (meta.episodes || []).filter((e) => !e.linkTo);
   const owned = isChar ? ctx.ownedLevels.has(key) : null;
   const level = owned ? ctx.ownedLevels.get(key) : null;
   const dl = ctx.dlMap.get(key) || null;

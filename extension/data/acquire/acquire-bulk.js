@@ -19,7 +19,7 @@ async function ensureDlDir(dirKey) {
 }
 
 export async function runBulkDownload(items, opts) {
-  const { dirKey, toRel, placeOf, skipExisting = true, tick, done: doneMsg, finalize, shouldAbort } = opts;
+  const { dirKey, toRel, placeOf, skipExisting = true, tick, done: doneMsg, finalize, shouldAbort, conc } = opts;
   const list = items || [];
   const dir = await ensureDlDir(dirKey);
   const base = opts.base || (await assetRoot());
@@ -35,14 +35,12 @@ export async function runBulkDownload(items, opts) {
   };
   let present = null;
   if (skipExisting && list.length) {
+    const specs = list.map((it) => ({ rel: toRel(it), place: placeOf ? placeOf(it) : undefined })).filter((x) => x.rel);
     prog('壊れた分を確認しています…', 0, ctx);
-    ctx.purged = await fileStore.purgeEmpty(dir);
+    ctx.purged = await fileStore.purgeEmptyIn(dir, assetStore.dirsFor(specs));
     prog(`確認中 0/${total}`, 0, ctx);
     try {
-      present = await assetStore.presentIds(
-        dirKey,
-        list.map((it) => ({ rel: toRel(it), place: placeOf ? placeOf(it) : undefined })).filter((x) => x.rel),
-      );
+      present = await assetStore.presentIds(dirKey, specs);
     } catch (e) {}
   }
   const grab = async (item) => {
@@ -59,7 +57,7 @@ export async function runBulkDownload(items, opts) {
   });
   const deferred = [];
   try {
-    await pool(list, DL_CONC.asset, async (item) => {
+    await pool(list, conc || DL_CONC.asset, async (item) => {
       if (aborted) return;
       if (shouldAbort && shouldAbort()) {
         ctx.stopped = true;
@@ -107,7 +105,7 @@ export async function runBulkDownload(items, opts) {
   }
   if (aborted) throw aborted;
   if (finalize) await finalize(ctx, { dir, base, prog });
-  if (ctx.purged == null) ctx.purged = await fileStore.purgeEmpty(dir);
+  if (ctx.purged == null) ctx.purged = 0;
   if (doneMsg) prog(doneMsg(ctx), 1);
   return { ctx, dir, base };
 }

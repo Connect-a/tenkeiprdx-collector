@@ -47,7 +47,7 @@ async function loadStage(mode) {
   const host = getById('vwStage');
   host.textContent = '';
   const mod = mode === '2d' ? await import('./viewer-stage2d.js') : await import('./viewer-stage3d.js');
-  stage = mod.createStage(host, { state, entryOf, onNote: setNote, onBusy: setBusy, onGizmo: (id) => controls.refresh(id) });
+  stage = mod.createStage(host, { state, entryOf, onNote: setNote, onBusy: setBusy, onGizmo: (id) => controls.refresh(id), onDrive: (id) => controls.refresh(id) });
   await stage.init();
   await stage.syncAll();
 }
@@ -145,6 +145,17 @@ async function saveShot() {
 function bind() {
   document.querySelectorAll('.vw-tab').forEach((t) => t.addEventListener('click', () => switchMode(t.dataset.mode).catch((e) => setNote(errText(e)))));
   getById('vwField').addEventListener('change', (e) => applyField(e.target.value));
+  const stepField = (d) => {
+    const sel = getById('vwField');
+    const opts = [...sel.options];
+    if (opts.length < 2) return;
+    const i = opts.findIndex((o) => o.value === sel.value);
+    const next = opts[(Math.max(0, i) + d + opts.length) % opts.length];
+    sel.value = next.value;
+    applyField(next.value);
+  };
+  getById('vwFieldPrev').addEventListener('click', () => stepField(-1));
+  getById('vwFieldNext').addEventListener('click', () => stepField(1));
   getById('vwRecenter').addEventListener('click', () => stage && stage.resetCamera());
   getById('vwShot').addEventListener('click', () => saveShot().catch((e) => setNote('画像を保存できませんでした。' + errText(e))));
   getById('vwClear').addEventListener('click', () => {

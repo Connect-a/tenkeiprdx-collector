@@ -9,11 +9,13 @@ import { errText } from '../../core/messages.js';
 import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, groupHeading, downloadBar, errorRow } from '../ui/panel-shell.js';
 import { bundleName } from '../../core/paths.js';
 import { el } from '../../core/dom.js';
+import { TITLE_SPRITE_NAMES } from '../../data/credits-assets.js';
 
-const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha']);
+const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha', 'titlelogo']);
 const isGacha = (e) => e.source === 'gacha';
 const SECTIONS = [
-  ['動画', (e) => !!e.file],
+  ['動画', (e) => !!e.file && e.source !== 'titlelogo'],
+  ['タイトルロゴ', (e) => e.source === 'titlelogo'],
   ['ガチャ', (e) => e.source === 'gacha'],
   ['ストーリーキャラ', (e) => !e.file && !STORY_EXCLUDE.has(e.source)],
   ['アイコン', (e) => !e.file && e.source === 'ui'],
@@ -159,6 +161,41 @@ export function createOther2dPanel(deps) {
     v.play().catch(() => {});
   }
 
+  async function paintTitleLogo(host, e) {
+    const dir = await fileStore.getDir(DIRS.shared, { create: false });
+    const raw = dir && (await fileStore.readBytesUnder(dir, e.file));
+    if (!raw) {
+      host.appendChild(el('div', 'note', '未取得（サイドバーの「共有リソース」DLで取得できます）。'));
+      return;
+    }
+    const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+    const grid = el('div', 'spine-grid stand one');
+    host.appendChild(grid);
+    let shown = 0;
+    for (const nm of e.spriteNames || TITLE_SPRITE_NAMES) {
+      let cv = null;
+      try {
+        cv = MESH_MOD.decodeAtlasSprite(bytes, nm);
+      } catch (er) {}
+      if (!cv) continue;
+      cv.className = 'statimage';
+      grid.appendChild(el('div', 'spine-cell', [el('div', 'spine-cell-cap', nm), cv]));
+      shown++;
+    }
+    if (!shown) {
+      let cvs = [];
+      try {
+        cvs = MESH_MOD.decodeAllTextureCanvases(bytes) || [];
+      } catch (er) {}
+      for (const cv of cvs) {
+        cv.className = 'statimage';
+        grid.appendChild(el('div', 'spine-cell', cv));
+        shown++;
+      }
+    }
+    if (!shown) grid.appendChild(el('div', 'note', 'タイトルロゴを取り出せませんでした。'));
+  }
+
   async function openEntry(e) {
     const host = getById('other2dView');
     if (!host) return;
@@ -172,6 +209,7 @@ export function createOther2dPanel(deps) {
     }
     host.innerHTML = '';
     host.appendChild(viewHeader(isGacha(e) ? nameFix(e.name) : `#${e.id}${e.name ? '　' + nameFix(e.name) : ''}`, _ordered, e, openEntry));
+    if (e.source === 'titlelogo') return paintTitleLogo(host, e);
     if (e.file) return paintVideo(host, e);
     if (e.parts) return paintGacha(host, e);
     await paintIcons(host, e.iconIds || []);
@@ -204,7 +242,7 @@ export function createOther2dPanel(deps) {
 
     grid.innerHTML = '';
     const missing = _list.filter((e) => !isGacha(e) && !ready(e)).flatMap((e) => e.refs.filter((r) => !_have.has(r.id)));
-    const missingFiles = _list.filter((e) => !isGacha(e) && e.file && !_haveFiles.has(e.file)).length;
+    const missingFiles = _list.filter((e) => !isGacha(e) && e.file && e.source !== 'titlelogo' && !_haveFiles.has(e.file)).length;
     if (missing.length || missingFiles) grid.appendChild(dlBar(missing, missing.length + missingFiles));
     const { listCol } = splitLayout(grid, 'other2dView', 'カードを選ぶとここに表示');
     _ordered = SECTIONS.flatMap(([, pick]) => _list.filter(pick));

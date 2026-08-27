@@ -3,9 +3,6 @@ import { getById } from '../../core/dom.js';
 import { dispatchPanels } from '../runtime/panel-state.js';
 import { audioScene } from '../runtime/audio-scene.js';
 import { refreshSharedNotice } from './shared-notice.js';
-import { playerState } from '../runtime/player-state.js';
-import { routeHash, routeKey } from '../runtime/router.js';
-import { setAppliedRouteKey } from '../runtime/router-controller.js';
 
 const EMPTY_IDLE = '「キャラ一覧」から選択してください。';
 
@@ -38,21 +35,9 @@ export function applyKindTabs(rosterKind) {
   }
   const save = getById('saveDecodedPack');
   if (save) save.textContent = charOnly ? 'デコード結果を保存（画像+ボイス）…' : 'デコード結果を保存（画像）…';
-  switchTab(charOnly ? 'image' : 'story');
 }
 
-export function syncDetailHash(section, epId) {
-  if (!playerState.cur) return;
-  const kind = playerState.rosterKind || 'character';
-  const id = String(playerState.cur.folderKey || '');
-  if (!id) return;
-  const next = routeHash(kind, id, section, epId);
-  setAppliedRouteKey(routeKey({ rosterKind: kind, id, section, epId }));
-  if (location.hash === next) return;
-  try {
-    history.replaceState(null, '', next);
-  } catch (e) {}
-}
+export const defaultSection = (rosterKind) => (rosterKind === 'character' ? 'image' : 'story');
 
 export function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
@@ -61,7 +46,6 @@ export function switchTab(name) {
   audioScene.set({ storyVisible: name === 'story' });
   dispatchPanels('onTabSwitched', name);
   if (name === 'story') refreshSharedNotice();
-  syncDetailHash(name === 'story' ? 'story' : null, null);
 }
 
 export function updateCdnReset() {

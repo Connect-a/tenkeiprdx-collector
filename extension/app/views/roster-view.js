@@ -6,8 +6,6 @@ import { renderRoster } from './roster-ui.js';
 import { showEmptyIdle } from './shell-ui.js';
 import { audioScene } from '../runtime/audio-scene.js';
 
-let pendingTarget = null;
-
 function syncRosterTypeButtons() {
   const wrap = getById('rosterType');
   if (wrap) wrap.querySelectorAll('.rf').forEach((x) => x.classList.toggle('active', x.dataset.rosterType === playerState.rosterKind));
@@ -17,15 +15,10 @@ function syncRosterTypeButtons() {
 
 const targetPanel = () => (playerState.rosterKind === 'home' ? getHomePanel() : playerState.rosterKind === 'other' ? getOtherPanel() : playerState.rosterKind === 'monster' ? getMonsterPanel() : null);
 
-function focusTarget(panel, target) {
+export function focusTarget(panel, target) {
   if (!panel || !target) return;
   if (panel.openTarget) panel.openTarget(target);
   else if (panel.scrollToSection) panel.scrollToSection(target);
-}
-
-export function applyPendingTarget(panel) {
-  focusTarget(panel, pendingTarget);
-  pendingTarget = null;
 }
 
 export function openRoster(rosterKind, target) {
@@ -44,8 +37,7 @@ export function openRoster(rosterKind, target) {
     focusTarget(targetPanel(), target);
     return;
   }
-  pendingTarget = target || null;
-  renderRoster();
+  renderRoster({ target: target || null });
 }
 
 export function closeRoster() {

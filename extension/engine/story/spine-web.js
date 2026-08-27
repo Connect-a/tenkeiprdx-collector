@@ -79,8 +79,28 @@ const runtimeReady = () => {
   return !!(s && s.SpinePlayer);
 };
 
+let _deformPatched = false;
+// HACK: spine 3.8 の deform 残留バグ回避（不一致長の deform を破棄）
+const patchStaleDeformOnce = () => {
+  if (_deformPatched) return;
+  const s = lib();
+  const proto = s && s.VertexAttachment && s.VertexAttachment.prototype;
+  if (!proto || !proto.computeWorldVertices) return;
+  _deformPatched = true;
+  const orig = proto.computeWorldVertices;
+  proto.computeWorldVertices = function (slot, start, count, worldVertices, offset, stride) {
+    const d = slot && slot.deform;
+    if (d && d.length && this.vertices) {
+      const exp = this.bones ? (this.vertices.length / 3) * 2 : this.vertices.length;
+      if (d.length !== exp) d.length = 0;
+    }
+    return orig.call(this, slot, start, count, worldVertices, offset, stride);
+  };
+};
+
 const buildPlayable = (host, input, opts) => {
   if (!runtimeReady()) throw new Error('spineWeb-runtime-not-ready');
+  patchStaleDeformOnce();
   if (!host) throw new Error('host-missing');
   const o = opts || {};
   let atlasBytes = input.atlasBytes;
@@ -181,4 +201,4 @@ const gateByVisibility = (player, host) => {
   };
 };
 
-export const spineWeb = { lib, runtimeReady, buildPlayable, startDefaultIdle, maybeScaleAtlas, makeRawGLTexture, detectSkeletonIsJson };
+export const spineWeb = { lib, runtimeReady, buildPlayable, startDefaultIdle, maybeScaleAtlas, makeRawGLTexture, detectSkeletonIsJson, patchStaleDeformOnce };

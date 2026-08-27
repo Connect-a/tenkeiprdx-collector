@@ -100,6 +100,12 @@
   min-width: 0;
   min-height: 0;
 }
+.vw-step {
+  flex: none;
+  width: 26px;
+  padding: 2px 0;
+  text-align: center;
+}
 .vw-fieldbar {
   display: flex;
   align-items: center;
@@ -210,7 +216,7 @@
   border: 1px solid #3a4152;
   border-radius: 6px;
   padding: 6px 10px;
-  width: 420px;
+  width: 360px;
   max-width: 100%;
   background: #1c2029;
 }
@@ -280,6 +286,9 @@
 .vw-radio input {
   margin: 0;
 }
+.vw-ctlbox {
+  margin-left: 10px;
+}
 .vw-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -294,8 +303,8 @@
 .vw-ctl-lbl {
   font-size: 11px;
   color: #9aa4b6;
-  width: 52px;
   flex: none;
+  white-space: nowrap;
 }
 .vw-ctl select {
   flex: 1;
@@ -368,4 +377,7 @@
   background: #3d4a63;
   color: #fff;
   border-color: #5a6d90;
+}
+.rgsel option:disabled {
+  color: #6b7382;
 }

@@ -1,11 +1,13 @@
 import { ensureIndexes } from './index-store.js';
 import { apiTypeForKind } from './character-meta.js';
 import { AFFILIATION_NAMES, RARITY_NAMES } from '../core/constants.js';
+import { CHARACTER_CV } from './character-cv.js';
 
+const CV_UNKNOWN = '【不明】';
 const groupName = (d) => AFFILIATION_NAMES[d && d.groupId] || '';
 const rankName = (d) => RARITY_NAMES[d && d.rankId] || '';
 
-const episodeRef = (e) => ({ episodeId: e.episodeId, order: e.order, label: e.label, title: e.title, xpos: e.xpos || 0, thumb: e.thumb || null, sceneBinIds: e.sceneBinIds });
+const episodeRef = (e) => ({ episodeId: e.episodeId, order: e.order, label: e.label, title: e.title, xpos: e.xpos || 0, thumb: e.thumb || null, sceneBinIds: e.sceneBinIds, linkTo: e.linkTo });
 
 function buildFolderMeta(x) {
   const folderMeta = {};
@@ -65,5 +67,6 @@ export async function characterDetail(charId) {
   const c = (await ensureIndexes()).master.characters[String(charId)];
   if (!c) return null;
   const { episodes, ...d } = c;
-  return { group: groupName(c), rank: rankName(c), ...d };
+  const cv = CHARACTER_CV[String(c.name || '').replace(/\(.*\)$/, '')] || CV_UNKNOWN;
+  return { group: groupName(c), rank: rankName(c), cv, ...d };
 }

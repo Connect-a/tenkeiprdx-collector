@@ -1,4 +1,4 @@
-import { DIRS } from '../../core/constants.js';
+import { DIRS, DL_CONC } from '../../core/constants.js';
 import { PLACE } from '../../core/placement.js';
 import { ensureIndexes } from '../index-store.js';
 import { monsterStatus, other3dStatus } from '../entity-lists.js';
@@ -201,6 +201,7 @@ async function runBattleFieldDownload(progress, opts) {
     progress,
     shouldAbort: opts && opts.shouldAbort,
     toRel: (rel) => rel,
+    conc: DL_CONC.large,
     tick: (c, phase) => (phase === 'dl' ? `DL中 ${c.done}/${c.total}（1件あたり10〜30MBあります）` : null),
     done: doneWithSkip,
   });

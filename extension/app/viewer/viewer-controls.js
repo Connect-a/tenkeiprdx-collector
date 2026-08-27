@@ -11,10 +11,17 @@ const KEEP = ['', '-'];
 
 function selectRow(label, options, value, onChange, title) {
   const sel = el('select', { class: 'rgsel', title: title || '' });
-  for (const [v, t] of options) sel.appendChild(el('option', { value: String(v), text: String(t) }));
+  for (const [v, t, off] of options) {
+    const o = el('option', { value: String(v), text: String(t) });
+    if (off) {
+      o.disabled = true;
+      o.title = 'このキャラはこのモーションを持っていません';
+    }
+    sel.appendChild(o);
+  }
   sel.value = String(value == null ? '' : value);
   sel.addEventListener('change', () => onChange(sel.value));
-  return el('label', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), sel]);
+  return { row: el('label', 'vw-ctl', [el('span', 'vw-ctl-lbl', label), sel]), sel };
 }
 
 function radioRow(label, name, options, value, onChange) {
@@ -39,6 +46,7 @@ function slider(label, min, max, step, value, onInput) {
 export function createControls(hostEl, deps) {
   const { state, stage, nameOf } = deps;
   const ranges = new Map();
+  const picks = new Map();
 
   function card(c) {
     const st = stage();
@@ -64,26 +72,71 @@ export function createControls(hostEl, deps) {
     });
 
     const motion = el('div', 'vw-row');
-    if (ui.motions.length) motion.appendChild(selectRow(ui.motionLabel || 'モーション', ui.motions, c.motion || ui.motions[0][0], (v) => apply({ motion: v })));
-    motion.appendChild(selectRow('速度', SPEEDS, c.speed, (v) => apply({ speed: Number(v) })));
+    const sels = new Map();
+    if (ui.motions.length) {
+      const r = selectRow(ui.motionLabel || 'モーション', ui.motions, c.motion || ui.motions[0][0], (v) => apply({ motion: v }));
+      sels.set('motion', r.sel);
+      motion.appendChild(r.row);
+    }
+    motion.appendChild(selectRow('速度', SPEEDS, c.speed, (v) => apply({ speed: Number(v) })).row);
     motion.appendChild(pause);
     body.appendChild(motion);
 
-    if (ui.shadow) body.appendChild(radioRow('影', 'vwshadow-' + c.id, ui.shadow, c.shadow, (v) => apply({ shadow: v })));
+    if (ui.shadow) {
+      const shadowRow = radioRow('影', 'vwshadow-' + c.id, ui.shadow, c.shadow, (v) => apply({ shadow: v }));
+      if (ui.control) {
+        const cb = el('input', { type: 'checkbox' });
+        cb.checked = !!c.control;
+        cb.addEventListener('change', () => {
+          if (cb.checked) for (const o of state.scene.chars) if (String(o.id) !== String(c.id) && o.control) state.update(o.id, { control: false });
+          apply({ control: cb.checked });
+          rebuild();
+        });
+        shadowRow.appendChild(el('label', { class: 'vw-radio vw-ctlbox', title: 'WASDで移動、スペースで攻撃、1〜9でモーション再生。ONにできるのは1人まで。' }, [cb, el('span', '', 'コントロール')]));
+      }
+      body.appendChild(shadowRow);
+    }
 
     const row = el('div', 'vw-row');
     for (const s of ui.selects) {
       const options = s.keep ? [KEEP, ...s.options] : s.options;
       const cur = c[s.key] == null ? '' : c[s.key];
-      row.appendChild(
-        selectRow(
-          s.label,
-          options,
-          cur || (s.keep ? '' : options[0][0]),
-          (v) => apply({ [s.key]: v === '' ? null : s.cast === 'number' ? Number(v) : v }),
-          s.keep ? '「-」はモーション側の指定に任せます' : '',
-        ),
+      const r = selectRow(
+        s.label,
+        options,
+        cur || (s.keep ? '' : options[0][0]),
+        (v) => apply({ [s.key]: v === '' ? null : s.cast === 'number' ? Number(v) : v }),
+        s.keep ? '「-」はモーション側の指定に任せます' : '',
       );
+      sels.set(s.key, r.sel);
+      row.appendChild(r.row);
+    }
+    const resettable = ui.selects.filter((s) => s.keep);
+    if (resettable.length) {
+      const paint = (patch) => {
+        apply(patch);
+        for (const s of resettable) {
+          const sel = sels.get(s.key);
+          if (sel) sel.value = patch[s.key] == null ? '' : String(patch[s.key]);
+        }
+      };
+      const shuffle = el('button', { class: 'vw-step btn xs', text: '🎲', title: 'ランダム表情' });
+      shuffle.addEventListener('click', () => {
+        const patch = {};
+        for (const s of resettable) {
+          const v = s.options[Math.floor(Math.random() * s.options.length)][0];
+          patch[s.key] = s.cast === 'number' ? Number(v) : v;
+        }
+        paint(patch);
+      });
+      const reset = el('button', { class: 'vw-step btn xs', text: '⟲', title: '目・眉・口をすべて未選択に戻します' });
+      reset.addEventListener('click', () => {
+        const patch = {};
+        for (const s of resettable) patch[s.key] = null;
+        paint(patch);
+      });
+      row.appendChild(shuffle);
+      row.appendChild(reset);
     }
     if (row.childNodes.length) body.appendChild(row);
 
@@ -95,6 +148,7 @@ export function createControls(hostEl, deps) {
       pos.appendChild(s.row);
     }
     ranges.set(String(c.id), inputs);
+    picks.set(String(c.id), sels);
     if (ui.sliders.length) body.appendChild(pos);
 
     off.addEventListener('click', () => {
@@ -109,6 +163,7 @@ export function createControls(hostEl, deps) {
   function rebuild() {
     hostEl.textContent = '';
     ranges.clear();
+    picks.clear();
     const list = state.scene.chars;
     if (!list.length) {
       hostEl.appendChild(el('div', 'note dim', '左の一覧から選ぶと、ここに個別の操作が出ます。'));
@@ -118,10 +173,12 @@ export function createControls(hostEl, deps) {
   }
 
   function refresh(id) {
-    const inputs = ranges.get(String(id));
     const c = state.get(id);
-    if (!inputs || !c) return;
-    for (const [key, input] of inputs) if (c[key] != null) input.value = String(c[key]);
+    if (!c) return;
+    const inputs = ranges.get(String(id));
+    if (inputs) for (const [key, input] of inputs) if (c[key] != null) input.value = String(c[key]);
+    const sels = picks.get(String(id));
+    if (sels) for (const [key, sel] of sels) sel.value = c[key] == null ? '' : String(c[key]);
   }
 
   return { rebuild, refresh };

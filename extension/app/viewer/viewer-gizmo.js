@@ -95,13 +95,17 @@ export function createGizmo(scene) {
     }
   };
 
-  return {
+  const api = {
     root,
     get active() {
       return !!drag;
     },
     attach(inst) {
       root.visible = true;
+      api.sync(inst);
+    },
+    sync(inst) {
+      if (!root.visible || !inst || drag) return;
       inst.root.updateMatrixWorld(true);
       if (inst.center) root.position.copy(inst.center).applyMatrix4(inst.root.matrixWorld);
       else root.position.copy(inst.root.position);
@@ -180,4 +184,5 @@ export function createGizmo(scene) {
       });
     },
   };
+  return api;
 }

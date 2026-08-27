@@ -1,4 +1,4 @@
-import { OTHER_EPISODE_SUBTYPE } from '../core/constants.js';
+import { OTHER_EPISODE_SUBTYPE, R18_ALT_EPISODES, R18_ALT_OWNER } from '../core/constants.js';
 import { utilHelpers } from '../core/util.js';
 import { toRel, APP_DIR, APP_PREFIX, bundleName } from '../core/paths.js';
 const num = utilHelpers.num;
@@ -399,7 +399,26 @@ function buildQuestIndex(acc, binIdsOf) {
       };
     }
   }
+  for (const q of Object.values(questIndex)) insertR18Links(q, binIdsOf);
   return questIndex;
+}
+
+function insertR18Links(q, binIdsOf) {
+  for (const alt of R18_ALT_EPISODES) {
+    const i = q.episodes.findIndex((e) => String(e.episodeId) === alt.after);
+    if (i < 0) continue;
+    const src = q.episodes[i];
+    q.episodes.splice(i + 1, 0, {
+      episodeId: alt.id,
+      order: src.order,
+      chapter: src.chapter,
+      chapterId: src.chapterId,
+      label: alt.label,
+      title: src.title,
+      sceneBinIds: binIdsOf(Number(alt.id)),
+      linkTo: { folderKey: R18_ALT_OWNER, episodeId: alt.id },
+    });
+  }
 }
 
 function referencedSceneIds(acc) {
@@ -415,6 +434,7 @@ function buildOtherIndex(acc, binIdsOf) {
   const episodes = [];
   for (const [sid, sc] of Object.entries(acc.sceneMeta)) {
     if (used.has(String(sid))) continue;
+    if (R18_ALT_EPISODES.some((a) => a.id === String(sid))) continue;
     noteSceneOwner(acc, sid, 'special_other');
     episodes.push({
       paidMasterId: null,
@@ -647,6 +667,7 @@ const SHARED_KEEP = [
   (r) => /^exchangeassets_assets_exchangeassets\//.test(r),
   (r) => /^loginbonus_assets_loginbonus\//.test(r),
   (r) => /^systemvoice_assets_/.test(r),
+  (r) => /^scenes_scenes_endcredits_/.test(r),
 ];
 
 const CAT_PREFIX = /^([a-z0-9()]+_assets_[a-z0-9()]+)\//;
@@ -660,7 +681,8 @@ const WORLDMAP_RE = /^worldmapassets_assets_assets\/.*\/worldmap_\d+_[a-z0-9]+\.
 const MINIGAME_RE = /^minigames_(?:assets|scenes)_/i;
 const GACHA_BG_RE = /^backgrounds_assets_backgrounds\/bg_gacha_\d+_[0-9a-f]{16,}\.bundle$/i;
 const GACHA_ANY_RE = /gacha/i;
-const BATTLEFIELD_RE = /^(?:battlefieldsassets_scenes_battlefields|obstacleassets_assets_obstacles)\//i;
+const BATTLEFIELD_RE =
+  /^(?:(?:battlefieldsassets_scenes_battlefields|obstacleassets_assets_obstacles)\/|materialsbundles_assets_assets\/3dmodels\/battlefieldsmodels\/|materialsbundles_assets_mouth_material_preset_)/i;
 
 const SCENE_ASSET_RULES = [
   [/^backgrounds_assets_backgrounds\/(.+)_[0-9a-f]{32}\.bundle$/, (n) => n],

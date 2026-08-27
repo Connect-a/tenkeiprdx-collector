@@ -70,6 +70,7 @@ function create(canvas, opts) {
   const spineRT = SP(),
     wgl = GL();
   if (!spineRT || !wgl || !wgl.SceneRenderer) throw new Error('spineWeb-webgl runtime unavailable');
+  if (spineWeb.patchStaleDeformOnce) spineWeb.patchStaleDeformOnce();
   const o = opts || {};
   const ctx = new wgl.ManagedWebGLRenderingContext(canvas, { alpha: true, premultipliedAlpha: true, antialias: true });
   const gl = ctx.gl;

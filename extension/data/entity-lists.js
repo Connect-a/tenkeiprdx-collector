@@ -3,6 +3,7 @@ import { assetStore } from './asset-store.js';
 import { PLACE, subFor } from '../core/placement.js';
 import { bundleName } from '../core/paths.js';
 import { staticsList } from './statics.js';
+import { TITLE_AA_CACHE, LOGO_AA_CACHE, TITLE_SPRITE_NAMES, LOGO_SPRITE_NAMES } from './credits-assets.js';
 import { gachaFileList } from './gacha.js';
 import { buildIndexes as BUILD_MOD } from './build-indexes.js';
 import { localInventory } from './inventory.js';
@@ -482,7 +483,24 @@ export async function other2dList() {
     iconIds: [],
     file: s.path,
   }));
-  return [...out.sort(byIdAsc), ...builtinEntries(x), ...uiPanelEntries(x), ...worldMapEntries(x), ...missionEntries(x), ...statics, ...(await gachaEntries(x))];
+  const aaLogo = (id, name, file, spriteNames) => ({
+    id,
+    name,
+    note: '',
+    source: 'titlelogo',
+    spine: null,
+    spinelight: null,
+    icon: null,
+    refs: [],
+    ids: [],
+    spineIds: [],
+    iconIds: [],
+    file,
+    spriteNames,
+  });
+  const titleLogo = aaLogo('titlelogo', 'タイトルロゴ', TITLE_AA_CACHE, TITLE_SPRITE_NAMES);
+  const gameLogo = aaLogo('logosprites', 'ロゴ（ゲーム／DMM／FANZA）', LOGO_AA_CACHE, LOGO_SPRITE_NAMES);
+  return [...out.sort(byIdAsc), ...builtinEntries(x), ...uiPanelEntries(x), ...worldMapEntries(x), ...missionEntries(x), ...statics, titleLogo, gameLogo, ...(await gachaEntries(x))];
 }
 
 function other3dCoreRefs(entry) {

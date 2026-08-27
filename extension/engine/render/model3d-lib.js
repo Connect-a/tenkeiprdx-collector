@@ -73,7 +73,10 @@ function remapMouthUV(baseUv, vMin, vMax, col, row) {
   return out;
 }
 
-function makeDataTexture(tex, { linear, forceOpaque } = {}) {
+// 実ゲームはガンマ色空間。生値で受けて最後に tpToLinear で戻す（設計資料_viewer.md）。
+const TP_TO_LINEAR = 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
+
+function makeDataTexture(tex, { forceOpaque } = {}) {
   let rgba = tex.rgba;
   if (forceOpaque) {
     rgba = rgba.slice();
@@ -87,7 +90,7 @@ function makeDataTexture(tex, { linear, forceOpaque } = {}) {
   dt.magFilter = THREE_NS.LinearFilter;
   dt.minFilter = THREE_NS.LinearMipmapLinearFilter;
   dt.generateMipmaps = true;
-  dt.colorSpace = linear ? THREE_NS.LinearSRGBColorSpace || THREE_NS.NoColorSpace || 'srgb-linear' : THREE_NS.SRGBColorSpace || 'srgb';
+  dt.colorSpace = THREE_NS.LinearSRGBColorSpace || THREE_NS.NoColorSpace || 'srgb-linear';
   return dt;
 }
 
@@ -121,7 +124,12 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   if ('colorSpace' in rt.texture) rt.texture.colorSpace = THREE_NS.LinearSRGBColorSpace || 'srgb-linear';
   // soft-particle(靄/メテオ)用のシーン深度プリパス。不透明(キャラ)のみを描いて深度テクスチャに焼き、
   // オーラの _CameraDepthTexture に供給する(実ゲーム同様に地面/キャラ際でフェード)。
-  const depthRT = new THREE_NS.WebGLRenderTarget(size.x, size.y, { minFilter: THREE_NS.NearestFilter, magFilter: THREE_NS.NearestFilter, format: THREE_NS.RGBAFormat, type: THREE_NS.UnsignedByteType });
+  const depthRT = new THREE_NS.WebGLRenderTarget(size.x, size.y, {
+    minFilter: THREE_NS.NearestFilter,
+    magFilter: THREE_NS.NearestFilter,
+    format: THREE_NS.RGBAFormat,
+    type: THREE_NS.UnsignedByteType,
+  });
   depthRT.depthTexture = new THREE_NS.DepthTexture(size.x, size.y);
   depthRT.depthTexture.type = THREE_NS.UnsignedIntType != null ? THREE_NS.UnsignedIntType : THREE_NS.UnsignedShortType;
   // 床面(不可視・深度のみ)。ゲームのステージ床の代わりに置き、床から立ち上る soft-particle オーラ
@@ -139,16 +147,20 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   const bloomScatter = G.bloomScatter != null ? G.bloomScatter : 0.7;
   const BLOOM_MIPS = 6;
   const bloomOpt = { minFilter: THREE_NS.LinearFilter, magFilter: THREE_NS.LinearFilter, format: THREE_NS.RGBAFormat, type: rtType, depthBuffer: false };
-  let downMips = [], upMips = [];
+  let downMips = [],
+    upMips = [];
   const allocMips = (w, h) => {
     for (const m of downMips) m.dispose();
     for (const m of upMips) m.dispose();
-    downMips = []; upMips = [];
-    let mw = Math.max(1, w >> 1), mh = Math.max(1, h >> 1);
+    downMips = [];
+    upMips = [];
+    let mw = Math.max(1, w >> 1),
+      mh = Math.max(1, h >> 1);
     for (let i = 0; i < BLOOM_MIPS && mw > 2 && mh > 2; i++) {
       downMips.push(new THREE_NS.WebGLRenderTarget(mw, mh, bloomOpt));
       upMips.push(new THREE_NS.WebGLRenderTarget(mw, mh, bloomOpt));
-      mw = Math.max(1, mw >> 1); mh = Math.max(1, mh >> 1);
+      mw = Math.max(1, mw >> 1);
+      mh = Math.max(1, mh >> 1);
     }
   };
   allocMips(size.x, size.y);
@@ -159,13 +171,19 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   fxScene.add(fxQuad);
   const prefiltMat = new THREE_NS.ShaderMaterial({
     uniforms: { t: { value: null }, threshold: { value: G.bloomThreshold != null ? G.bloomThreshold : 0.9 } },
-    depthTest: false, depthWrite: false, vertexShader: FS_V,
-    fragmentShader: 'precision highp float; varying vec2 vUv; uniform sampler2D t; uniform float threshold; void main(){ vec3 c=texture2D(t,vUv).rgb; float br=max(c.r,max(c.g,c.b)); float k=threshold*0.5; float soft=clamp(br-threshold+k,0.0,2.0*k); soft=soft*soft/(4.0*k+1e-4); float w=max(soft,br-threshold)/max(br,1e-4); gl_FragColor=vec4(c*w,1.0); }',
+    depthTest: false,
+    depthWrite: false,
+    vertexShader: FS_V,
+    fragmentShader:
+      'precision highp float; varying vec2 vUv; uniform sampler2D t; uniform float threshold; void main(){ vec3 c=texture2D(t,vUv).rgb; float br=max(c.r,max(c.g,c.b)); float k=threshold*0.5; float soft=clamp(br-threshold+k,0.0,2.0*k); soft=soft*soft/(4.0*k+1e-4); float w=max(soft,br-threshold)/max(br,1e-4); gl_FragColor=vec4(c*w,1.0); }',
   });
   const downMat = new THREE_NS.ShaderMaterial({
     uniforms: { t: { value: null }, texel: { value: new THREE_NS.Vector2() } },
-    depthTest: false, depthWrite: false, vertexShader: FS_V,
-    fragmentShader: 'precision highp float; varying vec2 vUv; uniform sampler2D t; uniform vec2 texel;\n' +
+    depthTest: false,
+    depthWrite: false,
+    vertexShader: FS_V,
+    fragmentShader:
+      'precision highp float; varying vec2 vUv; uniform sampler2D t; uniform vec2 texel;\n' +
       'void main(){ vec2 e=texel;\n' +
       ' vec3 a=texture2D(t,vUv+e*vec2(-2.,2.)).rgb, b=texture2D(t,vUv+e*vec2(0.,2.)).rgb, c=texture2D(t,vUv+e*vec2(2.,2.)).rgb;\n' +
       ' vec3 d=texture2D(t,vUv+e*vec2(-2.,0.)).rgb, ee=texture2D(t,vUv).rgb, f=texture2D(t,vUv+e*vec2(2.,0.)).rgb;\n' +
@@ -176,8 +194,11 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   });
   const upMat = new THREE_NS.ShaderMaterial({
     uniforms: { uHigh: { value: null }, uLow: { value: null }, texel: { value: new THREE_NS.Vector2() }, scatter: { value: bloomScatter } },
-    depthTest: false, depthWrite: false, vertexShader: FS_V,
-    fragmentShader: 'precision highp float; varying vec2 vUv; uniform sampler2D uHigh,uLow; uniform vec2 texel; uniform float scatter;\n' +
+    depthTest: false,
+    depthWrite: false,
+    vertexShader: FS_V,
+    fragmentShader:
+      'precision highp float; varying vec2 vUv; uniform sampler2D uHigh,uLow; uniform vec2 texel; uniform float scatter;\n' +
       'void main(){ vec2 e=texel;\n' +
       ' vec3 lo=texture2D(uLow,vUv).rgb*4.0;\n' +
       ' lo+=(texture2D(uLow,vUv+vec2(-e.x,0.)).rgb+texture2D(uLow,vUv+vec2(e.x,0.)).rgb+texture2D(uLow,vUv+vec2(0.,-e.y)).rgb+texture2D(uLow,vUv+vec2(0.,e.y)).rgb)*2.0;\n' +
@@ -187,7 +208,10 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
       ' gl_FragColor=vec4(mix(hi,lo,scatter),1.0); }',
   });
   const copyMat = new THREE_NS.ShaderMaterial({
-    uniforms: { t: { value: null } }, depthTest: false, depthWrite: false, vertexShader: FS_V,
+    uniforms: { t: { value: null } },
+    depthTest: false,
+    depthWrite: false,
+    vertexShader: FS_V,
     fragmentShader: 'precision highp float; varying vec2 vUv; uniform sampler2D t; void main(){ gl_FragColor=vec4(texture2D(t,vUv).rgb,1.0); }',
   });
   let bgScene = null,
@@ -230,8 +254,10 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
       'precision highp float; varying vec2 vUv; uniform sampler2D tDiffuse, uBloom;',
       'uniform vec3 uVigColor; uniform vec2 uVigParams, uScreenScale; uniform float uVigRoundness, uContrast, uBloomIntensity;',
       'vec3 l2s(vec3 c){ c=clamp(c,0.0,1.0); return mix(1.055*pow(c,vec3(1.0/2.4))-0.055, c*12.92, step(c,vec3(0.0031308))); }',
-      'vec3 lin2logc(vec3 x){ return 0.244161*(log2(5.555556*max(x,0.0)+0.047996)/log2(10.0))+0.386036; }',
-      'vec3 logc2lin(vec3 x){ return (pow(vec3(10.0),(x-0.386036)/0.244161)-0.047996)/5.555556; }',
+      // 実ゲームは HDR グレーディング＝ACEScc 空間。LutBuilderHdr の実GLSL に (log2(x)+9.72)*0.0570776239
+      // （0.0570776239 = 1/17.52）と閾値 2^-15、戻しに x*17.52-9.72 の exp2 がそのまま出ている。
+      'vec3 lin2acescc(vec3 x){ x=max(x,vec3(0.0)); vec3 s=(log2(exp2(-16.0)+x*0.5)+9.72)*0.0570776239; vec3 b=(log2(max(x,vec3(1e-10)))+9.72)*0.0570776239; return mix(b,s,step(x,vec3(3.05175781e-05))); }',
+      'vec3 acescc2lin(vec3 x){ vec3 lo=(exp2(x*17.52-9.72)-exp2(-16.0))*2.0; vec3 hi=exp2(x*17.52-9.72); return min(mix(hi,lo,step(x,vec3(-0.301369876))), vec3(65504.0)); }',
       'void main(){',
       '  vec4 src=texture2D(tDiffuse,vUv);',
       // bloom OFF(intensity=0)時は bloom を一切足さない。mipチェーンが HalfFloat で Inf/NaN 化していると
@@ -243,9 +269,9 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
       '  d.x *= uVigRoundness;',
       '  float vf = pow(max(1.0 - dot(d,d), 0.0), uVigParams.y);',
       '  c *= mix(uVigColor, vec3(1.0), vf);',
-      '  vec3 lg = lin2logc(c);',
-      '  lg = (lg - 0.4135884) * uContrast + 0.4135884;',
-      '  c = max(logc2lin(lg), vec3(0.0));',
+      '  vec3 lg = lin2acescc(c);',
+      '  lg = (lg - 0.413588405) * uContrast + 0.413588405;',
+      '  c = max(acescc2lin(lg), vec3(0.0));',
       '  gl_FragColor=vec4(l2s(c), src.a);',
       '}',
     ].join('\n'),
@@ -270,9 +296,18 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   return {
     uniforms,
     bloomDefaultOn: !!G.bloomDefaultOn,
-    setBloom(on) { uniforms.uBloomIntensity.value = on ? bloomOnValue : 0; },
+    setBloom(on) {
+      uniforms.uBloomIntensity.value = on ? bloomOnValue : 0;
+    },
     // 床から立ち上る soft-particle オーラ用に、深度プリパスへ足元床面を有効化(y=足元)。
-    setFloorY(y) { if (y == null || !isFinite(y)) { floorEnabled = false; return; } floorMesh.position.y = y; floorEnabled = true; },
+    setFloorY(y) {
+      if (y == null || !isFinite(y)) {
+        floorEnabled = false;
+        return;
+      }
+      floorMesh.position.y = y;
+      floorEnabled = true;
+    },
     render(scene, camera, depthExclude, onDepth) {
       const s = renderer.getDrawingBufferSize(new THREE_NS.Vector2());
       if (s.x !== curW || s.y !== curH) {
@@ -291,7 +326,12 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
         renderer.setClearColor(0x000000, 1);
         renderer.clear(true, true, false);
         renderer.render(scene, camera);
-        if (floorEnabled) { const pa = renderer.autoClear; renderer.autoClear = false; renderer.render(floorScene, camera); renderer.autoClear = pa; } // 床の深度を追記(色/深度はクリアしない)
+        if (floorEnabled) {
+          const pa = renderer.autoClear;
+          renderer.autoClear = false;
+          renderer.render(floorScene, camera);
+          renderer.autoClear = pa;
+        } // 床の深度を追記(色/深度はクリアしない)
         if (depthExclude) depthExclude.visible = true;
         onDepth(depthRT.depthTexture);
       }
@@ -303,7 +343,12 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
       if (bgScene && bgTexture.image) renderer.render(bgScene, quadCam);
       renderer.render(scene, camera);
       renderer.autoClear = prevAuto;
-      const drawFx = (rtOut, m) => { fxQuad.material = m; renderer.setRenderTarget(rtOut); renderer.clear(); renderer.render(fxScene, quadCam); };
+      const drawFx = (rtOut, m) => {
+        fxQuad.material = m;
+        renderer.setRenderTarget(rtOut);
+        renderer.clear();
+        renderer.render(fxScene, quadCam);
+      };
       if (downMips.length && uniforms.uBloomIntensity.value > 0) {
         prefiltMat.uniforms.t.value = rt.texture;
         drawFx(downMips[0], prefiltMat);
@@ -398,6 +443,7 @@ export const model3dLib = {
   MOUTH_EXPRESSIONS,
   remapMouthUV,
   makeDataTexture,
+  TP_TO_LINEAR,
   buildPostPass,
   buildThreeSkeleton,
   mat4FromBindpose,

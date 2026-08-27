@@ -169,6 +169,17 @@ async function saveStream(dirHandle, subpath, body) {
   }
   return subpath;
 }
+async function purgeEmptyIn(dirHandle, subdirs) {
+  let n = 0;
+  for (const sub of subdirs || []) {
+    try {
+      const d = await descend(dirHandle, String(sub).split('/').filter(Boolean), false);
+      n += await purgeEmpty(d, 6);
+    } catch (e) {}
+  }
+  return n;
+}
+
 async function purgeEmpty(dirHandle, depth) {
   const lv = depth || 0;
   if (!dirHandle || lv > 6) return 0;
@@ -410,6 +421,7 @@ export const fileStore = {
   getDir,
   saveStream,
   purgeEmpty,
+  purgeEmptyIn,
   writeUnder,
   removeUnder,
   readUnder,
