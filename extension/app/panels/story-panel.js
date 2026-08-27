@@ -1,8 +1,14 @@
 import { settings } from '../../core/settings.js';
-import { DEFAULT_PLAYER_NAME } from '../../core/constants.js';
+import { DEFAULT_PLAYER_NAME, DIRS } from '../../core/constants.js';
 import { el, filterBox } from '../../core/dom.js';
 import { applyVisFilter, syncPartsBtn } from '../../core/vis-panel.js';
 import { episodeIdOf } from '../../data/character-meta.js';
+import { playEndCredits, END_CREDIT_EPISODE_ID } from '../../engine/story/end-credits.js';
+import { ensureIndexes } from '../../data/index-store.js';
+import { assetStore } from '../../data/asset-store.js';
+import { unityMesh } from '../../unity/mesh.js';
+import { folderHandle } from '../runtime/state-refresh.js';
+import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 
 let storyHud = null;
 let storyEngine = null;
@@ -369,6 +375,72 @@ export function createStoryPanel(deps) {
     if (opts && opts.wasAuto) hud.setAuto(true);
   }
 
+  let _creditsRunning = false;
+  let _creditsCancel = null;
+  let _creditsShownFor = null;
+  function cancelEndCredits() {
+    if (_creditsCancel) {
+      const fn = _creditsCancel;
+      _creditsCancel = null;
+      fn();
+    }
+    _creditsRunning = false;
+  }
+  async function resolveCreditsSprites() {
+    const out = { specialThanksCanvas: null, titleLogoCanvas: null };
+    try {
+      const idx = await ensureIndexes();
+      const sceneRel = (idx.assets.sharedIndex || []).find((r) => /^scenes_scenes_endcredits_/.test(r));
+      if (!sceneRel || !(await assetStore.hasAsset(DIRS.shared, sceneRel))) return out;
+      const bytes = await assetStore.readAsset(DIRS.shared, sceneRel);
+      if (!bytes) return out;
+      const texs = unityMesh.decodeNamedTextureCanvases(bytes) || [];
+      const pick = (re) => (texs.find((t) => re.test(t.name || '')) || {}).canvas || null;
+      out.specialThanksCanvas = pick(/special.?thanks/i);
+      out.titleLogoCanvas = pick(/title.?logo/i) || pick(/(^|_)logo(_|$)/i);
+    } catch (e) {}
+    return out;
+  }
+  async function maybePlayEndCredits() {
+    if (_creditsRunning || !curEp) return;
+    if (String(episodeIdOf(curEp)) !== String(END_CREDIT_EPISODE_ID)) return;
+    if (_creditsShownFor === String(episodeIdOf(curEp))) return; // 同一話の再生では一度だけ（再送りで再トリガしない）
+    const host = getById('stage');
+    if (!host) return;
+    _creditsRunning = true;
+    _creditsShownFor = String(episodeIdOf(curEp));
+    let bgmRel = null;
+    let sprites = { specialThanksCanvas: null, titleLogoCanvas: null };
+    try {
+      const idx = await ensureIndexes();
+      bgmRel = (idx.assets.sceneAssetIndex || {})['bgm_2059'] || null;
+    } catch (e) {}
+    sprites = await resolveCreditsSprites();
+    if (player) {
+      try {
+        player.stopBgm();
+      } catch (e) {}
+    }
+    playEndCredits({
+      host,
+      bgmRel,
+      userName: settings.get('playerName') || DEFAULT_PLAYER_NAME,
+      specialThanksCanvas: sprites.specialThanksCanvas,
+      titleLogoCanvas: sprites.titleLogoCanvas,
+      volume: () => masterVol() * (scenarioSettings ? scenarioSettings.volumeOf('bgm') : 1),
+      bgmEnabled: audioScene.storyAudible,
+      reportBgm: (v) => audioScene.report('credits', v),
+      gen: () => _creditsRunning,
+      register: (fn) => {
+        _creditsCancel = fn;
+      },
+      onDone: () => {
+        _creditsRunning = false;
+        _creditsCancel = null;
+      },
+    });
+  }
+
   const voiceMode = () => settings.get('voiceMode');
   const voiceOn = () => voiceMode() !== 'tts' && voiceMode() !== 'off';
   settings.subscribe((n) => {
@@ -427,6 +499,7 @@ export function createStoryPanel(deps) {
       onFrame: () => updateProg(),
       onEnd: () => {
         if (hud && hud.reachEnd) hud.reachEnd();
+        maybePlayEndCredits();
       },
       onChoice: (pc) => {
         if (hud && hud.showChoices) hud.showChoices(pc);
@@ -450,8 +523,28 @@ export function createStoryPanel(deps) {
     box.querySelectorAll('.eprow').forEach((r) => r.classList.toggle('sel', r.dataset.epid === id));
   }
 
+  const _altMeta = new Map();
+  async function resolveSource(ep) {
+    const own = { handle: playerState.cur.handle, meta: playerState.cur.meta, ep };
+    if (!ep.linkTo) return own;
+    const { folderKey, episodeId } = ep.linkTo;
+    const handle = folderHandle(folderKey);
+    if (!handle) return null;
+    let meta = _altMeta.get(folderKey);
+    if (!meta) {
+      try {
+        meta = await assetAcquirer.charMetaFull(folderKey);
+      } catch (e) {}
+      if (meta) _altMeta.set(folderKey, meta);
+    }
+    const target = meta && (meta.episodes || []).find((e) => String(episodeIdOf(e)) === String(episodeId));
+    return target ? { handle, meta, ep: target } : null;
+  }
+
   async function playEpisode(ep, seekText) {
     if (!playerState.cur || !ep) return;
+    cancelEndCredits();
+    _creditsShownFor = null;
     const fk = playerState.cur.folderKey;
     if (fk !== _lastFolderKey) {
       _stillVisMem = {};
@@ -472,9 +565,17 @@ export function createStoryPanel(deps) {
     hud.stopAuto();
     hud.setReady(false);
     hud.fit();
+    const src = await resolveSource(ep);
+    if (!src) {
+      if (ctr) ctr.style.display = 'none';
+      showProg(false);
+      hud.setReady(true);
+      notify('R18版のデータが保存先にありません（その他エピソードから取得してください）', 'err');
+      return;
+    }
     let n = 0;
     try {
-      n = await p.open(playerState.cur.handle, playerState.cur.meta, ep, { seekText });
+      n = await p.open(src.handle, src.meta, src.ep, { seekText });
     } catch (e) {
       console.error('[tp] ストーリー描画に失敗', e);
     }
@@ -507,12 +608,14 @@ export function createStoryPanel(deps) {
   }
   function jumpFrac(frac) {
     if (!player || !player.count) return;
+    cancelEndCredits();
     const i = Math.round(Math.min(1, Math.max(0, frac)) * (player.count - 1));
     player.render(i);
   }
 
   function go(d) {
     if (!hud) return;
+    cancelEndCredits();
     if (d < 0) hud.back();
     else hud.advance();
   }

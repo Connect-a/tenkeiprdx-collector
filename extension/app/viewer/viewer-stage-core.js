@@ -50,12 +50,20 @@ export function createStageCore(hostEl, deps) {
     async addChar(id) {
       const key = String(id);
       if (items.has(key)) return;
-      items.set(key, { ok: false });
+      const token = { ok: false };
+      items.set(key, token);
       const entry = core.entryOf(key);
       core.busy(true, `${(entry && entry.displayName) || '#' + key} を読み込み中…`);
       try {
         const it = await impl.create(key, entry, state.get(key));
-        if (!it) return;
+        if (!it) {
+          if (items.get(key) === token) items.delete(key);
+          return;
+        }
+        if (items.get(key) !== token) {
+          impl.destroy(it);
+          return;
+        }
         it.ok = true;
         items.set(key, it);
         const c = state.get(key);

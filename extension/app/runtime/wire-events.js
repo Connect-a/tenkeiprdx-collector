@@ -5,10 +5,9 @@ import { setManualOrigin } from '../../data/origin.js';
 import { playerState } from './player-state.js';
 import { getById } from '../../core/dom.js';
 import { getStoryPanel } from './panel-state.js';
-import { parseRoute, isTargetRoute, routeHash, routeKey } from './router.js';
-import { switchTab, setStageMax, updateCdnReset } from '../views/shell-ui.js';
-import { ensureEpisodes } from '../views/detail-view.js';
-import { navTo, navChar, setAppliedRouteKey } from './router-controller.js';
+import { parseRoute, isTargetRoute } from './router.js';
+import { setStageMax, updateCdnReset } from '../views/shell-ui.js';
+import { navTo, navChar } from './router-controller.js';
 import { renderRoster } from '../views/roster-ui.js';
 import { runLineSearch } from '../views/line-search.js';
 import { openBulk, closeBulk, startBulk, stopBulk, renderBulkCard, renderBulkBanner, refreshBulkTarget } from '../views/bulk-ui.js';
@@ -40,8 +39,10 @@ const eachIn = (id, sel, fn) => getById(id).querySelectorAll(sel).forEach(fn);
 function bindNavigation() {
   document.querySelectorAll('.tab').forEach((t) =>
     t.addEventListener('click', () => {
-      switchTab(t.dataset.tab);
-      if (t.dataset.tab === 'story') ensureEpisodes();
+      const id = playerState.viewKey();
+      if (!id || t.classList.contains('active')) return;
+      const name = t.dataset.tab;
+      navTo(playerState.rosterKind || 'character', id, { section: name, epId: name === 'story' ? parseRoute().epId : null, replace: true });
     }),
   );
   const step = (d) => () => {
@@ -67,10 +68,7 @@ function bindNavigation() {
     if (sb) sb.scrollTo({ top: 0, behavior: 'smooth' });
     const r = parseRoute();
     if (!r.id || !isTargetRoute(r.rosterKind)) return;
-    try {
-      history.replaceState(null, '', routeHash(r.rosterKind, null));
-      setAppliedRouteKey(routeKey({ rosterKind: r.rosterKind }));
-    } catch (e) {}
+    navTo(r.rosterKind, null, { replace: true });
   });
 }
 

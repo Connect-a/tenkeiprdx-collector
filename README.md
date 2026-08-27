@@ -103,6 +103,10 @@ _マスタ/                   マスタデータ
 
 LZ4 / UnityFS / SerializedFile / Mesh / Avatar / AnimationClip の解析は本拡張の独自実装（外部依存なし）。
 
+### 既知のランタイム不具合と対処（Spine deform 残留）
+
+同梱の spine-player 3.8 は、あるアニメ内で「加重メッシュに deform を掛けた直後に別メッシュへアタッチメント差替」すると、差替後も前メッシュ用の `slot.deform`（別頂点数）が残留し `computeWorldVertices` が NaN 頂点を生む不具合がある（後続 3.8 パッチで修正済／実ゲームの Unity ランタイムは修正版のため崩れない＝データ側は正常）。実例＝EX still `10069301_01`（口=加重メッシュ、animation4 で mouth_2(deform)→mouth_4 差替時に口が崩壊）。対処＝`spine-web.js` の `patchStaleDeformOnce()` が `VertexAttachment.prototype.computeWorldVertices` を一度だけラップし、`slot.deform.length` が現アタッチメントの期待長（加重= `vertices.length/3*2`／非加重= `worldVerticesLength`）と一致しない場合に deform を破棄する。story(stage-gl)・立ち絵(SpinePlayer)両経路で有効。
+
 ## 🗂️ 構成
 
 ```

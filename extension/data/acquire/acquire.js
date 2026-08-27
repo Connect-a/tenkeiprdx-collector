@@ -180,6 +180,7 @@ async function createAcquireContext(folderKey, meta0, opts) {
 function planEpisodes(ctx, choiceGroupsByEp, gate, savedIds) {
   const orderedEpMetas = [];
   const work = [];
+  const hasLocalScenes = (ep) => (ep.sceneBinIds || []).some((sid) => savedIds && savedIds.has(String(sid)));
   for (const ep of ctx.meta0.episodes) {
     const epMeta = {
       episodeId: ep.episodeId,
@@ -196,6 +197,10 @@ function planEpisodes(ctx, choiceGroupsByEp, gate, savedIds) {
     };
     if (choiceGroupsByEp && choiceGroupsByEp[ep.episodeId]) epMeta.choiceGroups = choiceGroupsByEp[ep.episodeId];
     orderedEpMetas.push(epMeta);
+    if (ep.linkTo && !hasLocalScenes(ep)) {
+      epMeta.linkTo = ep.linkTo;
+      continue;
+    }
     if (episodeLocked(ep, gate)) {
       epMeta.gate = 'locked';
       const saved = savedIds && (ep.sceneBinIds || []).some((sid) => savedIds.has(String(sid)));
@@ -527,7 +532,8 @@ function queueCastSpines(ctx, routing) {
   }
 }
 
-function summarizeCompleteness(ctx, meta, orderedEpMetas, routing) {
+function summarizeCompleteness(ctx, meta, epMetasIn, routing) {
+  const orderedEpMetas = epMetasIn.filter((e) => !e.linkTo);
   const sum = (fn) => orderedEpMetas.reduce((n, e) => n + fn(e), 0);
   return {
     episodesTotal: orderedEpMetas.length,

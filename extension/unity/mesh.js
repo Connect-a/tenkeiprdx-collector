@@ -157,6 +157,7 @@ function extractCompressedMeshGeometry(m) {
   }
   let tangents = null,
     binormals = null,
+    tangentW = null,
     tanSigns = null;
   if (cm.m_Tangents && Number(cm.m_Tangents.m_NumItems) > 0) {
     const td = unpackFloats(cm.m_Tangents),
@@ -180,7 +181,9 @@ function extractCompressedMeshGeometry(m) {
       tangents[i * 3 + 1] = y;
       tangents[i * 3 + 2] = z;
     }
-    binormals = buildBinormals(normals, tangents, vcount, (i) => (tanSigns[i * 2 + 1] === 0 ? -1 : 1));
+    tangentW = new Float32Array(vcount);
+    for (let i = 0; i < vcount; i++) tangentW[i] = tanSigns[i * 2 + 1] === 0 ? -1 : 1;
+    binormals = buildBinormals(normals, tangents, vcount, (i) => tangentW[i]);
   }
   let uv = null;
   if (cm.m_UV && Number(cm.m_UV.m_NumItems) > 0) {
@@ -249,6 +252,7 @@ function extractCompressedMeshGeometry(m) {
     normals,
     tangents,
     binormals,
+    tangentW,
     colors,
     uv,
     indices,
@@ -368,15 +372,18 @@ function extractMeshGeometry(m, LE) {
     }
   }
   let tangents = null,
-    binormals = null;
+    binormals = null,
+    tangentW = null;
   if (tan && tan.dim >= 3) {
     tangents = new Float32Array(vcount * 3);
+    tangentW = new Float32Array(vcount);
     for (let v = 0; v < vcount; v++) {
       tangents[v * 3] = tan.arr[v * tan.dim];
       tangents[v * 3 + 1] = tan.arr[v * tan.dim + 1];
       tangents[v * 3 + 2] = tan.arr[v * tan.dim + 2];
+      tangentW[v] = tan.dim >= 4 && tan.arr[v * tan.dim + 3] < 0 ? -1 : 1;
     }
-    binormals = buildBinormals(normals, tangents, vcount, (v) => (tan.dim >= 4 && tan.arr[v * tan.dim + 3] < 0 ? -1 : 1));
+    binormals = buildBinormals(normals, tangents, vcount, (v) => tangentW[v]);
   }
   let colors = null;
   if (col && col.dim >= 1) {
@@ -447,7 +454,7 @@ function extractMeshGeometry(m, LE) {
     skinIndex = shared.rigidSkin.i;
   }
 
-  return { name: m.m_Name, vertexCount: vcount, positions, normals, tangents, binormals, colors, uv, uv1, indices, submeshes, skinWeight, skinIndex, bindposes, boneNameHashes, blendShapes };
+  return { name: m.m_Name, vertexCount: vcount, positions, normals, tangents, binormals, tangentW, colors, uv, uv1, indices, submeshes, skinWeight, skinIndex, bindposes, boneNameHashes, blendShapes };
 }
 
 function readMaterialObj(sf, LE, o) {
@@ -525,9 +532,14 @@ function readMaterialObj(sf, LE, o) {
   for (const p of colors) if (typeof p[0] === 'string') allColors[p[0]] = getColor(p[0]);
   for (const p of floats) if (typeof p[0] === 'string') allFloats[p[0]] = Number(p[1]);
   const graphColors = colors.filter((x) => typeof x[0] === 'string' && x[0][0] !== '_').map((x) => getColor(x[0]));
+  const kw = new Set();
+  if (typeof mat.m_ShaderKeywords === 'string') for (const k of mat.m_ShaderKeywords.split(' ')) if (k) kw.add(k);
+  if (Array.isArray(mat.m_ValidKeywords)) for (const k of mat.m_ValidKeywords) if (k) kw.add(String(k));
   return {
     pathID: o.pathID,
     name: mat.m_Name,
+    keywords: kw,
+    renderQueue: Number(mat.m_CustomRenderQueue),
     shaderPathID: mat.m_Shader ? String(mat.m_Shader.m_PathID) : null,
     mainTexPathID: mainTexPathID || colorTexPathID || firstTexPathID,
     mainTexScale,
@@ -755,14 +767,26 @@ function decodeTexture(tex, parsed) {
       }
       return { width: w, height: h, format: fmt, error: 'unityCrunch-unavailable' };
     } else if (fmt === 12 || fmt === 2 || fmt === 13 || fmt === 4) rgba = texCodec.decodeByFormat(fmt, bytes, w, h);
-    else if (fmt === 17 || fmt === 24) return { width: w, height: h, format: fmt, raw: bytes.subarray(0, fmt === 17 ? w * h * 8 : Math.ceil(w / 4) * Math.ceil(h / 4) * 16) };
+    else if (fmt === 17 || fmt === 24 || fmt === 25)
+      return { width: w, height: h, format: fmt, raw: bytes.subarray(0, fmt === 17 ? w * h * 8 : Math.ceil(w / 4) * Math.ceil(h / 4) * 16), ...textureSettings(tex) };
     else return { width: w, height: h, format: fmt, error: 'unsupported-format-' + fmt };
   } catch (e) {
     return { width: w, height: h, format: fmt, error: e && e.message ? e.message : String(e) };
   }
   if (!rgba) return { width: w, height: h, format: fmt, error: 'unityDecode-failed' };
+  return { width: w, height: h, format: fmt, rgba, ...textureSettings(tex) };
+}
+
+function textureSettings(tex) {
   const ts = tex.m_TextureSettings || {};
-  return { width: w, height: h, format: fmt, rgba, wrapU: Number(ts.m_WrapU) || 0, wrapV: Number(ts.m_WrapV) || 0 };
+  return {
+    wrapU: Number(ts.m_WrapU) || 0,
+    wrapV: Number(ts.m_WrapV) || 0,
+    filter: Number(ts.m_FilterMode),
+    aniso: Number(ts.m_Aniso) || 1,
+    mipCount: Number(tex.m_MipCount) || 1,
+    srgb: Number(tex.m_ColorSpace) !== 0,
+  };
 }
 
 const blockBytes = (fmt) => (fmt === 12 || fmt === 13 ? 16 : 8);
@@ -830,6 +854,10 @@ function parseMaterialBundle(bytes) {
           faces: dec.faces || null,
           wrapU: dec.wrapU || 0,
           wrapV: dec.wrapV || 0,
+          filter: dec.filter,
+          aniso: dec.aniso,
+          mipCount: dec.mipCount,
+          srgb: dec.srgb,
           error: dec.error || null,
         });
       } catch (e) {
@@ -920,6 +948,106 @@ function decodeAllTextureCanvases(bytes, parsed) {
   return single ? [single] : [];
 }
 
+function decodeNamedTextureCanvases(bytes, parsed) {
+  const out = [];
+  try {
+    const co = openCab(bytes, parsed);
+    if (!co) return out;
+    const { sf, sfp } = co;
+    const p = co.parsed;
+    for (const o of sfp.objects) {
+      if (o.classID !== 28) continue;
+      try {
+        const tx = unitySf.readObject(sf, sfp.LE, o);
+        const dec = decodeTexture(tx, p);
+        if (!dec || !dec.rgba || !dec.width || !dec.height) continue;
+        const rgba = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
+        const cv = texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(rgba, dec.width, dec.height) : null;
+        if (cv) out.push({ name: tx.m_Name || '', canvas: cv, width: dec.width, height: dec.height });
+      } catch (e) {}
+    }
+  } catch (e) {}
+  return out;
+}
+
+function decodeAtlasSprite(bytes, spriteName, parsed) {
+  try {
+    const co = openCab(bytes, parsed);
+    if (!co) return null;
+    const { sf, sfp } = co;
+    const p = co.parsed;
+    let sprite = null;
+    for (const o of sfp.objects) {
+      if (o.classID !== 213) continue;
+      let s;
+      try {
+        s = unitySf.readObject(sf, sfp.LE, o);
+      } catch (e) {
+        continue;
+      }
+      if (s && s.m_Name === spriteName) {
+        sprite = s;
+        break;
+      }
+    }
+    if (!sprite) return null;
+    let rect = sprite.m_RD && sprite.m_RD.textureRect;
+    let texPathID = sprite.m_RD && sprite.m_RD.texture ? String(sprite.m_RD.texture.m_PathID || '0') : '0';
+    // SpriteAtlas パック済みの場合、m_RD.textureRect は未パック座標なので m_RenderDataMap から実パック矩形を引く。
+    if (sprite.m_RenderDataKey) {
+      const sa = sfp.objects.find((o) => o.classID === 687078895);
+      if (sa) {
+        let atlas = null;
+        try {
+          atlas = unitySf.readObject(sf, sfp.LE, sa);
+        } catch (e) {}
+        const rdm = atlas && atlas.m_RenderDataMap;
+        const kk = sprite.m_RenderDataKey;
+        const keyEq = (a) => a && a.first && kk.first && ['data[0]', 'data[1]', 'data[2]', 'data[3]'].every((d) => String(a.first[d]) === String(kk.first[d])) && String(a.second) === String(kk.second);
+        if (Array.isArray(rdm)) {
+          for (const entry of rdm) {
+            const k = entry && entry[0];
+            const v = entry && entry[1];
+            if (v && keyEq(k)) {
+              if (v.textureRect) rect = v.textureRect;
+              if (v.texture) texPathID = String(v.texture.m_PathID || '0');
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (!rect) return null;
+    let dec = null;
+    const texObjs = sfp.objects.filter((o) => o.classID === 28);
+    const targetTex = texPathID !== '0' ? texObjs.find((o) => String(o.pathID) === texPathID) : null;
+    for (const o of targetTex ? [targetTex] : texObjs) {
+      try {
+        const tx = unitySf.readObject(sf, sfp.LE, o);
+        const d = decodeTexture(tx, p);
+        if (d && d.rgba && d.width && d.height) {
+          dec = d;
+          break;
+        }
+      } catch (e) {}
+    }
+    if (!dec) return null;
+    const top = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
+    const rw = Math.max(1, Math.round(rect.width));
+    const rh = Math.max(1, Math.round(rect.height));
+    const rx = Math.min(Math.max(0, Math.round(rect.x)), dec.width - rw);
+    const ry = Math.min(Math.max(0, Math.round(dec.height - rect.y - rect.height)), dec.height - rh);
+    const sub = new Uint8ClampedArray(rw * rh * 4);
+    for (let row = 0; row < rh; row++) {
+      const srcOff = ((ry + row) * dec.width + rx) * 4;
+      sub.set(top.subarray(srcOff, srcOff + rw * 4), row * rw * 4);
+    }
+    return texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(sub, rw, rh) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function parseMouthAtlas(bytes) {
   if (!bytes) return null;
   const mb = parseMaterialBundle(bytes);
@@ -957,6 +1085,8 @@ export const unityMesh = {
   decodeTextureRgba,
   decodeTextureCanvas,
   decodeAllTextureCanvases,
+  decodeNamedTextureCanvases,
+  decodeAtlasSprite,
   parseMouthAtlas,
   extractSpineInputs,
   extractMeshGeometry,

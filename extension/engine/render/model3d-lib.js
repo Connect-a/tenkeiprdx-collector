@@ -73,7 +73,10 @@ function remapMouthUV(baseUv, vMin, vMax, col, row) {
   return out;
 }
 
-function makeDataTexture(tex, { linear, forceOpaque } = {}) {
+// 実ゲームはガンマ色空間。生値で受けて最後に tpToLinear で戻す（設計資料_viewer.md）。
+const TP_TO_LINEAR = 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
+
+function makeDataTexture(tex, { forceOpaque } = {}) {
   let rgba = tex.rgba;
   if (forceOpaque) {
     rgba = rgba.slice();
@@ -87,7 +90,7 @@ function makeDataTexture(tex, { linear, forceOpaque } = {}) {
   dt.magFilter = THREE_NS.LinearFilter;
   dt.minFilter = THREE_NS.LinearMipmapLinearFilter;
   dt.generateMipmaps = true;
-  dt.colorSpace = linear ? THREE_NS.LinearSRGBColorSpace || THREE_NS.NoColorSpace || 'srgb-linear' : THREE_NS.SRGBColorSpace || 'srgb';
+  dt.colorSpace = THREE_NS.LinearSRGBColorSpace || THREE_NS.NoColorSpace || 'srgb-linear';
   return dt;
 }
 
@@ -398,6 +401,7 @@ export const model3dLib = {
   MOUTH_EXPRESSIONS,
   remapMouthUV,
   makeDataTexture,
+  TP_TO_LINEAR,
   buildPostPass,
   buildThreeSkeleton,
   mat4FromBindpose,

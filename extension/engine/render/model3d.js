@@ -11,10 +11,20 @@ import { el, append } from '../../core/dom.js';
 import { buildGroupedVisPanel } from '../../core/vis-panel.js';
 import { createPartControl } from './model-parts.js';
 import * as THREE_NS from '../../vendor/three.module.js';
-const { sharedBgTexture, setSharedBgFromRgba, buildTextureMap, MOUTH_EXPRESSIONS, remapMouthUV, makeDataTexture, buildPostPass, buildThreeSkeleton, mat4FromBindpose, buildThreeClip } = model3dLib;
+const { sharedBgTexture, setSharedBgFromRgba, buildTextureMap, MOUTH_EXPRESSIONS, remapMouthUV, makeDataTexture, TP_TO_LINEAR, buildPostPass, buildThreeSkeleton, mat4FromBindpose, buildThreeClip } =
+  model3dLib;
 
-const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : c < 1 ? Math.pow((c + 0.055) / 1.055, 2.4) : Math.pow(c, 2.2));
-const linColor = (T, a) => new T.Color(srgbToLinear(a[0]), srgbToLinear(a[1]), srgbToLinear(a[2]));
+// ガンマ色空間の実ゲームに合わせ、色は生値のまま演算して出力直前だけリニアへ戻す。
+const rawColor = (T, a) => new T.Color(a[0], a[1], a[2]);
+const gammaOut = (mat, cacheKey) => {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    if (prev) prev.call(mat, shader, renderer);
+    shader.fragmentShader = TP_TO_LINEAR + shader.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight = tpToLinear( outgoingLight );\n#include <opaque_fragment>');
+  };
+  mat.customProgramCacheKey = () => cacheKey;
+  return mat;
+};
 const hexRgb = (s) => {
   const m = /^#?([0-9a-fA-F]{3,8})$/.exec(String(s || '').trim());
   if (!m) return null;
@@ -33,7 +43,7 @@ const attachmentEmission = (cfg) => {
   const rgb = hexRgb(cfg && cfg.colorcode);
   if (!rgb) return null;
   const k = Math.pow(2, Number(cfg.intensity) || 0);
-  return rgb.map((c) => srgbToLinear(c * k));
+  return rgb.map((c) => c * k);
 };
 
 let _bgCssUrl = null;
@@ -64,7 +74,8 @@ async function ensureBgCommon(wrap) {
 }
 
 function createMaterialFactory(T, deps) {
-  const { texMap, TOON_LIGHT, mouthAtlasTex } = deps;
+  const { texMap, TOON_LIGHT, MAIN_LIGHT_COLOR, mouthAtlasTex } = deps;
+  const mainLight = MAIN_LIGHT_COLOR || [1, 1, 1];
   const shadowTexCache = new Map(),
     maskTexCache = new Map();
   const bundleIds = new WeakMap();
@@ -89,13 +100,12 @@ function createMaterialFactory(T, deps) {
     const maskRgba = tmap.maskByName.get(name);
     let maskTex = null;
     if (maskRgba) {
-      if (!maskTexCache.has(ck)) maskTexCache.set(ck, makeDataTexture(maskRgba, { linear: true }));
+      if (!maskTexCache.has(ck)) maskTexCache.set(ck, makeDataTexture(maskRgba));
       maskTex = maskTexCache.get(ck);
     }
-    const hc = (p.highlightColor || [1, 1, 1, 1]).map(srgbToLinear);
-    const em = emOverride || (p.emissionColor || [0, 0, 0, 0]).map(srgbToLinear);
+    const hc = p.highlightColor || [1, 1, 1, 1];
+    const em = emOverride || p.emissionColor || [0, 0, 0, 0];
     const co = p.colorOverride || [1, 1, 1, 1];
-    const coLin = co.map(srgbToLinear);
     const num = (v, d) => (v != null ? v : d);
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, {
@@ -116,8 +126,8 @@ function createMaterialFactory(T, deps) {
         uRimThreshold: { value: num(p.rimLightThreshold, 0.04) },
         uRimStrength: { value: 1.0 },
         uEmission: { value: new T.Vector3(em[0], em[1], em[2]) },
-        uColorOverride: { value: new T.Vector4(coLin[0], coLin[1], coLin[2], co[3] != null ? co[3] : 1) },
-        uMainLight: { value: new T.Vector3(1, 1, 1) },
+        uColorOverride: { value: new T.Vector4(co[0], co[1], co[2], co[3] != null ? co[3] : 1) },
+        uMainLight: { value: new T.Vector3(mainLight[0], mainLight[1], mainLight[2]) },
       });
       shader.vertexShader =
         'attribute vec3 aToonTangent;\nattribute vec4 aToonColor;\nvarying vec3 vToonWN;\nvarying vec3 vToonVD;\nvarying vec3 vToonTAN;\nvarying vec4 vToonCol;\nvarying vec2 vToonUv;\n' +
@@ -127,14 +137,14 @@ function createMaterialFactory(T, deps) {
             '#include <defaultnormal_vertex>',
             '#include <defaultnormal_vertex>\n\tvToonWN = normalize( mat3( modelMatrix ) * objectNormal );\n\tvec3 toonTan = aToonTangent;\n\t#ifdef USE_SKINNING\n\t\ttoonTan = mat3( skinMatrix ) * toonTan;\n\t#endif\n\tvToonTAN = mat3( modelMatrix ) * toonTan;\n\tvToonCol = aToonColor;',
           )
-          .replace('#include <project_vertex>', '#include <project_vertex>\n\tvToonVD = cameraPosition - ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvToonUv = uv;');
+          .replace('#include <project_vertex>', '#include <project_vertex>\n\tvToonVD = normalize( cameraPosition - ( modelMatrix * vec4( transformed, 1.0 ) ).xyz );\n\tvToonUv = uv;');
       const inject = [
         'if (dot(vToonWN, vToonWN) > 0.5) {',
-        '  vec3 N = normalize(vToonWN);',
-        '  vec3 Vd = normalize(vToonVD);',
+        '  vec3 N = vToonWN;',
+        '  vec3 Vd = vToonVD;',
         '  vec3 Ld = normalize(uLightDir);',
         '  float ndl = dot(N, Ld);',
-        '  vec4 maskT = (uHasMask > 0.5) ? texture2D(uMaskTex, vToonUv) : vec4(0.0);',
+        '  vec4 maskT = (uHasMask > 0.5) ? texture2D(uMaskTex, vToonUv) : vec4(0.0, 0.0, 0.0, 1.0);',
         '  vec3 mask = maskT.rgb;',
         '  float hp = (mask.b * 0.5 + 0.5) * uHiNoise + uHiPos;',
         '  vec3 Sv = normalize(-N * hp + vToonTAN);',
@@ -162,7 +172,7 @@ function createMaterialFactory(T, deps) {
         '  vec3 ov = mix(lo2, hi2, step(vec3(0.5), cTex)) * uMainLight;',
         '  baseCol *= uMainLight * uColorOverride.rgb;',
         '  diffuseColor.rgb = mix(baseCol, ov, hiF);',
-        '  diffuseColor.rgb += uEmission * ((uHasMask > 0.5) ? maskT.a : 1.0);',
+        '  diffuseColor.rgb += uEmission * maskT.a;',
         '  diffuseColor.a *= uColorOverride.a;',
         '}',
       ].join('\n');
@@ -170,7 +180,6 @@ function createMaterialFactory(T, deps) {
         'uniform sampler2D uShadowTex, uMaskTex;\nuniform float uHasShadow, uHasMask, uShadowThreshold, uShadowGrad, uShadowWeight, uHiIntensity, uHiSharp, uHiPos, uHiNoise, uFresnel, uRimThreshold, uRimStrength;\nuniform vec3 uLightDir, uHiColor, uEmission, uMainLight;\nuniform vec4 uColorOverride;\nvarying vec3 vToonWN;\nvarying vec3 vToonVD;\nvarying vec3 vToonTAN;\nvarying vec4 vToonCol;\nvarying vec2 vToonUv;\n' +
         shader.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n' + inject);
     };
-    mat.customProgramCacheKey = () => 'tp-toonshadow';
   };
 
   const texCache = new Map();
@@ -180,29 +189,23 @@ function createMaterialFactory(T, deps) {
     const key = bid(tmap) + '|' + ((modelMat && modelMat.pathID) || name || '__fallback') + (emOverride ? '|em' + emOverride.join(',') : '');
     if (texCache.has(key)) return texCache.get(key);
     const ownTex = name ? tmap.byName.get(name) : null;
-    const isMouth = /mouth/i.test(name || '');
-    const params = { side: T.DoubleSide };
+    const isMouth = /mouth|month/i.test(name || '');
+    // キャラ材質は全て ToonShader・_Cull=2(Back)・完全不透明。three は巻きが反転するので BackSide（設計資料_viewer.md）。
+    const params = { side: T.BackSide };
     if (isMouth && mouthAtlasTex) {
       params.map = mouthAtlasTex;
-      params.transparent = true;
       params.alphaTest = 0.5;
-      params.depthWrite = false;
     } else if (ownTex) {
       params.map = makeDataTexture(ownTex, { forceOpaque: true });
     } else if (tmap.fallback) {
       params.map = makeDataTexture(tmap.fallback, { forceOpaque: true });
-    } else if (modelMat && modelMat.color) params.color = linColor(T, modelMat.color);
+    } else if (modelMat && modelMat.color) params.color = rawColor(T, modelMat.color);
     else params.color = new T.Color(0xcccccc);
-    const matAlpha = modelMat && modelMat.color && modelMat.color[3] != null ? modelMat.color[3] : 1;
-    if (!isMouth && modelMat && modelMat.transparent && matAlpha < 1) {
-      params.transparent = true;
-      params.depthWrite = false;
-      params.opacity = matAlpha;
-      delete params.alphaTest;
-    }
     const mat = new T.MeshBasicMaterial(params);
     const tn = tmap.toonByName.get(name);
-    if (!isMouth && tn && (tn.colorTexPathID || tn.shadowTexPathID || tn.shadowBorderThreshold != null)) applyToonShadow(mat, name, tmap, emOverride);
+    const toon = !isMouth && tn && (tn.colorTexPathID || tn.shadowTexPathID || tn.shadowBorderThreshold != null);
+    if (toon) applyToonShadow(mat, name, tmap, emOverride);
+    gammaOut(mat, toon ? 'tp-toonshadow' : 'tp-gamma');
     texCache.set(key, mat);
     return mat;
   };
@@ -495,24 +498,18 @@ function buildControls(st, deps) {
     const defIdx = prefer >= 0 ? prefer : 0;
     if (!options.hidePlaybackUI) {
       const gMotion = addGroup();
-      st.clipSelect = addSelect(
-        gMotion,
-        'モーション',
-        [...clips.map((c, i) => [i, `${c.name} (${c.duration.toFixed(1)}s)`]), [POSE_VALUE, '⊂二二二( ^ω^)二⊃ブーン']],
-        defIdx,
-        (v) => {
-          if (v === POSE_VALUE) {
-            restPose();
-            if (options.onClip) options.onClip(POSE_VALUE);
-            return;
-          }
-          const idx = Number(v);
-          playClip(idx);
-          const mv = options.motionVoice;
-          if (mv && mv.enabled && clips[idx]) mv.onMotion(clips[idx].name);
-          if (options.onClip && clips[idx]) options.onClip(clips[idx].name);
-        },
-      );
+      st.clipSelect = addSelect(gMotion, 'モーション', [...clips.map((c, i) => [i, `${c.name} (${c.duration.toFixed(1)}s)`]), [POSE_VALUE, '⊂二二二( ^ω^)二⊃ブーン']], defIdx, (v) => {
+        if (v === POSE_VALUE) {
+          restPose();
+          if (options.onClip) options.onClip(POSE_VALUE);
+          return;
+        }
+        const idx = Number(v);
+        playClip(idx);
+        const mv = options.motionVoice;
+        if (mv && mv.enabled && clips[idx]) mv.onMotion(clips[idx].name);
+        if (options.onClip && clips[idx]) options.onClip(clips[idx].name);
+      });
       st.playBtn = addIconButton(gMotion, '⏸', null, (btn) => {
         if (!st.action) return;
         st.playing = !st.playing;
@@ -539,9 +536,7 @@ function buildControls(st, deps) {
   const decoCtrlWrap = el('span', 'model3d-group');
 
   if (mouthGeoms.length && mouthAtlasTex) {
-    let usedMouth = [...new Set((model.clips || []).flatMap((c) => (c.events || []).filter((e) => e.type === 'mouth').map((e) => e.index)))]
-      .filter((i) => i >= 1 && i <= 25)
-      .sort((a, b) => a - b);
+    let usedMouth = [...new Set((model.clips || []).flatMap((c) => (c.events || []).filter((e) => e.type === 'mouth').map((e) => e.index)))].filter((i) => i >= 1 && i <= 25).sort((a, b) => a - b);
     const defMouth = fbx.defaultMouthId > 0 ? fbx.defaultMouthId : 6;
     if (!usedMouth.length) usedMouth = [defMouth];
     else if (!usedMouth.includes(defMouth)) usedMouth.unshift(defMouth);
@@ -749,7 +744,7 @@ function buildCharacterMeshes(T, st, deps) {
     g.setAttribute('position', new T.BufferAttribute(op, 3));
     g.setIndex(new T.BufferAttribute(unityMesh.indices, 1));
     const c = colArr || [0.345, 0.302, 0.259];
-    const omat = new T.MeshBasicMaterial({ color: linColor(T, c), side: T.FrontSide });
+    const omat = gammaOut(new T.MeshBasicMaterial({ color: rawColor(T, c), side: T.FrontSide }), 'tp-outline');
     let o;
     const par = parent || root;
     if (useSkin) {
@@ -828,7 +823,7 @@ function buildCharacterMeshes(T, st, deps) {
     if (!unityMesh) continue;
     const firstMat = r.materialPathIDs && r.materialPathIDs[0] ? modelMatByPath.get(r.materialPathIDs[0]) : null;
     if (skipMesh(firstMat)) continue;
-    const isMouth = /mouth/i.test((firstMat && firstMat.name) || unityMesh.name || '');
+    const isMouth = /mouth|month/i.test((firstMat && firstMat.name) || unityMesh.name || '');
     if (isMouth && !mouthAtlasTex) continue;
     const isMouthMesh = isMouth && mouthAtlasTex;
     const geo = new T.BufferGeometry();
@@ -1506,7 +1501,12 @@ function buildInstance(model, materialBundle, opt) {
   const mouthMatOverride = (model.fbx && model.fbx.mouthMaterialOverride) || 0;
   const mouthVariant = (options.mouthAtlas && options.mouthAtlas.variants && options.mouthAtlas.variants[mouthMatOverride]) || options.mouthAtlas;
   const mouthAtlasTex = mouthVariant && mouthVariant.rgba ? makeDataTexture(mouthVariant) : null;
-  const matFactory = createMaterialFactory(THREE_NS, { texMap, TOON_LIGHT: [0.2962, 0.5, 0.8138], mouthAtlasTex });
+  const matFactory = createMaterialFactory(THREE_NS, {
+    texMap,
+    TOON_LIGHT: (options.mainLight && options.mainLight.dir) || [0.2962, 0.5, 0.8138],
+    MAIN_LIGHT_COLOR: (options.mainLight && options.mainLight.color) || null,
+    mouthAtlasTex,
+  });
   const exprBase = (n) => String(n || '').replace(/_[RL]$/, '');
   const fbx = (model && model.fbx) || {};
   const holder = new THREE_NS.Group();
@@ -1576,6 +1576,10 @@ function buildInstance(model, materialBundle, opt) {
     radius,
     defaultRotY: ((fbx.rotationOverrideY || 0) * Math.PI) / 180,
     clipNames,
+    clipDuration: (name) => {
+      const i = clipNames.indexOf(name);
+      return i < 0 ? 0 : clips[i].duration || 0;
+    },
     mouths,
     faces: basesOf('face'),
     brows: basesOf('brow'),
@@ -1638,4 +1642,4 @@ function buildInstance(model, materialBundle, opt) {
   };
 }
 
-export const model3dRenderer = { render, disposeModel3d, buildInstance };
+export const model3dRenderer = { render, disposeModel3d, buildInstance, createMaterialFactory };

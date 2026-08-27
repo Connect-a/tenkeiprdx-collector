@@ -9,7 +9,7 @@ import { toast } from '../ui/notifier.js';
 import { navTo } from '../runtime/router-controller.js';
 import { buildOnboard } from './onboarding-ui.js';
 import { getOtherPanel, getHomePanel, getItemPanel, getOther2dPanel, getMonsterPanel } from '../runtime/panel-state.js';
-import { applyPendingTarget } from './roster-view.js';
+import { focusTarget } from './roster-view.js';
 import { hideRosterControls, groupHeading } from '../ui/panel-shell.js';
 import { renderExScenes, resetExScenes, setThumbCache } from './exscene-view.js';
 
@@ -207,6 +207,7 @@ const KIND_DEPS = {
 
 export async function renderRoster(opts) {
   const changed = opts && opts.changed;
+  const target = (opts && opts.target) || null;
   if (changed) {
     const deps = KIND_DEPS[playerState.rosterKind] || KIND_DEPS.character;
     if (!changed.some((p) => deps.includes(p))) return;
@@ -215,6 +216,11 @@ export async function renderRoster(opts) {
   const stale = () => seq !== renderSeq;
   const otherPanel = getOtherPanel();
   const homePanel = getHomePanel();
+
+  if (playerState.rosterKind !== 'character' || !playerState.exMode) {
+    resetExScenes();
+    getById('rosterGrid').className = 'rostergrid';
+  }
 
   if (otherPanel && playerState.rosterKind !== 'other') otherPanel.reset();
   const o2 = getOther2dPanel();
@@ -225,7 +231,7 @@ export async function renderRoster(opts) {
     if (homePanel) {
       await homePanel.renderHome();
       if (stale()) return;
-      applyPendingTarget(homePanel);
+      focusTarget(homePanel, target);
     }
     return;
   }
@@ -238,7 +244,7 @@ export async function renderRoster(opts) {
     if (ep) {
       await ep.render();
       if (stale()) return;
-      applyPendingTarget(ep);
+      focusTarget(ep, target);
     }
     return;
   }
@@ -251,7 +257,7 @@ export async function renderRoster(opts) {
     if (otherPanel) {
       await otherPanel.renderList(getById('rosterGrid'));
       if (stale()) return;
-      applyPendingTarget(otherPanel);
+      focusTarget(otherPanel, target);
     } else {
       getById('rosterGrid').innerHTML = '';
     }
@@ -319,8 +325,6 @@ export async function renderRoster(opts) {
     await renderExScenes(grid);
     return;
   }
-  resetExScenes();
-  grid.className = 'rostergrid';
 
   const model = await rosterModel();
   if (stale()) return;

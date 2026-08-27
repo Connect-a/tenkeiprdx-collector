@@ -214,7 +214,7 @@ function jobRow(job) {
           const r = await job.run(
             (m, f, c) => {
               note.textContent = m;
-              if (c) paint(badge, spin, (c.skip || 0) + (c.got || 0), c.total || 0, 0, 0, true);
+              if (c && (c.skip || c.got)) paint(badge, spin, (c.skip || 0) + (c.got || 0), c.total || 0, 0, 0, true);
             },
             { shouldAbort: () => stopReq },
           );
