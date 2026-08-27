@@ -1,6 +1,7 @@
 import { spineWeb } from '../../engine/story/spine-web.js';
 import { visualRenderer } from '../../engine/render/visual.js';
 import { spineInputsFor } from './viewer-source.js';
+import { slotGroup } from '../../engine/story/slot-group.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { texCodec } from '../../unity/texcodec.js';
 import { fileStore } from '../../core/fsdir.js';
@@ -74,7 +75,7 @@ function buildSkeleton(ctx, inputs) {
   const off = new spine.Vector2();
   const size = new spine.Vector2();
   skeleton.getBounds(off, size, []);
-  return { atlas, skeleton, anim, anims: data.animations.map((a) => a.name), bounds: { x: off.x, y: off.y, w: size.x, h: size.y }, entry: null, cur: null };
+  return { atlas, skeleton, anim, anims: data.animations.map((a) => a.name), bounds: { x: off.x, y: off.y, w: size.x, h: size.y }, entry: null, cur: null, vis: {} };
 }
 
 export function createStage(hostEl, deps) {
@@ -307,6 +308,10 @@ export function createStage(hostEl, deps) {
         const cx = px + (c.x || 0) * (W / 12) * zoom;
         const cy = py + (c.y || 0) * (H / 12) * zoom;
         rects.set(String(c.id), { cx: cx / dpr, cy: (H - cy) / dpr, w: (b.w * scale) / dpr, h: (b.h * scale) / dpr, rot: -th });
+        for (const slot of rec.skeleton.slots || []) {
+          const a = rec.vis[slot.data.name];
+          if (a != null) slot.color.a *= a;
+        }
         try {
           renderer.drawSkeleton(rec.skeleton, true);
         } catch (e) {}
@@ -329,13 +334,13 @@ export function createStage(hostEl, deps) {
         inputs = await spineInputsFor(entry);
       } catch (e) {}
       if (!inputs) {
-        core.note(`#${key} の立ち絵Spineが見つかりません。ダウンロードを確認してください。`);
+        core.note(`#${key} のSpineが見つかりません。ダウンロードを確認してください。`);
         return null;
       }
       try {
         return buildSkeleton(ctx, inputs);
       } catch (e) {
-        core.note(`#${key} の立ち絵を組み立てられませんでした。`);
+        core.note(`#${key} のSpineを組み立てられませんでした。`);
         return null;
       }
     },
@@ -350,6 +355,8 @@ export function createStage(hostEl, deps) {
     },
     defaultMotion: (rec) => idleAnim(rec.anims),
     apply(c, rec) {
+      if (!c.vis) c.vis = {};
+      rec.vis = c.vis;
       const pick = rec.anims.includes(c.motion) ? c.motion : idleAnim(rec.anims);
       if (!pick) return;
       if (rec.cur !== pick) {
@@ -360,12 +367,38 @@ export function createStage(hostEl, deps) {
       }
       if (rec.entry) rec.entry.timeScale = c.paused ? 0 : c.speed > 0 ? c.speed : 1;
     },
-    controlsFor(rec) {
+    controlsFor(rec, entry) {
       if (!rec) return { motionLabel: '表情', motions: [], selects: [], sliders: SLIDERS };
+      const isEx = !!(entry && entry.kind === 'ex');
       const have = rec.anims;
       const known = EXPRESSIONS.filter(([v]) => have.includes(v));
       const extra = have.filter((n) => !EXPRESSIONS.some(([v]) => v === n)).map((n) => [n, n]);
-      return { motionLabel: '表情', motions: [...known, ...extra], selects: [], sliders: SLIDERS };
+      const motions = isEx ? have.map((n) => [n, n]) : [...known, ...extra];
+      return { motionLabel: isEx ? 'アニメ' : '表情', motions, selects: [], sliders: SLIDERS, vis: true };
+    },
+    visInfo(id) {
+      const rec = core.live(id);
+      if (!rec || !rec.skeleton) return null;
+      const groups = new Map();
+      for (const slot of rec.skeleton.slots || []) {
+        const nm = slot.data.name;
+        const g = slotGroup(nm);
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(nm);
+      }
+      return {
+        groups: [...groups],
+        alphaOf: (n) => (rec.vis[n] == null ? 1 : rec.vis[n]),
+        set: (names, a) => {
+          for (const n of names) {
+            if (a === 1) delete rec.vis[n];
+            else rec.vis[n] = a;
+          }
+        },
+        resetAll: () => {
+          for (const k of Object.keys(rec.vis)) delete rec.vis[k];
+        },
+      };
     },
     async syncField() {
       const f = state.scene.field;

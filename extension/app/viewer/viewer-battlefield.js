@@ -4,8 +4,9 @@ import { unityMesh } from '../../unity/mesh.js';
 import { assetStore } from '../../data/asset-store.js';
 import { DIRS } from '../../core/constants.js';
 import { hasFieldShader, makeFieldMaterial } from '../../engine/render/field-shader.js';
+import { unityAnim } from '../../unity/anim.js';
 
-const CLS = { GAME_OBJECT: 1, TRANSFORM: 4, MESH_RENDERER: 23, MESH_FILTER: 33, MESH: 43, RENDER_SETTINGS: 104, LIGHT: 108, LIGHTMAP_SETTINGS: 157 };
+const CLS = { GAME_OBJECT: 1, TRANSFORM: 4, MESH_RENDERER: 23, MESH_FILTER: 33, MESH: 43, ANIM_CLIP: 74, ANIM_CONTROLLER: 91, ANIMATOR: 95, RENDER_SETTINGS: 104, LIGHT: 108, LIGHTMAP_SETTINGS: 157 };
 const pid = (ref) => (ref && ref.m_PathID != null ? String(ref.m_PathID) : null);
 const isLocal = (ref) => ref && Number(ref.m_FileID || 0) === 0 && pid(ref) && pid(ref) !== '0';
 
@@ -17,6 +18,41 @@ function sliceStream(parsed, sd) {
   const off = Number(sd.offset) || 0;
   const size = Number(sd.size) || 0;
   return parsed.data.subarray(node.off + off, node.off + off + size);
+}
+
+const flatArray = (v) => (Array.isArray(v) ? v : v && Array.isArray(v.Array) ? v.Array : []);
+function decodeMapClip(raw) {
+  const mc = raw.m_MuscleClip || {};
+  const cd = (mc.m_Clip && (mc.m_Clip.data || mc.m_Clip)) || {};
+  const sc = cd.m_StreamedClip || {};
+  const dc = cd.m_DenseClip || {};
+  let dec = null;
+  try {
+    dec = unityAnim.decodeClipObj({
+      m_Name: raw.m_Name,
+      m_SampleRate: raw.m_SampleRate,
+      m_Events: [],
+      m_ClipBindingConstant: { genericBindings: flatArray((raw.m_ClipBindingConstant || {}).genericBindings) },
+      m_MuscleClip: {
+        m_StartTime: mc.m_StartTime,
+        m_StopTime: mc.m_StopTime,
+        m_LoopTime: mc.m_LoopTime,
+        m_LoopBlend: mc.m_LoopBlend,
+        m_Clip: {
+          data: {
+            m_StreamedClip: { curveCount: sc.curveCount, data: flatArray(sc.data) },
+            m_DenseClip: { m_CurveCount: dc.m_CurveCount, m_FrameCount: dc.m_FrameCount, m_SampleRate: dc.m_SampleRate, m_BeginTime: dc.m_BeginTime, m_SampleArray: flatArray(dc.m_SampleArray) },
+            m_ConstantClip: { data: flatArray((cd.m_ConstantClip || {}).data) },
+          },
+        },
+      },
+    });
+  } catch (e) {
+    return null;
+  }
+  if (!dec || !dec.duration) return null;
+  const rot = dec.buildTracks(30).tracks.find((t) => t.type === 'rot' && t.boneHash === 0);
+  return rot ? { duration: dec.duration, times: rot.times, values: rot.values } : null;
 }
 
 function readGeometry(parsed, sf, LE, obj) {
@@ -81,12 +117,13 @@ function buildTextures(T, bytes, maxAniso) {
 }
 
 const scaleRgb = (rgba, k) => {
-  if (Math.abs(k - 1) < 1e-4) return rgba;
+  const s = Array.isArray(k) ? k : [k, k, k];
+  if (Math.abs(s[0] - 1) < 1e-4 && Math.abs(s[1] - 1) < 1e-4 && Math.abs(s[2] - 1) < 1e-4) return rgba;
   const out = new Uint8Array(rgba.length);
   for (let i = 0; i < rgba.length; i += 4) {
-    out[i] = Math.min(255, rgba[i] * k);
-    out[i + 1] = Math.min(255, rgba[i + 1] * k);
-    out[i + 2] = Math.min(255, rgba[i + 2] * k);
+    out[i] = Math.min(255, rgba[i] * s[0]);
+    out[i + 1] = Math.min(255, rgba[i + 1] * s[1]);
+    out[i + 2] = Math.min(255, rgba[i + 2] * s[2]);
     out[i + 3] = rgba[i + 3];
   }
   return out;
@@ -117,7 +154,7 @@ function skyTexture(T, rec, exposure) {
 function flatSkyColor(T, mat, exposure) {
   const c = (mat.allColors && (mat.allColors._Tint || mat.allColors._SkyTint || mat.allColors._BaseColor || mat.allColors._Color)) || [0, 0, 0, 1];
   const k = mat.allFloats && mat.allFloats._Exposure != null ? exposure : 1;
-  return new T.Color(Math.min(1, c[0] * k), Math.min(1, c[1] * k), Math.min(1, c[2] * k));
+  return new T.Color(Math.min(1, c[0] * 2 * k), Math.min(1, c[1] * 2 * k), Math.min(1, c[2] * 2 * k));
 }
 
 function skyboxInfo(T, rs, matByPid, cubeByPid, texByPid) {
@@ -125,25 +162,27 @@ function skyboxInfo(T, rs, matByPid, cubeByPid, texByPid) {
   const skyMat = skyPid ? matByPid.get(skyPid) : null;
   const skyRef = skyMat ? String(skyMat.mainTexPathID || skyMat.firstTexPathID || '') : '';
   const f = (skyMat && skyMat.allFloats) || {};
+  const c = (skyMat && skyMat.allColors && (skyMat.allColors._Tint || skyMat.allColors._SkyTint)) || null;
+  const e = f._Exposure == null ? 1 : Number(f._Exposure);
+  const t = c ? [c[0], c[1], c[2]] : [0.5, 0.5, 0.5];
   return {
     mat: skyMat,
     cube: skyRef ? cubeByPid.get(skyRef) : null,
     tex: skyRef ? texByPid.get(skyRef) : null,
-    exposure: f._Exposure == null ? 1 : Number(f._Exposure),
+    exposure: e,
+    scale: [t[0] * 2 * e, t[1] * 2 * e, t[2] * 2 * e],
     rotation: ((Number(f._Rotation) || 0) * Math.PI) / 180,
   };
 }
 
-// 焼き込み済みキューブが無いマップ（47/81）は実ゲームと同じく skybox から作る。反射は生値で読むので linear 扱い。
 function skyboxCube(T, renderer, sky) {
   const raw = (t) => {
     if (t) t.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
     return t;
   };
-  if (sky.cube) return { tex: raw(cubeTexture(T, sky.cube, sky.exposure)), rt: null };
+  if (sky.cube) return { tex: raw(cubeTexture(T, sky.cube, sky.scale)), rt: null };
   if (sky.tex && renderer) {
-    // fromEquirectangularTexture は元テクスチャから minFilter/generateMipmaps を引き継ぐ。先に設定しないとミップが無い。
-    const src = skyTexture(T, sky.tex, sky.exposure);
+    const src = skyTexture(T, sky.tex, sky.scale);
     src.minFilter = T.LinearMipmapLinearFilter;
     src.generateMipmaps = true;
     const rt = new T.WebGLCubeRenderTarget(256);
@@ -184,6 +223,8 @@ function lightmapTexture(T, rec, bptc) {
   tex.generateMipmaps = false;
   tex.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
   tex.channel = 1;
+  if (!tex.userData) tex.userData = {};
+  tex.userData.lightmapRgbm = !(rec.format === 17 || rec.format === 24);
   tex.needsUpdate = true;
   return tex;
 }
@@ -209,8 +250,6 @@ function ambientOf(rs) {
   return FLAT_SH(rgb.map(srgbToLinear));
 }
 
-// ベイク済み LightProbes（sharedAssets 側の classID 258）。実データを持つのは
-// deepforest3 / plainforest / plainforest2 の3本だけで、他は空。
 function lightProbesOf(ssf, ssfp) {
   if (!ssf || !ssfp) return null;
   const key = (i) => 'sh[' + (i < 10 ? ' ' : '') + i + ']';
@@ -235,7 +274,6 @@ function lightProbesOf(ssf, ssfp) {
     return {
       coeff,
       pos: pos.map((p) => [Number(p.x) || 0, Number(p.y) || 0, Number(p.z) || 0]),
-      // matrix は行優先（実データ 90/90 で検証: プローブ位置を入れると重心座標が (1,0,0)/(0,1,0)/(0,0,1) になる）
       tets: tets.map((t) => {
         const m = t.matrix || {};
         return {
@@ -248,8 +286,6 @@ function lightProbesOf(ssf, ssfp) {
   return null;
 }
 
-// Unity と同じで、点を含む四面体の重心座標で4つのプローブを混ぜる。
-// 凸包の外に出た点は、いちばん内側に近い四面体でクランプする（Unity は m_HullRays を使う）。
 function probeShAt(lp, x, y, z) {
   let best = null;
   let bestScore = -Infinity;
@@ -305,8 +341,6 @@ function sampleSH(sh, nx, ny, nz, out) {
   return out;
 }
 
-// Unity が unity_SHAr..unity_SHC へ詰める形（LightProbes.cpp の fC0..fC4）。
-// sh[係数][チャンネル] の並びは m_AmbientProbe と同じ。
 function shConstants(sh) {
   const [fC0, fC1, fC2, fC3, fC4] = SH_C;
   const out = {};
@@ -320,7 +354,6 @@ function shConstants(sh) {
   return out;
 }
 
-// Unity の unity_FogParams。x,y は Exp/Exp2 用、z,w は Linear 用。
 function fogParams(rs) {
   const d = Number(rs.m_FogDensity) || 0;
   const s = Number(rs.m_LinearFogStart) || 0;
@@ -343,9 +376,9 @@ function bakeAmbientColors(T, geo, sh) {
   return new T.BufferAttribute(col, 3);
 }
 
+const TP_ENCODE_UNIFORM = 'uniform float uTpEncode;\n';
 const TP_TO_LINEAR = 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
 
-// 霧（実ゲームの焼き込み GLSL と同じ式。field-shader.js の FOG_FN と同一）。
 const TP_FOG = [
   'uniform vec4 uTpFogParams;',
   'uniform vec3 uTpFogColor;',
@@ -361,8 +394,6 @@ const TP_FOG = [
   '}',
 ].join('\n');
 
-// URP の Lit / Simple Lit フラグメント（WebGL版バンドルの実GLSL）を式のまま移した直接光。
-// Baked Lit は直接光を一切持たないので対象外。
 const TP_DIRECT = [
   '#if defined( TP_LIT ) || defined( TP_BLINN )',
   '  {',
@@ -403,10 +434,24 @@ const TP_DIRECT = [
   '#endif',
 ].join('\n');
 
+const TP_CHAR_SHADOW = [
+  '#ifdef TP_CHARSHADOW',
+  '  if ( uCharShadowStrength > 0.0 ) {',
+  '    vec4 tpCw = uCharShadowMatrix * vec4( vTpWorld, 1.0 );',
+  '    tpCw.xyz /= tpCw.w;',
+  '    if ( tpCw.x > 0.0 && tpCw.x < 1.0 && tpCw.y > 0.0 && tpCw.y < 1.0 && tpCw.z < 1.0 )',
+  '      outgoingLight *= mix( 1.0, texture( uCharShadowMap, tpCw.xyz ), uCharShadowStrength );',
+  '  }',
+  '#endif',
+].join('\n');
+
 function gammaPipeline(T, opts, o) {
   const uniforms = {};
   const defines = {};
+  const charShadow = !!o.charShadow;
   const needNormal = !!(o.dirLightMap || o.lighting);
+  const needWorld = needNormal || charShadow;
+  if (opts.lightMap && opts.lightMap.userData && opts.lightMap.userData.lightmapRgbm) defines.TP_LM_RGBM = '';
   if (o.dirLightMap) {
     uniforms.uDirLightMap = { value: o.dirLightMap };
     defines.TP_DIRLM = '';
@@ -447,29 +492,43 @@ function gammaPipeline(T, opts, o) {
     uniforms.uTpFogControl = { value: [o.fog.mode, 0.05] };
     if (o.fogUniforms) o.fogUniforms.push(uniforms);
   }
+  if (charShadow) {
+    defines.TP_CHARSHADOW = '';
+    uniforms.uCharShadowMap = { value: o.charShadow.map };
+    uniforms.uCharShadowMatrix = { value: new T.Matrix4() };
+    uniforms.uCharShadowStrength = { value: 0 };
+    o.charShadowUniforms.push(uniforms);
+  }
+  uniforms.uTpEncode = { value: 1 };
+  if (o.rtUniforms) o.rtUniforms.push(uniforms);
   const key = 'tp-field|' + Object.keys(defines).sort().join('+');
   return (m) => {
     m.defines = Object.assign(m.defines || {}, defines);
     m.customProgramCacheKey = () => key;
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
-      if (needNormal || defines.TP_FOG != null) {
+      if (needWorld || defines.TP_FOG != null) {
         let vs = shader.vertexShader;
-        if (needNormal)
+        if (needWorld)
           vs = vs.replace(
             '#include <begin_vertex>',
-            '#include <begin_vertex>\n\tvTpNormal = mat3( modelMatrix ) * normal;\n\tvTpWorld = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;' + (defines.TP_SH != null ? '\n\tvTpSH = aTpSH;' : ''),
+            '#include <begin_vertex>\n\tvTpWorld = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;' +
+              (needNormal ? '\n\tvTpNormal = mat3( modelMatrix ) * normal;' : '') +
+              (defines.TP_SH != null ? '\n\tvTpSH = aTpSH;' : ''),
           );
         if (defines.TP_FOG != null) vs = vs.replace('#include <project_vertex>', '#include <project_vertex>\n\tvTpFogZ = gl_Position.w;');
         shader.vertexShader =
-          (needNormal ? 'varying vec3 vTpNormal;\nvarying vec3 vTpWorld;\n' : '') +
+          (needNormal ? 'varying vec3 vTpNormal;\n' : '') +
+          (needWorld ? 'varying vec3 vTpWorld;\n' : '') +
           (defines.TP_SH != null ? 'attribute vec3 aTpSH;\nvarying vec3 vTpSH;\n' : '') +
           (defines.TP_FOG != null ? 'varying float vTpFogZ;\n' : '') +
           vs;
       }
       shader.fragmentShader =
+        TP_ENCODE_UNIFORM +
         TP_TO_LINEAR +
-        (needNormal ? 'varying vec3 vTpNormal;\nvarying vec3 vTpWorld;\n' : '') +
+        (needNormal ? 'varying vec3 vTpNormal;\n' : '') +
+        (needWorld ? 'varying vec3 vTpWorld;\n' : '') +
         (defines.TP_SH != null ? 'varying vec3 vTpSH;\n' : '') +
         (o.dirLightMap ? 'uniform sampler2D uDirLightMap;\n' : '') +
         (o.emission ? 'uniform vec3 uEmission;\n' : '') +
@@ -478,17 +537,20 @@ function gammaPipeline(T, opts, o) {
         (defines.TP_LIT != null ? 'uniform float uSmoothness;\nuniform float uMetallic;\n' : '') +
         (defines.TP_SPECCUBE != null ? 'uniform samplerCube uSpecCube;\n' : '') +
         (defines.TP_SHADOW != null ? 'uniform highp sampler2DShadow uShadowMap;\nuniform mat4 uShadowMatrix;\nuniform float uShadowStrength;\n' : '') +
+        (charShadow ? 'uniform highp sampler2DShadow uCharShadowMap;\nuniform mat4 uCharShadowMatrix;\nuniform float uCharShadowStrength;\n' : '') +
         (defines.TP_FOG != null ? TP_FOG + '\n' : '') +
         shader.fragmentShader
           .replace(
             '#ifdef USE_LIGHTMAP\n\t\tvec4 lightMapTexel = texture2D( lightMap, vLightMapUv );\n\t\treflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;\n\t#else\n\t\treflectedLight.indirectDiffuse += vec3( 1.0 );\n\t#endif',
-            'vec3 tpGi = vec3( 1.0 );\n\t#ifdef USE_LIGHTMAP\n\t\tvec4 lightMapTexel = texture2D( lightMap, vLightMapUv );\n\t\ttpGi = lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;\n\t\t#ifdef TP_DIRLM\n\t\t\tvec4 tpDir = texture2D( uDirLightMap, vLightMapUv );\n\t\t\ttpGi = tpGi * ( dot( normalize( vTpNormal ), tpDir.xyz - 0.5 ) + 0.5 ) / max( tpDir.w, 1e-4 );\n\t\t#endif\n\t#endif\n\t#ifdef TP_SH\n\t\ttpGi = vTpSH;\n\t#endif\n\treflectedLight.indirectDiffuse += tpGi;',
+            'vec3 tpGi = vec3( 1.0 );\n\t#ifdef USE_LIGHTMAP\n\t\tvec4 lightMapTexel = texture2D( lightMap, vLightMapUv );\n\t\t#ifdef TP_LM_RGBM\n\t\t\tlightMapTexel.rgb *= lightMapTexel.a * 5.0;\n\t\t#endif\n\t\ttpGi = lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;\n\t\t#ifdef TP_DIRLM\n\t\t\tvec4 tpDir = texture2D( uDirLightMap, vLightMapUv );\n\t\t\ttpGi = tpGi * ( dot( normalize( vTpNormal ), tpDir.xyz - 0.5 ) + 0.5 ) / max( tpDir.w, 1e-4 );\n\t\t#endif\n\t#endif\n\t#ifdef TP_SH\n\t\ttpGi = vTpSH;\n\t#endif\n\treflectedLight.indirectDiffuse += tpGi;',
           )
           .replace(
             'vec3 outgoingLight = reflectedLight.indirectDiffuse;',
             'vec3 outgoingLight = reflectedLight.indirectDiffuse;\n' +
               TP_DIRECT +
-              '\n\t#ifdef TP_EMISSION\n\t\t#ifdef TP_EMISSIONMAP\n\t\t\toutgoingLight += uEmission * texture2D( uEmissionMap, vMapUv ).rgb;\n\t\t#else\n\t\t\toutgoingLight += uEmission;\n\t\t#endif\n\t#endif\n\t#ifdef TP_FOG\n\t\toutgoingLight = tpMixFog( outgoingLight );\n\t#endif\n\toutgoingLight = tpToLinear( outgoingLight );',
+              '\n\t#ifdef TP_EMISSION\n\t\t#ifdef TP_EMISSIONMAP\n\t\t\toutgoingLight += uEmission * texture2D( uEmissionMap, vMapUv ).rgb;\n\t\t#else\n\t\t\toutgoingLight += uEmission;\n\t\t#endif\n\t#endif\n' +
+              TP_CHAR_SHADOW +
+              '\n\t#ifdef TP_FOG\n\t\toutgoingLight = tpMixFog( outgoingLight );\n\t#endif\n\toutgoingLight = mix( outgoingLight, tpToLinear( outgoingLight ), uTpEncode );',
           );
     };
   };
@@ -519,14 +581,12 @@ function threeMaterial(T, mat, texByPid, lightMap, dirLightMap, env) {
   const c = (mat && mat.color) || null;
   const base = Array.isArray(c) ? c : c ? [c.r ?? 1, c.g ?? 1, c.b ?? 1] : [1, 1, 1];
   if (c) opts.color = new T.Color(base[0], base[1], base[2]);
-  if (mat && mat.cutoff != null && mat.alphaClip === 1) {
-    opts.alphaTest = mat.cutoff;
-    opts.transparent = false;
-  } else if (mat && mat.transparent) {
+  if (mat && mat.cutoff != null && mat.alphaClip === 1) opts.alphaTest = mat.cutoff;
+  if (mat && mat.transparent) {
     opts.transparent = true;
     opts.depthWrite = mat.zwrite === 1;
     if (Number(mat.srcBlend) === 1 && Number(mat.dstBlend) === 1) opts.blending = T.AdditiveBlending;
-  }
+  } else opts.transparent = false;
   const em = emissionOf(mat);
   const emMap = em && mat.texByName && mat.texByName._EmissionMap ? (texByPid.get(String(mat.texByName._EmissionMap)) || {}).tex : null;
   const f = (mat && mat.allFloats) || {};
@@ -544,6 +604,9 @@ function threeMaterial(T, mat, texByPid, lightMap, dirLightMap, env) {
     specCube: env && env.specCube,
     fog: env && env.fog,
     fogUniforms: env && env.fogUniforms,
+    rtUniforms: env && env.rtUniforms,
+    charShadow: env && env.charShadow,
+    charShadowUniforms: env && env.charShadowUniforms,
   })(m);
   return m;
 }
@@ -556,8 +619,10 @@ function emissionOf(mat) {
   return c[0] + c[1] + c[2] > 0.001 ? [c[0], c[1], c[2]] : null;
 }
 
+const GROUND_FOOT = 0.25;
 function groundNear(geos, x, z, refY) {
-  let best = null;
+  const pts = [];
+  for (const dx of [-GROUND_FOOT, 0, GROUND_FOOT]) for (const dz of [-GROUND_FOOT, 0, GROUND_FOOT]) pts.push([x + dx, z + dz, null]);
   for (const geo of geos) {
     const a = geo.positions;
     const ix = geo.indices;
@@ -573,12 +638,8 @@ function groundNear(geos, x, z, refY) {
         z2 = a[i2 + 2];
       const d = (z1 - z2) * (x0 - x2) + (x2 - x1) * (z0 - z2);
       if (Math.abs(d) < 1e-9) continue;
-      const l0 = ((z1 - z2) * (x - x2) + (x2 - x1) * (z - z2)) / d;
-      if (l0 < 0 || l0 > 1) continue;
-      const l1 = ((z2 - z0) * (x - x2) + (x0 - x2) * (z - z2)) / d;
-      if (l1 < 0 || l1 > 1) continue;
-      const l2 = 1 - l0 - l1;
-      if (l2 < 0 || l2 > 1) continue;
+      if (Math.min(x0, x1, x2) > x + GROUND_FOOT || Math.max(x0, x1, x2) < x - GROUND_FOOT) continue;
+      if (Math.min(z0, z1, z2) > z + GROUND_FOOT || Math.max(z0, z1, z2) < z - GROUND_FOOT) continue;
       const ux = a[i1] - a[i0],
         uy = a[i1 + 1] - a[i0 + 1],
         uz = a[i1 + 2] - a[i0 + 2];
@@ -587,10 +648,20 @@ function groundNear(geos, x, z, refY) {
         vz = a[i2 + 2] - a[i0 + 2];
       const ny = uz * vx - ux * vz;
       if (ny / (Math.hypot(uy * vz - uz * vy, ny, ux * vy - uy * vx) || 1) <= 0.3) continue;
-      const y = l0 * a[i0 + 1] + l1 * a[i1 + 1] + l2 * a[i2 + 1];
-      if (best === null || Math.abs(y - refY) < Math.abs(best - refY)) best = y;
+      for (const p of pts) {
+        const l0 = ((z1 - z2) * (p[0] - x2) + (x2 - x1) * (p[1] - z2)) / d;
+        if (l0 < 0 || l0 > 1) continue;
+        const l1 = ((z2 - z0) * (p[0] - x2) + (x0 - x2) * (p[1] - z2)) / d;
+        if (l1 < 0 || l1 > 1) continue;
+        const l2 = 1 - l0 - l1;
+        if (l2 < 0 || l2 > 1) continue;
+        const y = l0 * a[i0 + 1] + l1 * a[i1 + 1] + l2 * a[i2 + 1];
+        if (p[2] === null || Math.abs(y - refY) < Math.abs(p[2] - refY)) p[2] = y;
+      }
     }
   }
+  let best = null;
+  for (const p of pts) if (p[2] !== null && (best === null || p[2] > best)) best = p[2];
   return best;
 }
 
@@ -660,7 +731,19 @@ export async function loadBattleField(T, rel, opt) {
     }
     return whiteTex;
   };
-  const env = { light: null, specCube: null, specCubeRT: null, globals: {}, rsRead: false, shadowUniforms: [], fog: null, fogUniforms: [] };
+  const env = {
+    light: null,
+    specCube: null,
+    specCubeRT: null,
+    globals: {},
+    rsRead: false,
+    shadowUniforms: [],
+    fog: null,
+    fogUniforms: [],
+    rtUniforms: [],
+    charShadow: (opt && opt.charShadow) || null,
+    charShadowUniforms: [],
+  };
   const fieldMats = [];
   const matCache = new Map();
   const materialFor = (p, lmIndex, shOverride, shKey) => {
@@ -683,6 +766,7 @@ export async function loadBattleField(T, rel, opt) {
           fogMode: env.fog ? env.fog.mode : 0,
           fogParams: env.fog ? env.fog.params : null,
           fogColor: env.fog ? env.fog.color : null,
+          charShadow: env.charShadow,
         });
       } catch (e) {
         m = null;
@@ -751,6 +835,39 @@ export async function loadBattleField(T, rel, opt) {
     } catch (e) {}
   }
 
+  const clipTracks = new Map();
+  const ctrlNameById = new Map();
+  for (const o of ssfp ? ssfp.objects : []) {
+    if (o.classID === CLS.ANIM_CLIP) {
+      let c;
+      try {
+        c = unitySf.readObject(ssf, ssfp.LE, o);
+      } catch (e) {
+        continue;
+      }
+      const dec = decodeMapClip(c);
+      if (dec) clipTracks.set(String(c.m_Name).toLowerCase(), dec);
+    } else if (o.classID === CLS.ANIM_CONTROLLER) {
+      try {
+        ctrlNameById.set(String(o.pathID), String(unitySf.readObject(ssf, ssfp.LE, o).m_Name || '').toLowerCase());
+      } catch (e) {}
+    }
+  }
+  const animByGo = new Map();
+  if (clipTracks.size) {
+    for (const o of sfp.objects) {
+      if (o.classID !== CLS.ANIMATOR) continue;
+      let a;
+      try {
+        a = unitySf.readObject(sf, sfp.LE, o);
+      } catch (e) {
+        continue;
+      }
+      if (a.m_Enabled === 0) continue;
+      const track = clipTracks.get(ctrlNameById.get(pid(a.m_Controller)) || '');
+      if (track) animByGo.set(pid(a.m_GameObject), track);
+    }
+  }
   const trById = new Map();
   const trByGo = new Map();
   for (const o of sfp.objects) {
@@ -834,10 +951,7 @@ export async function loadBattleField(T, rel, opt) {
         };
         env.globals._MainLightPosition = [env.light.dir[0], env.light.dir[1], env.light.dir[2], 0];
         env.globals._MainLightColor = [c.r * k, c.g * k, c.b * k, 1];
-        // Unity と同じ lerp(1, shadow, strength)。影 Off のマップは strength=0 で影が消える。
-        // z/w は距離フェード（0 にすると無効）。y はソフト影のタップ数選択で、0 なら単発サンプル。
         env.globals._MainLightShadowParams = [strength, 0, 0, 0];
-        // カスケードは1枚に固定する（半径を巨大にすると ComputeCascadeIndex が必ず 0 を返す）。
         env.globals._CascadeShadowSplitSpheres0 = [0, 0, 0, 0];
         env.globals._CascadeShadowSplitSpheres1 = [0, 0, 0, 0];
         env.globals._CascadeShadowSplitSpheres2 = [0, 0, 0, 0];
@@ -874,6 +988,36 @@ export async function loadBattleField(T, rel, opt) {
 
   const perMesh = new Map();
   const loose = [];
+  const animated = [];
+  const animRootCache = new Map();
+  const animRootOf = (goPid) => {
+    if (!animByGo.size) return null;
+    if (animRootCache.has(goPid)) return animRootCache.get(goPid);
+    let cur = goPid;
+    let found = null;
+    for (let i = 0; cur && i < 64; i++) {
+      const track = animByGo.get(cur);
+      if (track) {
+        const self = trByGo.get(cur);
+        const father = self && isLocal(self.m_Father) ? trById.get(pid(self.m_Father)) : null;
+        const p = (self && self.m_LocalPosition) || {};
+        const s = (self && self.m_LocalScale) || {};
+        found = {
+          track,
+          world: worldMatrix(cur),
+          parent: father ? worldMatrix(pid(father.m_GameObject)) : new T.Matrix4(),
+          pos: [Number(p.x) || 0, Number(p.y) || 0, Number(p.z) || 0],
+          scale: [s.x == null ? 1 : Number(s.x), s.y == null ? 1 : Number(s.y), s.z == null ? 1 : Number(s.z)],
+        };
+        break;
+      }
+      const t = trByGo.get(cur);
+      const f = t && isLocal(t.m_Father) ? trById.get(pid(t.m_Father)) : null;
+      cur = f ? pid(f.m_GameObject) : null;
+    }
+    animRootCache.set(goPid, found);
+    return found;
+  };
   for (const o of sfp.objects) {
     if (o.classID !== CLS.MESH_RENDERER) continue;
     let mr;
@@ -901,11 +1045,18 @@ export async function loadBattleField(T, rel, opt) {
       parts.push({ start: sm.indexStart, count: sm.indexCount, matPid: pid(matRefs[i] || matRefs[0]), lm });
     });
     if (!parts.length) continue;
+    const goPid = pid(mr.m_GameObject);
+    const root = animRootOf(goPid);
+    if (root) {
+      const rel = new T.Matrix4().copy(root.world).invert().multiply(worldMatrix(goPid));
+      animated.push({ geo, parts, track: root.track, parent: root.parent, pos: root.pos, scale: root.scale, rel });
+      continue;
+    }
     if (cnt > 0) {
       if (!perMesh.has(meshKey)) perMesh.set(meshKey, { geo, parts: [] });
       perMesh.get(meshKey).parts.push(...parts);
     } else {
-      loose.push({ geo, parts, matrix: worldMatrix(pid(mr.m_GameObject)) });
+      loose.push({ geo, parts, matrix: worldMatrix(goPid) });
     }
   }
 
@@ -971,8 +1122,6 @@ export async function loadBattleField(T, rel, opt) {
     g.setIndex(a.index);
     if (!a.normal) g.computeVertexNormals();
     if (geo.uv1) g.setAttribute('uv1', new T.BufferAttribute(bakeLightmapUv(geo, parts), 2));
-    // ライトマップを持たないレンダラは、Unity と同じくレンダラ1点（bbox 中心）で
-    // ベイク済み LightProbes を四面体補間して使う。プローブが無いマップは従来どおり ambient probe。
     let probeSh = null;
     let probeKey = '';
     if (lightProbes && parts.some((p) => !(p.lm && geo.uv1))) {
@@ -980,10 +1129,11 @@ export async function loadBattleField(T, rel, opt) {
       probeSh = probeShAt(lightProbes, c[0], c[1], c[2]);
       if (probeSh) probeKey = 'pb' + ++probeSeq;
     }
+    if (geo.colors) g.setAttribute('color', new T.BufferAttribute(geo.colors, 4));
     if (parts.some((p) => !(p.lm && geo.uv1))) {
       const vc = bakeAmbientColors(T, g, probeSh || ambient);
       if (vc) {
-        g.setAttribute('color', vc);
+        if (!shaderPass) g.setAttribute('color', vc);
         g.setAttribute('aTpSH', vc);
       }
     }
@@ -1007,26 +1157,35 @@ export async function loadBattleField(T, rel, opt) {
     if (matrix) {
       mesh.matrixAutoUpdate = false;
       mesh.matrix.copy(matrix);
+      mesh.matrixWorldNeedsUpdate = true;
     }
     group.add(mesh);
     owned.push(g);
+    return mesh;
   };
   const addSplit = (geo, parts, matrix) => {
-    addMesh(
+    const a = addMesh(
       geo,
       parts.filter((p) => !usesFieldShader(p.matPid)),
       matrix,
       false,
     );
-    addMesh(
+    const b = addMesh(
       geo,
       parts.filter((p) => usesFieldShader(p.matPid)),
       matrix,
       true,
     );
+    return [a, b].filter(Boolean);
   };
   for (const { geo, parts } of perMesh.values()) addSplit(geo, parts, null);
   for (const { geo, parts, matrix } of loose) addSplit(geo, parts, matrix);
+  const animItems = [];
+  for (const a of animated) {
+    const rest = new T.Matrix4().compose(new T.Vector3(a.pos[0], a.pos[1], a.pos[2]), new T.Quaternion(), new T.Vector3(a.scale[0], a.scale[1], a.scale[2]));
+    const meshes = addSplit(a.geo, a.parts, new T.Matrix4().multiplyMatrices(a.parent, rest).multiply(a.rel));
+    if (meshes.length) animItems.push({ meshes, parent: a.parent, pos: a.pos, scale: a.scale, rel: a.rel, track: a.track });
+  }
   if (!drawn) return null;
 
   let origin = null;
@@ -1079,9 +1238,9 @@ export async function loadBattleField(T, rel, opt) {
           exposure = sky.exposure;
         backgroundRotation = sky.rotation;
         if (skyCube) {
-          background = cubeTexture(T, skyCube, exposure);
+          background = cubeTexture(T, skyCube, sky.scale);
         } else if (skyTex) {
-          background = skyTexture(T, skyTex, exposure);
+          background = skyTexture(T, skyTex, sky.scale);
         } else if (skyMat) {
           background = flatSkyColor(T, skyMat, exposure);
         } else {
@@ -1116,7 +1275,40 @@ export async function loadBattleField(T, rel, opt) {
     fieldMats,
     shadowUniforms: env.shadowUniforms,
     fogUniforms: env.fogUniforms,
+    rtUniforms: env.rtUniforms,
+    charShadowUniforms: env.charShadowUniforms,
+    animated: animItems,
   };
+}
+
+export function stepFieldAnimation(T, items, t) {
+  if (!items || !items.length) return;
+  const q = new T.Quaternion();
+  const v = new T.Vector3();
+  const s = new T.Vector3();
+  const local = new T.Matrix4();
+  for (const it of items) {
+    const tr = it.track;
+    const n = tr.times.length;
+    const u = ((t % tr.duration) + tr.duration) % tr.duration;
+    let i = 0;
+    while (i < n - 2 && tr.times[i + 1] <= u) i++;
+    const t0 = tr.times[i];
+    const t1 = tr.times[i + 1];
+    const f = t1 > t0 ? (u - t0) / (t1 - t0) : 0;
+    q.set(tr.values[i * 4], tr.values[i * 4 + 1], tr.values[i * 4 + 2], tr.values[i * 4 + 3]);
+    const q1 = new T.Quaternion(tr.values[(i + 1) * 4], tr.values[(i + 1) * 4 + 1], tr.values[(i + 1) * 4 + 2], tr.values[(i + 1) * 4 + 3]);
+    q.slerp(q1, f);
+    v.set(it.pos[0], it.pos[1], it.pos[2]);
+    s.set(it.scale[0], it.scale[1], it.scale[2]);
+    local.compose(v, q, s);
+    local.premultiply(it.parent);
+    if (it.rel) local.multiply(it.rel);
+    for (const m of it.meshes) {
+      m.matrix.copy(local);
+      m.matrixWorldNeedsUpdate = true;
+    }
+  }
 }
 
 export { gammaPipeline };

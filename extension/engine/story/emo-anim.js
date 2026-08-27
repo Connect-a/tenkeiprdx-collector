@@ -234,7 +234,10 @@ function build(code) {
   for (const p in byProp) {
     byProp[p].sort((a, b) => a.start - b.start);
     let prev = BASE[p];
-    for (const tr of byProp[p]) { tr.from = prev; if (p !== 'punch') prev = tr.to; }
+    for (const tr of byProp[p]) {
+      tr.from = prev;
+      if (p !== 'punch') prev = tr.to;
+    }
   }
   function sample(t) {
     const v = { a: BASE.a, s: 1, sx: 1, sy: 1, x: BASE.x, y: BASE.y, rz: 0, punch: 0, fill: byProp.fill ? 0 : 1 };
@@ -244,11 +247,17 @@ function build(code) {
       let val = list[0].from;
       for (const tr of list) {
         if (t < tr.start) break;
-        if (t >= tr.end) { val = p === 'punch' ? 0 : tr.ease === 'flash' ? 1 : tr.to; continue; }
+        if (t >= tr.end) {
+          val = p === 'punch' ? 0 : tr.ease === 'flash' ? 1 : tr.to;
+          continue;
+        }
         const prog = tr.dur > 0 ? clamp01((t - tr.start) / tr.dur) : 1;
         if (p === 'punch') val = tr.to * Math.sin(prog * Math.PI);
         else if (tr.ease === 'flash') val = 1 + (tr.to - 1) * Math.sin(prog * Math.PI);
-        else { const fn = EASE[tr.ease] || EASE.outSine; val = tr.from + (tr.to - tr.from) * fn(prog); }
+        else {
+          const fn = EASE[tr.ease] || EASE.outSine;
+          val = tr.from + (tr.to - tr.from) * fn(prog);
+        }
         break;
       }
       v[p] = val;
@@ -259,10 +268,12 @@ function build(code) {
         if (!tr._arc) tr._arc = buildArcTable([[0, 0]].concat(tr.pts));
         const frac = t >= tr.end ? 1 : (EASE[tr.ease] || EASE.outSine)(clamp01((t - tr.start) / tr.dur));
         const pos = sampleArc(tr._arc, frac);
-        v.x = pos[0]; v.y = pos[1];
+        v.x = pos[0];
+        v.y = pos[1];
       }
     }
-    const sx = v.s * v.sx * (1 + v.punch), sy = v.s * v.sy * (1 + v.punch);
+    const sx = v.s * v.sx * (1 + v.punch),
+      sy = v.s * v.sy * (1 + v.punch);
     return { a: v.a, x: v.x, y: v.y, sx, sy, rz: v.rz, fill: v.fill };
   }
   return { total, sample };

@@ -5,8 +5,10 @@ import { charAssets } from '../../data/char-assets.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { characterMeta } from '../../data/character-meta.js';
 import { PLACE } from '../../core/placement.js';
+import { bundleName } from '../../core/paths.js';
 import { DIRS, FOLDER_PARENTS } from '../../core/constants.js';
 import { ensureIndexes } from '../../data/index-store.js';
+import { utilHelpers } from '../../core/util.js';
 
 const bundleIn = async (handle, sub) => {
   try {
@@ -21,6 +23,7 @@ const spineAssets = (m) => (m && m.assets ? m.assets.filter((a) => a.cat === 'sp
 
 let _charDirs = null;
 let _monsters = null;
+let _other3d = null;
 const _byId = new Map();
 const _loaded = new Set();
 
@@ -48,8 +51,63 @@ async function monsterEntries(mode) {
   return list.filter(has).map((m) => ({ id: String(m.id), kind: 'monster', displayName: m.name || '#' + m.id, title: '' }));
 }
 
+const OTHER3D_GROUPS = [
+  ['monster', 'モンスター'],
+  ['boss', 'ボス・敵キャラ'],
+  ['ally', '未分類'],
+];
+
+async function other3dEntries() {
+  const list = await collectionRepository.otherList();
+  _other3d = new Map(list.map((e) => [String(e.id), e]));
+  const out = [];
+  OTHER3D_GROUPS.forEach(([cat, label], groupNo) => {
+    for (const e of list) {
+      if (e.category !== cat || !e.model) continue;
+      out.push({ id: String(e.id), kind: 'other3d', group: label, groupNo, displayName: e.name || '#' + e.id, title: e.name ? '#' + e.id : '' });
+    }
+  });
+  return out;
+}
+
+const EX_RE = /^EX/i;
+
+async function exEntries() {
+  const { folderMeta } = await collectionRepository.folderModel();
+  const dirs = (await fileStore.listFolderDirs()).filter((d) => d.parent === FOLDER_PARENTS.character);
+  _charDirs = new Map(dirs.map((d) => [String(d.folderKey), d.handle]));
+  const jobs = [];
+  for (const d of dirs) {
+    const fm = folderMeta[String(d.folderKey)];
+    if (!fm || fm.rosterKind !== 'character') continue;
+    for (const ep of fm.episodes || []) {
+      if (!EX_RE.test(ep.label || '')) continue;
+      jobs.push({ handle: d.handle, folderKey: String(d.folderKey), fm, ep });
+    }
+  }
+  const found = await utilHelpers.pool(jobs, 16, async (j) => {
+    const sub = `story/${j.ep.episodeId}/cg`;
+    const out = [];
+    for (const name of await bundleIn(j.handle, sub)) {
+      const m = name.match(/^(\d{8})_(\d+)\./);
+      if (!m) continue;
+      const no = String(parseInt(m[2], 10));
+      out.push({
+        id: `ex:${j.folderKey}:${j.ep.episodeId}:${m[2]}`,
+        kind: 'ex',
+        folderKey: j.folderKey,
+        sub: sub + '/' + name,
+        displayName: `${characterMeta.displayName(j.fm) || j.folderKey}EX${no}`,
+        title: '',
+      });
+    }
+    return out;
+  });
+  return found.flat().sort((a, b) => (a.displayName > b.displayName ? 1 : a.displayName < b.displayName ? -1 : 0));
+}
+
 export async function listEntries(kind, mode) {
-  const list = kind === 'monster' ? await monsterEntries(mode) : await characterEntries();
+  const list = kind === 'ex' ? await exEntries() : kind === 'other3d' ? await other3dEntries() : kind === 'monster' ? await monsterEntries(mode) : await characterEntries();
   _loaded.add(kind + ':' + mode);
   return index(list);
 }
@@ -90,7 +148,8 @@ async function charWeapons(handle, det, read) {
     const model = files.find((f) => f.startsWith(wid + '_model.'));
     if (!model) continue;
     const mat = files.find((f) => f.startsWith(wid + '_mat.'));
-    list.push({ id: wid, slot: w.slot || 'wp_2', scale: w.scale || 1, model: 'visual/weapon/' + model, materials: mat ? 'visual/weapon/' + mat : null });
+    const deps = files.filter((f) => f.startsWith(wid + '_dep')).map((f) => 'visual/weapon/' + f);
+    list.push({ id: wid, slot: w.slot || 'wp_2', scale: w.scale || 1, model: 'visual/weapon/' + model, materials: mat ? 'visual/weapon/' + mat : null, deps });
   }
   if (!list.length) return null;
   const out = await charAssets.buildWeapons(read, list);
@@ -99,6 +158,26 @@ async function charWeapons(handle, det, read) {
 
 export async function loadModelFor(entry, costume) {
   if (!entry) return null;
+  if (entry.kind === 'other3d') {
+    const e = _other3d && _other3d.get(String(entry.id));
+    if (!e || !e.model) return null;
+    const read = (rel) => (rel ? assetStore.readAsset(DIRS.other, rel, PLACE.flat) : Promise.resolve(null));
+    const model = await charAssets.loadModelBundle(read, e.model, e.meshDeps);
+    if (!model) return null;
+    const mats = e.materials || [];
+    const pick = (costume && mats.includes(costume) && costume) || e.material || mats[0] || null;
+    return {
+      model,
+      matBundle: await charAssets.loadMaterialBundle(read, pick),
+      weapons: await charAssets.buildWeapons(read, e.weapons),
+      attachments: e.attachments || undefined,
+      attachmentColors: e.attachmentColors || null,
+      mouthAtlas: e.mouth ? await mouthAtlas() : null,
+      costume: pick || '',
+      variations: mats.map((rel) => ({ value: rel, label: bundleName(rel) })),
+      read,
+    };
+  }
   if (entry.kind === 'monster') {
     const m = _monsters && _monsters.get(String(entry.id));
     if (!m || !m.model) return null;
@@ -141,6 +220,16 @@ export async function loadModelFor(entry, costume) {
 }
 
 export async function spineInputsFor(entry) {
+  if (entry && entry.kind === 'ex') {
+    const h = charHandle(entry.folderKey);
+    if (!h) return null;
+    try {
+      const b = await fileStore.readBytesUnder(h, entry.sub);
+      return b ? unityMesh.extractSpineInputs(b) : null;
+    } catch (e) {
+      return null;
+    }
+  }
   if (entry && entry.kind === 'monster') {
     const m = _monsters && _monsters.get(String(entry.id));
     for (const a of spineAssets(m)) {

@@ -80,7 +80,6 @@ const runtimeReady = () => {
 };
 
 let _deformPatched = false;
-// HACK: spine 3.8 の deform 残留バグ回避（不一致長の deform を破棄）
 const patchStaleDeformOnce = () => {
   if (_deformPatched) return;
   const s = lib();

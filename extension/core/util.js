@@ -26,11 +26,13 @@ async function pool(items, limit, worker) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runner));
   return out;
 }
-const safeProgress = (progress) => (...a) => {
-  try {
-    progress && progress(...a);
-  } catch (e) {}
-};
+const safeProgress =
+  (progress) =>
+  (...a) => {
+    try {
+      progress && progress(...a);
+    } catch (e) {}
+  };
 const audioBlobUrl = (data, mime) => URL.createObjectURL(new Blob([data], { type: mime || 'audio/mp4' }));
 const revokeUrlMap = (map) => {
   for (const u of map.values()) {

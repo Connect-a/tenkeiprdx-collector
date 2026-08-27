@@ -180,7 +180,14 @@ export function createMonsterPanel(deps) {
   function profile(e) {
     const grid = GRID_ROWS.map(([label, get]) => [label, get(e)]).filter(([, v]) => v);
     const kids = [];
-    if (grid.length) kids.push(el('div', 'dinfogrid', grid.map(([label, v]) => cell(label, v))));
+    if (grid.length)
+      kids.push(
+        el(
+          'div',
+          'dinfogrid',
+          grid.map(([label, v]) => cell(label, v)),
+        ),
+      );
     if (e.desc) kids.push(el('div', 'dinforow', [el('span', 'dinfo-label', 'このモンスターについて'), el('span', 'dinfo-value', nameFix(e.desc))]));
     return el('div', 'dinfo', kids);
   }

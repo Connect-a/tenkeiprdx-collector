@@ -57,8 +57,5 @@ export async function refreshSharedNotice() {
       },
     },
   });
-  append(box, [
-    el('div', 'note', 'ストーリー再生には共有リソース（背景・BGM・SE・フォント・演出）が必要です。まだダウンロードされていません。'),
-    el('div', { class: 'sharedfixrow' }, [btn, prog]),
-  ]);
+  append(box, [el('div', 'note', 'ストーリー再生には共有リソース（背景・BGM・SE・フォント・演出）が必要です。まだダウンロードされていません。'), el('div', { class: 'sharedfixrow' }, [btn, prog])]);
 }

@@ -23,7 +23,13 @@ const valueSpan = (val) => el('span', 'dinfo-value', nameFix(val));
 
 const inlineRow = (pairs) => {
   const items = pairs.filter(([, v]) => v);
-  return items.length ? el('div', 'dinforow inline', items.map(([label, val]) => el('span', 'dinfoitem', [labelSpan(label), valueSpan(val)]))) : null;
+  return items.length
+    ? el(
+        'div',
+        'dinforow inline',
+        items.map(([label, val]) => el('span', 'dinfoitem', [labelSpan(label), valueSpan(val)])),
+      )
+    : null;
 };
 const labeledRow = (label, val) => (val ? el('div', 'dinforow', [labelSpan(label), valueSpan(val)]) : null);
 
@@ -77,7 +83,9 @@ function renderEpisodes(m) {
       class: 'eprow' + (playable ? '' : ' na'),
       data: { epid: String(episodeIdOf(ep)) },
       html: html`<span class="lbl">${ep.label || ''}</span><span class="ti"></span><span class="cats"></span><span class="epid">#${episodeIdOf(ep)}</span
-        ><span class="vc">${ep.linkTo ? 'R18版' : ep.have !== 'none' ? ep.lineCount + '行' + (ep.voiced ? ' / 音声' + ep.voiced : '') + (ep.have === 'partial' ? ' / 続き未取得' : '') : naLabel}</span>`,
+        ><span class="vc"
+          >${ep.linkTo ? 'R18版' : ep.have !== 'none' ? ep.lineCount + '行' + (ep.voiced ? ' / 音声' + ep.voiced : '') + (ep.have === 'partial' ? ' / 続き未取得' : '') : naLabel}</span
+        >`,
     });
     row.querySelector('.ti').textContent = ep.title || '';
     for (const n of xposNames(ep.xpos)) row.querySelector('.cats').appendChild(el('span', 'epcat', n));

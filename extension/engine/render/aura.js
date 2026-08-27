@@ -18,7 +18,10 @@ async function catalog() {
     const dir = await fileStore.getDir(DIRS.shared, { create: false });
     if (dir) {
       const f = await fileStore.readUnder(dir, CATALOG_DIR + '/vfx_catalog.json');
-      if (f) { _catalog = JSON.parse(await f.text()); return _catalog; }
+      if (f) {
+        _catalog = JSON.parse(await f.text());
+        return _catalog;
+      }
     }
   } catch (e) {}
   const base = await assetRoot();

@@ -2,14 +2,21 @@
 // 手編集しないこと。再生成: node _games/tenkeiprdx/_scripts/bake-aura-shaders.mjs
 // key=Shader Graph名(Shader Graphs/除去)。props は型+シェーダ既定のみ、実際の値は実行時に各オーラ材質で上書き。
 export const gameShaders = {
-  "GeneralTexNormalMeshHue": {
-    shader: "Shader Graphs/GeneralTexNormalMeshHue",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  GeneralTexNormalMeshHue: {
+    shader: 'Shader Graphs/GeneralTexNormalMeshHue',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
-    samplers: ["Texture2D_eb03ed6fffcc41089e4f2a75e54c9aa4"],
+    samplers: ['Texture2D_eb03ed6fffcc41089e4f2a75e54c9aa4'],
     unknownVary: false,
-    props: {"Color_853690b2cfac448ebc2e75f7c1e3039c":{"type":"vec4","def":[7.999999046325684,7.999999046325684,7.999999046325684,0]},"Hue":{"type":"float","def":0},"White":{"type":"float","def":1}},
+    props: {
+      Color_853690b2cfac448ebc2e75f7c1e3039c: { type: 'vec4', def: [7.999999046325684, 7.999999046325684, 7.999999046325684, 0] },
+      Hue: { type: 'float', def: 0 },
+      White: { type: 'float', def: 1 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -219,14 +226,27 @@ void main(){
     return;
 }`,
   },
-  "blackVortex": {
-    shader: "Shader Graphs/blackVortex",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  blackVortex: {
+    shader: 'Shader Graphs/blackVortex',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Vector1_e6720cd6227748d8a1f714820c2134b7":{"type":"float","def":9.399999618530273},"Vector1_8ad15bbcadda40c19e67ddd2d989cd96":{"type":"float","def":9.399999618530273},"Vector1_1":{"type":"float","def":2.200000047683716},"Vector1_bcac86adb4cc4a7bbe536a3ae38a43d9":{"type":"float","def":6.5},"Vector1_5c104539d7bf4a7ebd2585f0e5a8e360":{"type":"float","def":1},"Color1":{"type":"vec4","def":[0,0,0,0]},"Color2":{"type":"vec4","def":[0,0,0,0]},"Insize":{"type":"float","def":0.800000011920929}},
+    props: {
+      Vector1_e6720cd6227748d8a1f714820c2134b7: { type: 'float', def: 9.399999618530273 },
+      Vector1_8ad15bbcadda40c19e67ddd2d989cd96: { type: 'float', def: 9.399999618530273 },
+      Vector1_1: { type: 'float', def: 2.200000047683716 },
+      Vector1_bcac86adb4cc4a7bbe536a3ae38a43d9: { type: 'float', def: 6.5 },
+      Vector1_5c104539d7bf4a7ebd2585f0e5a8e360: { type: 'float', def: 1 },
+      Color1: { type: 'vec4', def: [0, 0, 0, 0] },
+      Color2: { type: 'vec4', def: [0, 0, 0, 0] },
+      Insize: { type: 'float', def: 0.800000011920929 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -1106,14 +1126,25 @@ void main(){
     return;
 }`,
   },
-  "blackVortex2": {
-    shader: "Shader Graphs/blackVortex2",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  blackVortex2: {
+    shader: 'Shader Graphs/blackVortex2',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: false,
-    props: {"Vector1_e6720cd6227748d8a1f714820c2134b7":{"type":"float","def":9.399999618530273},"Vector1_8ad15bbcadda40c19e67ddd2d989cd96":{"type":"float","def":9.399999618530273},"Vector1_1":{"type":"float","def":2.200000047683716},"Vector1_bcac86adb4cc4a7bbe536a3ae38a43d9":{"type":"float","def":6.5},"Color1":{"type":"vec4","def":[0,0,0,0]},"Color2":{"type":"vec4","def":[0,0,0,0]},"Insize":{"type":"float","def":0.800000011920929}},
+    props: {
+      Vector1_e6720cd6227748d8a1f714820c2134b7: { type: 'float', def: 9.399999618530273 },
+      Vector1_8ad15bbcadda40c19e67ddd2d989cd96: { type: 'float', def: 9.399999618530273 },
+      Vector1_1: { type: 'float', def: 2.200000047683716 },
+      Vector1_bcac86adb4cc4a7bbe536a3ae38a43d9: { type: 'float', def: 6.5 },
+      Color1: { type: 'vec4', def: [0, 0, 0, 0] },
+      Color2: { type: 'vec4', def: [0, 0, 0, 0] },
+      Insize: { type: 'float', def: 0.800000011920929 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -1913,14 +1944,17 @@ void main(){
     return;
 }`,
   },
-  "GeneralTexNormalMesh": {
-    shader: "Shader Graphs/GeneralTexNormalMesh",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  GeneralTexNormalMesh: {
+    shader: 'Shader Graphs/GeneralTexNormalMesh',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
-    samplers: ["Texture2D_eb03ed6fffcc41089e4f2a75e54c9aa4"],
+    samplers: ['Texture2D_eb03ed6fffcc41089e4f2a75e54c9aa4'],
     unknownVary: false,
-    props: {"Color_853690b2cfac448ebc2e75f7c1e3039c":{"type":"vec4","def":[8,8,8,0]}},
+    props: { Color_853690b2cfac448ebc2e75f7c1e3039c: { type: 'vec4', def: [8, 8, 8, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -2080,12 +2114,12 @@ void main(){
     return;
 }`,
   },
-  "Universal Render Pipeline/Particles/Unlit": {
-    shader: "Universal Render Pipeline/Particles/Unlit",
-    vertexKind: "uv",
+  'Universal Render Pipeline/Particles/Unlit': {
+    shader: 'Universal Render Pipeline/Particles/Unlit',
+    vertexKind: 'uv',
     varyings: [],
     needsDepth: false,
-    samplers: ["_BaseMap"],
+    samplers: ['_BaseMap'],
     unknownVary: false,
     props: {},
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
@@ -2291,14 +2325,29 @@ void main(){
     return;
 }`,
   },
-  "skill_WaterShildTex": {
-    shader: "Shader Graphs/skill_WaterShildTex",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"},{"slot":3,"type":"vec3","sem":"normal"}],
+  skill_WaterShildTex: {
+    shader: 'Shader Graphs/skill_WaterShildTex',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+      { slot: 3, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: false,
-    samplers: ["Texture"],
+    samplers: ['Texture'],
     unknownVary: false,
-    props: {"_MainColor":{"type":"vec4","def":[0.45909929275512695,0,1,0]},"DistortPower":{"type":"float","def":0.10000000149011612},"DistortSpeed1":{"type":"float","def":4},"DistortSpeed2":{"type":"float","def":10},"Speed":{"type":"float","def":1},"Power":{"type":"float","def":0.019999999552965164},"OutBlack":{"type":"float","def":1.399999976158142},"Alpha":{"type":"float","def":0},"_Hue":{"type":"float","def":0}},
+    props: {
+      _MainColor: { type: 'vec4', def: [0.45909929275512695, 0, 1, 0] },
+      DistortPower: { type: 'float', def: 0.10000000149011612 },
+      DistortSpeed1: { type: 'float', def: 4 },
+      DistortSpeed2: { type: 'float', def: 10 },
+      Speed: { type: 'float', def: 1 },
+      Power: { type: 'float', def: 0.019999999552965164 },
+      OutBlack: { type: 'float', def: 1.399999976158142 },
+      Alpha: { type: 'float', def: 0 },
+      _Hue: { type: 'float', def: 0 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -2933,14 +2982,24 @@ void main(){
     return;
 }`,
   },
-  "auraskin_window": {
-    shader: "Shader Graphs/auraskin_window",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  auraskin_window: {
+    shader: 'Shader Graphs/auraskin_window',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: false,
-    samplers: ["_Texture2D"],
+    samplers: ['_Texture2D'],
     unknownVary: false,
-    props: {"_Color":{"type":"vec4","def":[3.5648701190948486,3.5648701190948486,3.5648701190948486,0]},"_Effect":{"type":"float","def":1},"_speed":{"type":"float","def":0},"_rotate":{"type":"float","def":90},"_line":{"type":"float","def":0.03999999910593033}},
+    props: {
+      _Color: { type: 'vec4', def: [3.5648701190948486, 3.5648701190948486, 3.5648701190948486, 0] },
+      _Effect: { type: 'float', def: 1 },
+      _speed: { type: 'float', def: 0 },
+      _rotate: { type: 'float', def: 90 },
+      _line: { type: 'float', def: 0.03999999910593033 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -3141,14 +3200,28 @@ void main(){
     return;
 }`,
   },
-  "skill_WaterShildTexBoth": {
-    shader: "Shader Graphs/skill_WaterShildTexBoth",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"},{"slot":3,"type":"vec3","sem":"normal"}],
+  skill_WaterShildTexBoth: {
+    shader: 'Shader Graphs/skill_WaterShildTexBoth',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+      { slot: 3, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: false,
-    samplers: ["Texture"],
+    samplers: ['Texture'],
     unknownVary: false,
-    props: {"_MainColor":{"type":"vec4","def":[0.45909929275512695,0,1,0]},"DistortPower":{"type":"float","def":0.10000000149011612},"DistortSpeed1":{"type":"float","def":4},"DistortSpeed2":{"type":"float","def":10},"Speed":{"type":"float","def":1},"Power":{"type":"float","def":0.019999999552965164},"OutBlack":{"type":"float","def":1.399999976158142},"Alpha":{"type":"float","def":0}},
+    props: {
+      _MainColor: { type: 'vec4', def: [0.45909929275512695, 0, 1, 0] },
+      DistortPower: { type: 'float', def: 0.10000000149011612 },
+      DistortSpeed1: { type: 'float', def: 4 },
+      DistortSpeed2: { type: 'float', def: 10 },
+      Speed: { type: 'float', def: 1 },
+      Power: { type: 'float', def: 0.019999999552965164 },
+      OutBlack: { type: 'float', def: 1.399999976158142 },
+      Alpha: { type: 'float', def: 0 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -3739,14 +3812,17 @@ void main(){
     return;
 }`,
   },
-  "GeneralTex": {
-    shader: "Shader Graphs/GeneralTex",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  GeneralTex: {
+    shader: 'Shader Graphs/GeneralTex',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
-    samplers: ["Texture2D_eb03ed6fffcc41089e4f2a75e54c9aa4"],
+    samplers: ['Texture2D_eb03ed6fffcc41089e4f2a75e54c9aa4'],
     unknownVary: false,
-    props: {"Color_853690b2cfac448ebc2e75f7c1e3039c":{"type":"vec4","def":[8,8,8,0]}},
+    props: { Color_853690b2cfac448ebc2e75f7c1e3039c: { type: 'vec4', def: [8, 8, 8, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -3905,14 +3981,23 @@ void main(){
     return;
 }`,
   },
-  "Circle_add": {
-    shader: "Shader Graphs/Circle_add",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  Circle_add: {
+    shader: 'Shader Graphs/Circle_add',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Vector1_f0683063f9b44121bff83e626fd4632a":{"type":"float","def":1},"Vector1_9e0b82cda8e244118777bca7e52af518":{"type":"float","def":2},"Color_da8be80bf63c49b4b13ac913f7bab5eb":{"type":"vec4","def":[1,1,1,1]},"Vector1_191acac1eb7c405ba126772c12a339f1":{"type":"float","def":0.30000001192092896}},
+    props: {
+      Vector1_f0683063f9b44121bff83e626fd4632a: { type: 'float', def: 1 },
+      Vector1_9e0b82cda8e244118777bca7e52af518: { type: 'float', def: 2 },
+      Color_da8be80bf63c49b4b13ac913f7bab5eb: { type: 'vec4', def: [1, 1, 1, 1] },
+      Vector1_191acac1eb7c405ba126772c12a339f1: { type: 'float', def: 0.30000001192092896 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -4129,14 +4214,23 @@ void main(){
     return;
 }`,
   },
-  "Circle_nomal": {
-    shader: "Shader Graphs/Circle_nomal",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  Circle_nomal: {
+    shader: 'Shader Graphs/Circle_nomal',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Vector1_f0683063f9b44121bff83e626fd4632a":{"type":"float","def":1},"Vector1_9e0b82cda8e244118777bca7e52af518":{"type":"float","def":2},"Color_d2c0e575d6b84e79bd60aee596337a4e":{"type":"vec4","def":[1,1,1,0]},"Far":{"type":"float","def":0}},
+    props: {
+      Vector1_f0683063f9b44121bff83e626fd4632a: { type: 'float', def: 1 },
+      Vector1_9e0b82cda8e244118777bca7e52af518: { type: 'float', def: 2 },
+      Color_d2c0e575d6b84e79bd60aee596337a4e: { type: 'vec4', def: [1, 1, 1, 0] },
+      Far: { type: 'float', def: 0 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -4352,14 +4446,18 @@ void main(){
     return;
 }`,
   },
-  "enemy_fire": {
-    shader: "Shader Graphs/enemy_fire",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  enemy_fire: {
+    shader: 'Shader Graphs/enemy_fire',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"_MainColor":{"type":"vec4","def":[0.45909929275512695,0,1,0]},"Far":{"type":"float","def":0}},
+    props: { _MainColor: { type: 'vec4', def: [0.45909929275512695, 0, 1, 0] }, Far: { type: 'float', def: 0 } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -4739,14 +4837,18 @@ void main(){
     return;
 }`,
   },
-  "enemy_fire_hard": {
-    shader: "Shader Graphs/enemy_fire_hard",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  enemy_fire_hard: {
+    shader: 'Shader Graphs/enemy_fire_hard',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"_MainVector":{"type":"float","def":0.699999988079071},"_MainColor":{"type":"vec4","def":[0.45909929275512695,0,1,0]},"Far":{"type":"float","def":0}},
+    props: { _MainVector: { type: 'float', def: 0.699999988079071 }, _MainColor: { type: 'vec4', def: [0.45909929275512695, 0, 1, 0] }, Far: { type: 'float', def: 0 } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -5475,10 +5577,14 @@ void main(){
     return;
 }`,
   },
-  "GlitterAdd": {
-    shader: "Shader Graphs/GlitterAdd",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  GlitterAdd: {
+    shader: 'Shader Graphs/GlitterAdd',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
@@ -5708,14 +5814,17 @@ void main(){
     return;
 }`,
   },
-  "GlitterNormal": {
-    shader: "Shader Graphs/GlitterNormal",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  GlitterNormal: {
+    shader: 'Shader Graphs/GlitterNormal',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: false,
-    props: {"Color_38ab2571dbbc4bd1a49530fc0ec77756":{"type":"vec4","def":[1,1,1,0]}},
+    props: { Color_38ab2571dbbc4bd1a49530fc0ec77756: { type: 'vec4', def: [1, 1, 1, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -5910,14 +6019,17 @@ void main(){
     return;
 }`,
   },
-  "HeartShape": {
-    shader: "Shader Graphs/HeartShape",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  HeartShape: {
+    shader: 'Shader Graphs/HeartShape',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: false,
-    props: {"HDR":{"type":"vec4","def":[1,1,1,0]}},
+    props: { HDR: { type: 'vec4', def: [1, 1, 1, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -6156,14 +6268,17 @@ void main(){
     return;
 }`,
   },
-  "HeartShapeHole": {
-    shader: "Shader Graphs/HeartShapeHole",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  HeartShapeHole: {
+    shader: 'Shader Graphs/HeartShapeHole',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: false,
-    props: {"_Color":{"type":"vec4","def":[1,1,1,0]}},
+    props: { _Color: { type: 'vec4', def: [1, 1, 1, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -6608,14 +6723,25 @@ void main(){
     return;
 }`,
   },
-  "Ice": {
-    shader: "Shader Graphs/Ice",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec3","sem":"worldPos"},{"slot":2,"type":"vec3","sem":"normal"}],
+  Ice: {
+    shader: 'Shader Graphs/Ice',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec3', sem: 'worldPos' },
+      { slot: 2, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: false,
-    samplers: ["_CameraOpaqueTexture","_MainTex"],
+    samplers: ['_CameraOpaqueTexture', '_MainTex'],
     unknownVary: false,
-    props: {"_Color":{"type":"vec4","def":[0.8495739102363586,1.0509450435638428,1.2595080137252808,0]},"Vector1_9710150C":{"type":"float","def":0},"Vector2_4F8FAB1D":{"type":"vec2","def":[0,0,0,0]},"Vector1_3B2B3DBD":{"type":"float","def":1},"Color_82DDE56C":{"type":"vec4","def":[1,1,1,0]},"Hue":{"type":"float","def":0}},
+    props: {
+      _Color: { type: 'vec4', def: [0.8495739102363586, 1.0509450435638428, 1.2595080137252808, 0] },
+      Vector1_9710150C: { type: 'float', def: 0 },
+      Vector2_4F8FAB1D: { type: 'vec2', def: [0, 0, 0, 0] },
+      Vector1_3B2B3DBD: { type: 'float', def: 1 },
+      Color_82DDE56C: { type: 'vec4', def: [1, 1, 1, 0] },
+      Hue: { type: 'float', def: 0 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -6879,14 +7005,20 @@ void main(){
     return;
 }`,
   },
-  "LineGaleLengthPower 03": {
-    shader: "Shader Graphs/LineGaleLengthPower 03",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"unknown"},{"slot":2,"type":"vec4","sem":"color"},{"slot":3,"type":"vec3","sem":"worldPos"},{"slot":4,"type":"vec3","sem":"normal"}],
+  'LineGaleLengthPower 03': {
+    shader: 'Shader Graphs/LineGaleLengthPower 03',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'unknown' },
+      { slot: 2, type: 'vec4', sem: 'color' },
+      { slot: 3, type: 'vec3', sem: 'worldPos' },
+      { slot: 4, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: true,
-    props: {"_Color":{"type":"vec4","def":[0.07235130667686462,2.0213510990142822,0,0]}},
+    props: { _Color: { type: 'vec4', def: [0.07235130667686462, 2.0213510990142822, 0, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -7618,14 +7750,20 @@ void main(){
     return;
 }`,
   },
-  "LineGaleLengthPower 05_Variable": {
-    shader: "Shader Graphs/LineGaleLengthPower 05_Variable",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"unknown"},{"slot":2,"type":"vec4","sem":"color"},{"slot":3,"type":"vec3","sem":"worldPos"},{"slot":4,"type":"vec3","sem":"normal"}],
+  'LineGaleLengthPower 05_Variable': {
+    shader: 'Shader Graphs/LineGaleLengthPower 05_Variable',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'unknown' },
+      { slot: 2, type: 'vec4', sem: 'color' },
+      { slot: 3, type: 'vec3', sem: 'worldPos' },
+      { slot: 4, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: true,
-    props: {"_Color":{"type":"vec4","def":[0.07235130667686462,2.0213510990142822,0,0]},"Speed":{"type":"float","def":-2}},
+    props: { _Color: { type: 'vec4', def: [0.07235130667686462, 2.0213510990142822, 0, 0] }, Speed: { type: 'float', def: -2 } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -8378,14 +8516,20 @@ void main(){
     return;
 }`,
   },
-  "LineGaleLengthPower 05": {
-    shader: "Shader Graphs/LineGaleLengthPower 05",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"unknown"},{"slot":2,"type":"vec4","sem":"color"},{"slot":3,"type":"vec3","sem":"worldPos"},{"slot":4,"type":"vec3","sem":"normal"}],
+  'LineGaleLengthPower 05': {
+    shader: 'Shader Graphs/LineGaleLengthPower 05',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'unknown' },
+      { slot: 2, type: 'vec4', sem: 'color' },
+      { slot: 3, type: 'vec3', sem: 'worldPos' },
+      { slot: 4, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: true,
-    props: {"_Color":{"type":"vec4","def":[0.07235130667686462,2.0213510990142822,0,0]}},
+    props: { _Color: { type: 'vec4', def: [0.07235130667686462, 2.0213510990142822, 0, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -9134,14 +9278,18 @@ void main(){
     return;
 }`,
   },
-  "MagLineCross": {
-    shader: "Shader Graphs/MagLineCross",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  MagLineCross: {
+    shader: 'Shader Graphs/MagLineCross',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Vector1_789565cf655b4a298eba8b462f2a755e":{"type":"float","def":1}},
+    props: { Vector1_789565cf655b4a298eba8b462f2a755e: { type: 'float', def: 1 } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -9378,14 +9526,18 @@ void main(){
     return;
 }`,
   },
-  "skill_fire_normal": {
-    shader: "Shader Graphs/skill_fire_normal",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"color"},{"slot":1,"type":"vec3","sem":"worldPos"},{"slot":2,"type":"vec3","sem":"normal"}],
+  skill_fire_normal: {
+    shader: 'Shader Graphs/skill_fire_normal',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'color' },
+      { slot: 1, type: 'vec3', sem: 'worldPos' },
+      { slot: 2, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: false,
-    props: {"_MainColor":{"type":"vec4","def":[0.45909929275512695,0,1,0]},"Speed":{"type":"float","def":1}},
+    props: { _MainColor: { type: 'vec4', def: [0.45909929275512695, 0, 1, 0] }, Speed: { type: 'float', def: 1 } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -9926,14 +10078,25 @@ void main(){
     return;
 }`,
   },
-  "slash": {
-    shader: "Shader Graphs/slash",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"}],
+  slash: {
+    shader: 'Shader Graphs/slash',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: false,
-    props: {"Color_328f134cfa334403817dbdff0b79dd9b":{"type":"vec4","def":[4,0.9568626880645752,0,0]},"Vector1_fdc983d7e12d448692964a0c6992e291":{"type":"float","def":-0.75},"Vector1_bbe9b6f0c046432eb0e8c789fb8fabb4":{"type":"float","def":-0.44999998807907104},"Vector2_4b9342e119614cecab6c231f2cb4a16c":{"type":"vec2","def":[0,0.4099999964237213,0,0]},"Vector2_1":{"type":"vec2","def":[0,0.10999999940395355,0,0]},"Vector1_73d7c4b66bf74383b70a8ca59e2b8588":{"type":"float","def":15},"Vector1_9bf597e0e0dc467c93535270f133bd1f":{"type":"float","def":6}},
+    props: {
+      Color_328f134cfa334403817dbdff0b79dd9b: { type: 'vec4', def: [4, 0.9568626880645752, 0, 0] },
+      Vector1_fdc983d7e12d448692964a0c6992e291: { type: 'float', def: -0.75 },
+      Vector1_bbe9b6f0c046432eb0e8c789fb8fabb4: { type: 'float', def: -0.44999998807907104 },
+      Vector2_4b9342e119614cecab6c231f2cb4a16c: { type: 'vec2', def: [0, 0.4099999964237213, 0, 0] },
+      Vector2_1: { type: 'vec2', def: [0, 0.10999999940395355, 0, 0] },
+      Vector1_73d7c4b66bf74383b70a8ca59e2b8588: { type: 'float', def: 15 },
+      Vector1_9bf597e0e0dc467c93535270f133bd1f: { type: 'float', def: 6 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -10484,14 +10647,18 @@ void main(){
     return;
 }`,
   },
-  "SoftSmokeAdd": {
-    shader: "Shader Graphs/SoftSmokeAdd",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  SoftSmokeAdd: {
+    shader: 'Shader Graphs/SoftSmokeAdd',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Vector1_1":{"type":"float","def":0},"Vector1_7d2ae84d23b3470692465f597838496f":{"type":"float","def":1},"Color_2c101510ed5e4321b044897cdda7875c":{"type":"vec4","def":[1,1,1,1]}},
+    props: { Vector1_1: { type: 'float', def: 0 }, Vector1_7d2ae84d23b3470692465f597838496f: { type: 'float', def: 1 }, Color_2c101510ed5e4321b044897cdda7875c: { type: 'vec4', def: [1, 1, 1, 1] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -11039,14 +11206,23 @@ void main(){
     return;
 }`,
   },
-  "SoftSmokeClear": {
-    shader: "Shader Graphs/SoftSmokeClear",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  SoftSmokeClear: {
+    shader: 'Shader Graphs/SoftSmokeClear',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Vector1_1":{"type":"float","def":0},"Vector1_7d2ae84d23b3470692465f597838496f":{"type":"float","def":1},"Color_2c101510ed5e4321b044897cdda7875c":{"type":"vec4","def":[1,1,1,1]},"Vector1_eab1da95405448269f12104325a80336":{"type":"float","def":0}},
+    props: {
+      Vector1_1: { type: 'float', def: 0 },
+      Vector1_7d2ae84d23b3470692465f597838496f: { type: 'float', def: 1 },
+      Color_2c101510ed5e4321b044897cdda7875c: { type: 'vec4', def: [1, 1, 1, 1] },
+      Vector1_eab1da95405448269f12104325a80336: { type: 'float', def: 0 },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -11639,14 +11815,19 @@ void main(){
     return;
 }`,
   },
-  "SphereSmoke_Both": {
-    shader: "Shader Graphs/SphereSmoke_Both",
-    vertexKind: "matcap",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"},{"slot":3,"type":"vec3","sem":"normal"}],
+  SphereSmoke_Both: {
+    shader: 'Shader Graphs/SphereSmoke_Both',
+    vertexKind: 'matcap',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+      { slot: 3, type: 'vec3', sem: 'normal' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Power":{"type":"float","def":1},"Far":{"type":"float","def":1},"_Color":{"type":"vec4","def":[1,1,1,0]}},
+    props: { Power: { type: 'float', def: 1 }, Far: { type: 'float', def: 1 }, _Color: { type: 'vec4', def: [1, 1, 1, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -12270,14 +12451,28 @@ void main(){
     return;
 }`,
   },
-  "WaterCircleGround": {
-    shader: "Shader Graphs/WaterCircleGround",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  WaterCircleGround: {
+    shader: 'Shader Graphs/WaterCircleGround',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: false,
     samplers: [],
     unknownVary: false,
-    props: {"Color_A3D1317D":{"type":"vec4","def":[0,0.3864400088787079,1,0]},"Color_E776904D":{"type":"vec4","def":[0.6078432202339172,0.9359992146492004,1,0]},"Vector1_978AE1FE":{"type":"float","def":2},"Vector1_DC2CD795":{"type":"float","def":5},"Vector1_CED8F778":{"type":"float","def":5},"Vector1_300EABC":{"type":"float","def":17.469999313354492},"Vector1_602331E6":{"type":"float","def":0.7099999785423279},"Vector1_3546CC37":{"type":"float","def":0.8999999761581421},"Vector2_1e62a70bbd2f41148c35c1520fe72b7b":{"type":"vec2","def":[-0.3700000047683716,0,0,0]}},
+    props: {
+      Color_A3D1317D: { type: 'vec4', def: [0, 0.3864400088787079, 1, 0] },
+      Color_E776904D: { type: 'vec4', def: [0.6078432202339172, 0.9359992146492004, 1, 0] },
+      Vector1_978AE1FE: { type: 'float', def: 2 },
+      Vector1_DC2CD795: { type: 'float', def: 5 },
+      Vector1_CED8F778: { type: 'float', def: 5 },
+      Vector1_300EABC: { type: 'float', def: 17.469999313354492 },
+      Vector1_602331E6: { type: 'float', def: 0.7099999785423279 },
+      Vector1_3546CC37: { type: 'float', def: 0.8999999761581421 },
+      Vector2_1e62a70bbd2f41148c35c1520fe72b7b: { type: 'vec2', def: [-0.3700000047683716, 0, 0, 0] },
+    },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 
@@ -13785,14 +13980,18 @@ void main(){
     return;
 }`,
   },
-  "WaterFoamSmallADD": {
-    shader: "Shader Graphs/WaterFoamSmallADD",
-    vertexKind: "uv",
-    varyings: [{"slot":0,"type":"vec4","sem":"uv"},{"slot":1,"type":"vec4","sem":"color"},{"slot":2,"type":"vec3","sem":"worldPos"}],
+  WaterFoamSmallADD: {
+    shader: 'Shader Graphs/WaterFoamSmallADD',
+    vertexKind: 'uv',
+    varyings: [
+      { slot: 0, type: 'vec4', sem: 'uv' },
+      { slot: 1, type: 'vec4', sem: 'color' },
+      { slot: 2, type: 'vec3', sem: 'worldPos' },
+    ],
     needsDepth: true,
     samplers: [],
     unknownVary: false,
-    props: {"Color_ab9acd07cdca4e40b375f18f4ea82ed1":{"type":"vec4","def":[1,1,1,0]}},
+    props: { Color_ab9acd07cdca4e40b375f18f4ea82ed1: { type: 'vec4', def: [1, 1, 1, 0] } },
     frag: `#ifdef GL_EXT_shader_framebuffer_fetch
 #endif
 

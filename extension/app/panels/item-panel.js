@@ -110,7 +110,13 @@ export function createItemPanel(deps) {
       const h = headers.get(key);
       if (h && h.scrollIntoView) h.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    grid.appendChild(el('div', 'homenav', groups.map((g) => el('button', { class: 'homenavlink', text: `${g.label} ${g.items.length}`, on: { click: () => jump(g.key) } }))));
+    grid.appendChild(
+      el(
+        'div',
+        'homenav',
+        groups.map((g) => el('button', { class: 'homenavlink', text: `${g.label} ${g.items.length}`, on: { click: () => jump(g.key) } })),
+      ),
+    );
     for (const g of groups) {
       headers.set(g.key, groupHeading(grid, `${g.label}（${g.items.length}）`));
       const wrap = el('div', 'itemgrid');

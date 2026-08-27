@@ -22,15 +22,19 @@ function actionDuration(code) {
   return ACT_DUR[code] || 0.5;
 }
 
-function layoutCast(c, b, { W, H, refW, refH, sRef, pinScreen, pinBody }) {
+function layoutCast(c, b, { W, H, refW, refH, sRef, pinScreen, pinBody, pinScreenAdv }, advBone) {
   const zf = c.zoom ? ZOOM_SCALE : 1;
-  const baseline = pinScreen - (pinBody * sRef * zf * b.h) / refH;
+  const useAdv = !!advBone;
+  const anchorY = useAdv ? pinScreenAdv : pinScreen;
+  const pinLocalY = useAdv ? advBone.y : pinBody * b.h;
   const scale = sRef * (H / refH);
+  const sx = (c.flip ? -scale : scale) * zf;
+  const baseline = anchorY - (pinLocalY * sRef * zf) / refH;
   const zoomOff = zf > 1 ? ZOOM_Y_REF * (H / refH) : 0;
   return {
-    tx: W * (0.5 + (c.posMapX || 0) / refW),
+    tx: W * (0.5 + (c.posMapX || 0) / refW) - (advBone ? advBone.x : 0) * sx,
     y: H * baseline + zoomOff,
-    sx: (c.flip ? -scale : scale) * zf,
+    sx,
     sy: scale * zf,
     dim: c.speaking === false ? 0.5 : 1.0,
     anchor: { x: refW / 2 + (c.posMapX || 0), y: refH * (1 - baseline) - (b.y + b.h) * sRef * zf * EMO_HEAD_FRAC },
@@ -62,8 +66,23 @@ function buildSpineSkeleton(ctx, inputs) {
   const off = new spine.Vector2(),
     size = new spine.Vector2();
   skeleton.getBounds(off, size, []);
+  let advBone = null;
+  try {
+    const bn = skeleton.findBone('adventure_position');
+    if (bn) advBone = { x: bn.worldX, y: bn.worldY };
+  } catch (e) {}
   const mosaicSlots = data.slots.filter((s) => MOSAIC_RE.test(s.name)).map((s) => s.name);
-  return { data, skeleton, state, bounds: { x: off.x, y: off.y, w: size.x, h: size.y }, curAnim: null, anims: data.animations.map((a) => a.name), hasMosaic: mosaicSlots.length > 0, mosaicSlots };
+  return {
+    data,
+    skeleton,
+    state,
+    bounds: { x: off.x, y: off.y, w: size.x, h: size.y },
+    advBone,
+    curAnim: null,
+    anims: data.animations.map((a) => a.name),
+    hasMosaic: mosaicSlots.length > 0,
+    mosaicSlots,
+  };
 }
 
 function create(canvas, opts) {
@@ -215,13 +234,14 @@ function create(canvas, opts) {
     refH: refHeight(),
     sRef: (o.scaleMul || 1) * BASE_SCALE,
     pinScreen: o.pinScreen != null ? o.pinScreen : 190 / 640,
+    pinScreenAdv: o.pinScreenAdv != null ? o.pinScreenAdv : 0.075,
     pinBody: o.pinBody != null ? o.pinBody : 0.5,
   });
 
   const applyCastLayout = (it, cfg) => {
     const b = it.rec && it.rec.bounds;
     if (!b || !(b.h > 0)) return;
-    const L = layoutCast(cfg, b, castLayoutEnv());
+    const L = layoutCast(cfg, b, castLayoutEnv(), it.rec.advBone);
     it.tx = L.tx;
     it.y = L.y;
     it.sx = L.sx;
@@ -396,7 +416,10 @@ function create(canvas, opts) {
     for (const em of emoInstances) {
       if (em.t0 == null) em.t0 = nowMs;
       const tSec = (nowMs - em.t0) / 1000;
-      if (tSec > em.anim.total + 0.05) { em.done = true; continue; }
+      if (tSec > em.anim.total + 0.05) {
+        em.done = true;
+        continue;
+      }
       const it = cast.get(em.id);
       if (!it || !it.rec || it.rec.dead) continue;
       const b = it.rec.bounds;
@@ -412,7 +435,8 @@ function create(canvas, opts) {
       if (a <= 0.003 || w <= 0 || h <= 0 || !em.tex) continue;
       const tex = em.tex;
       const col = new spine.Color(a, a, a, a);
-      let u0 = em.fx < 0 ? 1 : 0, u2 = em.fx < 0 ? 0 : 1;
+      let u0 = em.fx < 0 ? 1 : 0,
+        u2 = em.fx < 0 ? 0 : 1;
       const fill = v.fill == null ? 1 : v.fill < 0 ? 0 : v.fill > 1 ? 1 : v.fill;
       if (fill < 0.999) {
         const left = cx - w / 2;
@@ -641,15 +665,28 @@ function create(canvas, opts) {
     },
     setEmotions(list) {
       emoInstances = (list || []).map((e) => ({
-        id: e.id, code: e.code, name: e.name, sprite: e.sprite,
-        tex: (() => { try { return emoTex(e.name, e.sprite); } catch (err) { return null; } })(),
-        anim: emoAnim.build(e.code), t0: null, done: false,
+        id: e.id,
+        code: e.code,
+        name: e.name,
+        sprite: e.sprite,
+        tex: (() => {
+          try {
+            return emoTex(e.name, e.sprite);
+          } catch (err) {
+            return null;
+          }
+        })(),
+        anim: emoAnim.build(e.code),
+        t0: null,
+        done: false,
         anchor: e.code === 13 ? EMO_ANCHOR.sighR : e.code === 14 ? EMO_ANCHOR.sighL : e.code === 10 ? EMO_ANCHOR.head : EMO_ANCHOR.def,
         fx: e.code === 13 ? -1 : 1,
         sizeBase: EMO_SIZE[e.code] || 250,
       }));
     },
-    clearEmotions() { emoInstances = []; },
+    clearEmotions() {
+      emoInstances = [];
+    },
     camState() {
       return { panX: camCur.panX || 0, panY: camCur.panY || 0, zoom: camCur.zoom || 1, mode };
     },

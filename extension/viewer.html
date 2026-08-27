@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="style/base.css" />
     <link rel="stylesheet" href="style/roster.css" />
     <link rel="stylesheet" href="style/visual.css" />
+    <link rel="stylesheet" href="style/story.css" />
     <link rel="stylesheet" href="style/viewer.css" />
   </head>
   <body class="vwbody">
@@ -38,8 +39,11 @@
           <button class="btn xs vw-step" id="vwFieldPrev" title="前へ">◀</button>
           <select id="vwField" class="rgsel"></select>
           <button class="btn xs vw-step" id="vwFieldNext" title="次へ">▶</button>
+          <label class="vw-lbl" id="vwShadowLabel">影</label>
+          <select id="vwShadow" class="rgsel" title="配置中のキャラ全員の影の出し方"></select>
           <span class="note dim" id="vwFieldNote"></span>
           <span class="hdspacer"></span>
+          <button class="btn xs" id="vwHelp" title="コントロールをONにしたキャラの操作方法を表示します">コントロール操作説明</button>
           <button class="btn xs" id="vwRecenter" title="カメラを配置中のキャラに合わせ直します">カメラを戻す</button>
           <button class="btn xs" id="vwClear" title="配置中のキャラを全て外します">全部外す</button>
         </div>

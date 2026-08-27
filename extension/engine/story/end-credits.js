@@ -18,8 +18,6 @@ const WAIT_SPECIAL_THANKS = 4;
 const WAIT_TITLE_LOGO = 4;
 const WAIT_SCENE_CHANGE = 2;
 
-// タイトルロゴは共有DL(credits-assets)で落としてある aa titlesprites を「読むだけ」。
-// クレジット再生時にライブ取得はしない（拡張のルール）。無ければ文字表示にフォールバック。
 async function resolveTitleLogoCanvas() {
   let bytes = null;
   try {
@@ -91,12 +89,13 @@ export async function playEndCredits(opts) {
   root.appendChild(overlay);
   root.appendChild(skip);
   host.appendChild(root);
+  const swallow = (e) => e.stopPropagation();
+  root.addEventListener('click', swallow);
+  root.addEventListener('pointerdown', swallow);
 
   let audio = null;
   let done = false;
   let onVis = null;
-  // クレジットは専用BGMを鳴らすので、audioScene に「他BGM再生中」を報告して
-  // ヘッダー/ホームBGMの復帰（二重再生）を抑止する。cleanup で解除。
   if (opts.reportBgm) opts.reportBgm(true);
   const cleanup = () => {
     if (done) return;
@@ -137,7 +136,7 @@ export async function playEndCredits(opts) {
   }
   if (bgmUrl) {
     audio = new Audio(bgmUrl);
-    audio.loop = true;
+    audio.loop = false;
     audio.volume = 0;
     audio
       .play()
@@ -145,8 +144,6 @@ export async function playEndCredits(opts) {
       .catch(() => {});
   }
 
-  // 別タブ（非表示）ではブラウザが動画再生/rAF/timerをスロットルするため、動画と音声を
-  // 一緒に一時停止し、再表示で再開して同期ズレ（動画停止・音だけ進行）を防ぐ。
   onVis = () => {
     if (done) return;
     const hidden = globalThis.document && globalThis.document.hidden;
@@ -187,13 +184,10 @@ export async function playEndCredits(opts) {
     if (finaleStarted) return;
     finaleStarted = true;
     overlay.classList.add('show');
-    // finale に入ったらスキップボタンは消す（この先はロゴ表示までロック）。
     try {
       skip.remove();
     } catch (e) {}
 
-    // 実ゲーム(EndCreditSequenceManager.ExecuteEndCreditSequence)は Special Thanks とロゴを排他表示する：
-    //   specialThanks フェードイン(1s)→4s→フェードアウト(1s)→titleLogo フェードイン(1s)→4s→…。
     const thanks = document.createElement('div');
     thanks.className = 'endcredits-thanks';
     if (opts.specialThanksCanvas) {
@@ -230,14 +224,11 @@ export async function playEndCredits(opts) {
     await sleep((FADE + WAIT_TITLE_LOGO) * 1000);
     if (!gen()) return cleanup();
 
-    // 実ゲームはこの後ロゴもフェードアウト→2s→シーン遷移だが、コレクターでは戻り先が無いため
-    // ユーザー指定によりロゴ表示のまま「操作不能」でロックする（物語の最終フレームへ戻さない）。
     await sleep(WAIT_SCENE_CHANGE * 1000);
   };
 
   let finaleStarted = false;
   video.addEventListener('ended', runFinale);
-  // スキップ＝長い動画を飛ばして finale へ。finale 開始後はボタン自体が消える（ロック）。
   skip.addEventListener('click', () => {
     if (finaleStarted) return;
     try {

@@ -14,6 +14,7 @@ import { ensureSharedSingletons } from './acquire-shared-res.js';
 import { fileNameOf } from '../../core/paths.js';
 import { PLACE } from '../../core/placement.js';
 import { assetStore } from '../asset-store.js';
+import { manualChoiceGroups } from '../manual-choice-groups.js';
 const { assetRoot } = networkClient;
 const { ownedLevels, unlockedPaidSet, clearedNodeSet, openEpisodeSet, userLoaded } = userStateService;
 const pool = utilHelpers.pool;
@@ -195,7 +196,8 @@ function planEpisodes(ctx, choiceGroupsByEp, gate, savedIds) {
       voiced: 0,
       scenes: [],
     };
-    if (choiceGroupsByEp && choiceGroupsByEp[ep.episodeId]) epMeta.choiceGroups = choiceGroupsByEp[ep.episodeId];
+    const cg = (choiceGroupsByEp && choiceGroupsByEp[ep.episodeId]) || manualChoiceGroups(ep.episodeId);
+    if (cg) epMeta.choiceGroups = cg;
     orderedEpMetas.push(epMeta);
     if (ep.linkTo && !hasLocalScenes(ep)) {
       epMeta.linkTo = ep.linkTo;
@@ -477,6 +479,13 @@ function queueCardVisuals(ctx, meta, orderedEpMetas) {
       if (mp) wrec.model = mp;
       const tp = matRel ? await ctx.grabOwn(matRel, PLACE.fixed('visual/weapon/', `${w.weaponId}_mat`), `weapon mat ${w.weaponId}`) : null;
       if (tp) wrec.materials = tp;
+      const deps = [];
+      for (const [i, dep] of ((idx.meta.modelDeps || {})[String(w.weaponId)] || []).entries()) {
+        if (dep === matRel || dep === modelRel) continue;
+        const dp = await ctx.grabOwn(dep, PLACE.fixed('visual/weapon/', `${w.weaponId}_dep${i}`), `weapon dep ${w.weaponId}`);
+        if (dp) deps.push(dp);
+      }
+      if (deps.length) wrec.deps = deps;
       if (wrec.model) assetsManifest.weapon[String(w.weaponId)] = wrec;
     });
   }

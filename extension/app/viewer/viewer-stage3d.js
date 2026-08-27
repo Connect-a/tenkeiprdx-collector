@@ -2,26 +2,27 @@ import * as THREE from '../../vendor/three.module.js';
 import { loadModel3d } from '../../engine/render/lazy.js';
 import { loadModelFor, voiceClipFor } from './viewer-source.js';
 import { guardRenderer } from '../../engine/render/gl-manager.js';
-import { loadBattleField } from './viewer-battlefield.js';
+import { loadBattleField, stepFieldAnimation } from './viewer-battlefield.js';
 import { updateFieldUniforms, noteShaderError } from '../../engine/render/field-shader.js';
 import { createStageCore } from './viewer-stage-core.js';
-import { createShadow, disposeShadow, placeShadow, SHADOW_OPACITY, SHADOW_KINDS } from './viewer-shadow.js';
+import { createShadow, disposeShadow, placeShadow, SHADOW_OPACITY } from './viewer-shadow.js';
 import { createGizmo } from './viewer-gizmo.js';
 import { el } from '../../core/dom.js';
 import { MOTION_VOICE, MOTION_ORDER } from '../../core/constants.js';
 import { utilHelpers } from '../../core/util.js';
 
 const PITCH_LIMIT = 1.3;
-// 影の範囲は URP アセットの m_ShadowDistance=40。カスケードは1枚のままなので解像度で補う（設計資料_viewer.md）。
 const FIELD_SHADOW_SIZE = 2048;
 const FIELD_SHADOW_EXTENT = 40;
+const CHAR_SHADOW_SIZE = 2048;
+const CHAR_SHADOW_EXTENT = 8;
+const CHAR_SHADOW_BIAS = 0.0015;
 const LAYER_FIELD = 1;
 const LAYER_CHAR = 2;
 const idleClip = (names) => (names || []).find((n) => /^idle$/i.test(n)) || (names || []).find((n) => /idle/i.test(n)) || (names || [])[0] || '';
 const clipLike = (names, re) => (names || []).find((n) => re.test(n)) || '';
 const SLIDERS = [];
 const MOTION_LC = MOTION_ORDER.map((n) => n.toLowerCase());
-// 持っていないモーションも並びどおりに出し、選べないことが分かるようにする。
 const motionOptions = (names) => {
   const have = new Map((names || []).map((n) => [String(n).toLowerCase(), n]));
   const out = [];
@@ -36,9 +37,8 @@ const motionOptions = (names) => {
   return out;
 };
 
-// 操作モードはビューワー独自の機能。実ゲームの移動速度・当たり判定の数値は持っていないので、
-// ここは「見て操作できる」ことを目的にした値。クリップ名は実ゲームの文字列リテラル準拠（Idle/Run/Attack/Damage）。
 const RUN_SPEED = 3;
+const LIFT_SPEED = 2;
 const TURN_RATE = 12;
 const HIT_REACH = 2.4;
 const HIT_HALF_ANGLE = Math.PI / 4;
@@ -83,13 +83,8 @@ export function createStage(hostEl, deps) {
   scene.add(shadowLight);
   scene.add(shadowLight.target);
 
-  // フィールド用の影。three のライトを増やすとキャラ実影の受け皿(ShadowMaterial)にもフィールドの影が
-  // 二重に乗るので、深度だけ自前のRTへ焼いて実ゲームGLSLの sampler2DShadow に直接差す。
-  // ライトは動かないので、フィールド読込時と基準点移動時に1回焼くだけ。
   const fieldShadowCam = new THREE.OrthographicCamera(-FIELD_SHADOW_EXTENT, FIELD_SHADOW_EXTENT, FIELD_SHADOW_EXTENT, -FIELD_SHADOW_EXTENT, 0.5, FIELD_SHADOW_EXTENT * 4);
   fieldShadowCam.layers.set(LAYER_FIELD);
-  // URP の ShadowCasterPass と同じ ApplyShadowBias を掛けてから深度を焼く。
-  // depthBias / normalBias は実データの Light.m_Shadows の値 × テクセルのワールドサイズ（Unityと同じ算出）。
   const fieldShadowDepthMat = new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3,
     side: THREE.DoubleSide,
@@ -116,18 +111,33 @@ export function createStage(hostEl, deps) {
   let fieldShadowUniforms = [];
   const fieldShadow = { map: null, matrix: new THREE.Matrix4(), mapSize: new THREE.Vector2(FIELD_SHADOW_SIZE, FIELD_SHADOW_SIZE) };
 
+  const charShadowCam = new THREE.OrthographicCamera(-CHAR_SHADOW_EXTENT, CHAR_SHADOW_EXTENT, CHAR_SHADOW_EXTENT, -CHAR_SHADOW_EXTENT, 0.5, CHAR_SHADOW_EXTENT * 6);
+  charShadowCam.layers.set(LAYER_CHAR);
+  const charShadowDepthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.BasicDepthPacking, side: THREE.DoubleSide });
+  const charShadowRT = new THREE.WebGLRenderTarget(CHAR_SHADOW_SIZE, CHAR_SHADOW_SIZE);
+  charShadowRT.depthTexture = new THREE.DepthTexture(CHAR_SHADOW_SIZE, CHAR_SHADOW_SIZE, THREE.UnsignedIntType);
+  charShadowRT.depthTexture.format = THREE.DepthFormat;
+  charShadowRT.depthTexture.compareFunction = THREE.LessEqualCompare;
+  charShadowRT.depthTexture.minFilter = THREE.LinearFilter;
+  charShadowRT.depthTexture.magFilter = THREE.LinearFilter;
+  const charShadow = { map: charShadowRT.depthTexture, matrix: new THREE.Matrix4(), strength: 0 };
+  let charShadowUniforms = [];
+
   const catcher = new THREE.Mesh(new THREE.PlaneGeometry(60, 60).rotateX(-Math.PI / 2), new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY, transparent: true, side: THREE.DoubleSide }));
   catcher.receiveShadow = true;
+  catcher.material.depthWrite = false;
   catcher.visible = false;
   scene.add(catcher);
 
   let fieldGroup = null;
+  let fieldAnim = [];
   let fieldSeq = 0;
   let grid = null;
   let guard = null;
   let fieldMats = [];
   let sceneRT = null;
   let fogUniforms = [];
+  let rtUniforms = [];
   let clock = 0;
   let m3d = null;
   const anchor = new THREE.Vector3(0, 0, 0);
@@ -157,7 +167,7 @@ export function createStage(hostEl, deps) {
       : '';
     if (key === lightKey) return;
     lightKey = key;
-    mainLight = l ? { dir: l.dir, color: l.color } : null;
+    mainLight = l ? { dir: l.dir, color: l.color, shadow: l.shadow || null } : null;
     if (!api) return;
     for (const id of [...core.items.keys()]) {
       api.removeChar(id);
@@ -240,14 +250,39 @@ export function createStage(hostEl, deps) {
     camera.updateProjectionMatrix();
   }
 
+  const GROUND_FOOT = 0.25;
+  const GROUND_TAPS = [
+    [0, 0],
+    [GROUND_FOOT, 0],
+    [-GROUND_FOOT, 0],
+    [0, GROUND_FOOT],
+    [0, -GROUND_FOOT],
+  ];
   function groundAt(x, y, z) {
     if (!fieldGroup) return anchor.y;
-    rayFrom.set(x, y + 6, z);
-    ray.set(rayFrom, DOWN);
-    ray.far = 60;
-    const hit = ray.intersectObject(fieldGroup, true);
-    for (const h of hit) if (h.object.visible && h.point.y <= y + 0.001) return h.point.y;
-    return anchor.y;
+    const saved = [];
+    fieldGroup.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m || m.side === THREE.DoubleSide) continue;
+        saved.push([m, m.side]);
+        m.side = THREE.DoubleSide;
+      }
+    });
+    let best = null;
+    for (const [dx, dz] of GROUND_TAPS) {
+      rayFrom.set(x + dx, y + 6, z + dz);
+      ray.set(rayFrom, DOWN);
+      ray.far = 60;
+      const hit = ray.intersectObject(fieldGroup, true);
+      for (const h of hit) {
+        if (!h.object.visible || h.point.y > y + 0.001) continue;
+        if (best === null || h.point.y > best) best = h.point.y;
+        break;
+      }
+    }
+    for (const [m, s] of saved) m.side = s;
+    return best === null ? anchor.y : best;
   }
 
   const SHADOW_BIAS_MATRIX = new THREE.Matrix4().set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
@@ -268,7 +303,6 @@ export function createStage(hostEl, deps) {
     fieldShadowCam.lookAt(anchor);
     fieldShadowCam.updateMatrixWorld();
     fieldShadowCam.updateProjectionMatrix();
-    // Unity: texelSize = 2 * frustumSize / resolution、bias は符号反転してライトと逆へ押し出す。
     const texel = (2 * FIELD_SHADOW_EXTENT * 2) / FIELD_SHADOW_SIZE;
     const soft = light.shadow.type === 2 ? Math.SQRT2 : 1;
     fieldShadowDepthMat.uniforms.uLightDir.value.copy(d);
@@ -291,37 +325,80 @@ export function createStage(hostEl, deps) {
     }
   }
 
+  function renderCharShadow() {
+    if (!(charShadow.strength > 0)) {
+      for (const u of charShadowUniforms) u.uCharShadowStrength.value = 0;
+      return;
+    }
+    const d = charShadowDir();
+    charShadowCam.position.copy(anchor).addScaledVector(d, CHAR_SHADOW_EXTENT * 3);
+    charShadowCam.lookAt(anchor);
+    charShadowCam.updateMatrixWorld();
+    charShadowCam.updateProjectionMatrix();
+    charShadow.matrix.copy(SHADOW_BIAS_MATRIX).multiply(charShadowCam.projectionMatrix).multiply(charShadowCam.matrixWorldInverse);
+    charShadow.matrix.elements[14] -= CHAR_SHADOW_BIAS;
+    const prev = scene.overrideMaterial;
+    const bg = scene.background;
+    scene.overrideMaterial = charShadowDepthMat;
+    scene.background = null;
+    renderer.setRenderTarget(charShadowRT);
+    renderer.clear();
+    renderer.render(scene, charShadowCam);
+    renderer.setRenderTarget(null);
+    scene.overrideMaterial = prev;
+    scene.background = bg;
+    for (const u of charShadowUniforms) {
+      u.uCharShadowMap.value = charShadow.map;
+      u.uCharShadowMatrix.value.copy(charShadow.matrix);
+      u.uCharShadowStrength.value = charShadow.strength;
+    }
+  }
+
+  const softShadow = () => !!(mainLight && mainLight.shadow && Number(mainLight.shadow.type) === 2);
+  const CHAR_SHADOW_FALLBACK = new THREE.Vector3(0.4, 1, 0.8).normalize();
+  function charShadowDir() {
+    const md = mainLight && mainLight.dir;
+    if (!md) return CHAR_SHADOW_FALLBACK;
+    const v = new THREE.Vector3(md[0], md[1], md[2]);
+    if (!(v.lengthSq() > 1e-8)) return CHAR_SHADOW_FALLBACK;
+    v.normalize();
+    return v.y < 0.15 ? CHAR_SHADOW_FALLBACK : v;
+  }
+  let shadowSoftApplied = null;
   function applyShadowMode() {
     let any = false;
     for (const c of state.scene.chars) {
       const inst = core.live(c.id);
       if (!inst) continue;
-      const cast = c.shadow === 'cast';
+      const cast = state.scene.shadow === 'cast';
       if (cast) any = true;
       inst.root.traverse((o) => {
         if (!o.isMesh) return;
         o.castShadow = cast;
-        o.layers.enable(LAYER_CHAR);
+        if (cast) o.layers.enable(LAYER_CHAR);
+        else o.layers.disable(LAYER_CHAR);
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
           if (!m) continue;
           m.shadowSide = THREE.DoubleSide;
         }
       });
     }
-    if (renderer.shadowMap.enabled !== any) {
-      renderer.shadowMap.enabled = any;
-      renderer.shadowMap.type = THREE.PCFShadowMap;
+    charShadow.strength = any && fieldGroup ? SHADOW_OPACITY : 0;
+    const useThreeShadow = any && !fieldGroup;
+    if (renderer.shadowMap.enabled !== useThreeShadow) {
+      renderer.shadowMap.enabled = useThreeShadow;
+      renderer.shadowMap.type = softShadow() ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
       scene.traverse((o) => {
         if (!o.material) return;
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
       });
     }
-    shadowLight.castShadow = any;
-    catcher.visible = any;
+    shadowLight.castShadow = any && !fieldGroup;
+    catcher.visible = any && !fieldGroup;
     catcher.position.set(anchor.x, anchor.y + 0.005, anchor.z);
     if (!any) return;
-    const d = new THREE.Vector3(0.4, 1, 0.8);
-    shadowLight.position.copy(anchor).addScaledVector(d.normalize(), 14);
+    const d = charShadowDir();
+    shadowLight.position.copy(anchor).addScaledVector(d, 14);
     shadowLight.target.position.copy(anchor);
     shadowLight.target.updateMatrixWorld();
   }
@@ -339,7 +416,7 @@ export function createStage(hostEl, deps) {
     inst.root.scale.set(s, s, s);
     if (!inst.shadow) return;
     const p = inst.root.position;
-    placeShadow(inst.shadow, { kind: c.shadow, x: p.x, groundY: groundAt(p.x, p.y, p.z), z: p.z, scale: s, rotY: inst.root.rotation.y });
+    placeShadow(inst.shadow, { kind: state.scene.shadow, x: p.x, groundY: groundAt(p.x, p.y, p.z), z: p.z, scale: s, rotY: inst.root.rotation.y });
   }
 
   const keys = new Set();
@@ -348,7 +425,7 @@ export function createStage(hostEl, deps) {
 
   function onKey(e) {
     const k = (e.key || '').toLowerCase();
-    if (!('wasd '.includes(k) || /^[0-9]$/.test(k)) || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (!('wasdjert '.includes(k) || /^[0-9]$/.test(k)) || e.ctrlKey || e.altKey || e.metaKey) return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     if (!state.scene.chars.some((c) => c.control)) return;
@@ -439,6 +516,21 @@ export function createStage(hostEl, deps) {
       act = null;
       return;
     }
+    let dy = 0;
+    if (keys.has('e')) dy += 1;
+    if (keys.has('r')) dy -= 1;
+    if (keys.has('t')) {
+      keys.delete('t');
+      if (c.y) {
+        state.update(c.id, { y: 0 });
+        place(state.get(c.id), inst);
+        if (deps.onDrive) deps.onDrive(c.id);
+      }
+    } else if (dy) {
+      state.update(c.id, { y: (c.y || 0) + dy * LIFT_SPEED * dt });
+      place(state.get(c.id), inst);
+      if (deps.onDrive) deps.onDrive(c.id);
+    }
     if (act && act.hurt) {
       for (const h of act.hurt) {
         const t = core.live(h.id);
@@ -463,6 +555,11 @@ export function createStage(hostEl, deps) {
     }
     if (act && act.once != null) {
       act.once -= dt;
+      if (act.drift) {
+        state.update(c.id, { x: (c.x || 0) + act.drift.x * dt, z: (c.z || 0) + act.drift.z * dt });
+        place(state.get(c.id), inst);
+        if (deps.onDrive) deps.onDrive(c.id);
+      }
       if (act.hit != null) {
         act.hit -= dt;
         if (act.hit <= 0) {
@@ -492,6 +589,16 @@ export function createStage(hostEl, deps) {
       if (clip) playOnce(c, inst, clip, /^attack$/i.test(clip));
       break;
     }
+    if (keys.has('j')) {
+      keys.delete('j');
+      const vel = act && act.vel ? { ...act.vel } : null;
+      const jc = clipLike(inst.clipNames, /^jump$/i);
+      if (jc) {
+        playOnce(c, inst, jc);
+        if (vel) act.drift = vel;
+        return;
+      }
+    }
     if (act && act.once != null) return;
     if (keys.has(' ')) {
       keys.delete(' ');
@@ -513,10 +620,9 @@ export function createStage(hostEl, deps) {
         inst.setClip(c.motion || idleClip(inst.clipNames));
         act.moving = false;
       }
+      if (act) act.vel = null;
       return;
     }
-    // 描画は X を反転している（camera.projectionMatrix の [0] を -1 倍）ので、
-    // 画面の右＝ワールド -X。左右成分だけ符号を合わせる。
     const yaw = CAM().yaw;
     const sy = Math.sin(yaw);
     const cy = Math.cos(yaw);
@@ -534,9 +640,10 @@ export function createStage(hostEl, deps) {
     cur += diff * Math.min(1, TURN_RATE * dt);
     state.update(c.id, { x: nx, z: nz, rotY: cur });
     place(state.get(c.id), inst);
+    act = { ...(act || {}), vel: { x: (-wx / len) * RUN_SPEED, z: (wz / len) * RUN_SPEED } };
     if (run) {
       inst.setClip(run);
-      act = { ...(act || {}), moving: true };
+      act.moving = true;
     }
     if (deps.onDrive) deps.onDrive(c.id);
   }
@@ -550,8 +657,12 @@ export function createStage(hostEl, deps) {
 
   function clearField() {
     fieldMats = [];
+    fieldAnim = [];
     fogUniforms = [];
+    rtUniforms = [];
     fieldShadowUniforms = [];
+    charShadowUniforms = [];
+    charShadow.strength = 0;
     fieldShadow.map = null;
     if (fieldGroup) {
       scene.remove(fieldGroup);
@@ -713,11 +824,13 @@ export function createStage(hostEl, deps) {
       resize();
       clock += dt;
       drive(dt);
+      if (fieldAnim.length) stepFieldAnimation(THREE, fieldAnim, clock);
       for (const c of state.scene.chars) {
         const inst = core.live(c.id);
         if (inst) inst.update(c.paused ? 0 : dt);
       }
       if (guard && guard.lost) return;
+      renderCharShadow();
       if (fieldMats.length) {
         const size = renderer.getDrawingBufferSize(new THREE.Vector2());
         const rw = Math.max(1, size.x);
@@ -728,27 +841,38 @@ export function createStage(hostEl, deps) {
             sceneRT.dispose();
           }
           sceneRT = new THREE.WebGLRenderTarget(rw, rh);
-          sceneRT.texture.colorSpace = THREE.SRGBColorSpace || 'srgb';
+          sceneRT.texture.colorSpace = THREE.LinearSRGBColorSpace || 'srgb-linear';
           sceneRT.depthTexture = new THREE.DepthTexture(rw, rh);
           sceneRT.depthTexture.format = THREE.DepthFormat;
           sceneRT.depthTexture.type = THREE.UnsignedIntType;
         }
         const hidden = [];
+        if (catcher.visible) {
+          catcher.visible = false;
+          hidden.push(catcher);
+        }
         if (fieldGroup)
           fieldGroup.traverse((o) => {
-            if (o.userData && o.userData.fieldShaderPass && o.visible) {
-              o.visible = false;
-              hidden.push(o);
-            }
+            if (!o.isMesh || !o.visible) return;
+            const ms = Array.isArray(o.material) ? o.material : [o.material];
+            if (!ms.some((m) => m && m.transparent)) return;
+            o.visible = false;
+            hidden.push(o);
           });
+        for (const u of rtUniforms) u.uTpEncode.value = 0;
         renderer.setRenderTarget(sceneRT);
         renderer.clear();
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);
         for (const o of hidden) o.visible = true;
-        updateFieldUniforms(fieldMats, THREE, { camera, time: clock, width: size.x, height: size.y, opaque: sceneRT.texture, depth: sceneRT.depthTexture, shadow: fieldShadow });
+        for (const u of rtUniforms) u.uTpEncode.value = 1;
+        updateFieldUniforms(fieldMats, THREE, { camera, time: clock, width: size.x, height: size.y, opaque: sceneRT.texture, depth: sceneRT.depthTexture, shadow: fieldShadow, charShadow });
       }
-      if (selected) gizmo.sync(core.live(selected));
+      if (selected) {
+        const sel = core.live(selected);
+        if (sel) gizmo.sync(sel);
+        else selectChar(null);
+      }
       gizmo.resize(camera);
       renderer.render(scene, camera);
     },
@@ -796,7 +920,6 @@ export function createStage(hostEl, deps) {
     needsRebuild: (c, inst) => !!(c.costume && inst.costume && inst.costume !== c.costume),
     apply(c, inst) {
       if (c.motion) {
-        // キャラ詳細のビューワーと同じで、モーションを切り替えたら対応するボイスを鳴らす。
         const key = String(c.id);
         if (lastMotion.has(key) && lastMotion.get(key) !== c.motion) playMotionVoice(c.id, String(c.motion).toLowerCase());
         lastMotion.set(key, c.motion);
@@ -810,9 +933,14 @@ export function createStage(hostEl, deps) {
       place(c, inst);
       applyShadowMode();
     },
+    syncShadow() {
+      applyShadowMode();
+      placeAll();
+      frame();
+    },
     controlsFor(inst) {
       if (!inst) return { motionLabel: 'モーション', motions: [], selects: [], sliders: SLIDERS };
-      return { motionLabel: 'モーション', motions: motionOptions(inst.clipNames), selects: charSelects(inst), sliders: SLIDERS, shadow: SHADOW_KINDS, control: true };
+      return { motionLabel: 'モーション', motions: motionOptions(inst.clipNames), selects: charSelects(inst), sliders: SLIDERS, control: true };
     },
     async syncField() {
       const prevAnchor = anchor.clone();
@@ -837,6 +965,7 @@ export function createStage(hostEl, deps) {
           bptc: renderer.extensions.has('EXT_texture_compression_bptc'),
           renderer,
           maxAniso: renderer.capabilities.getMaxAnisotropy(),
+          charShadow,
         });
         if (seq !== fieldSeq) {
           if (r && r.group && r.group.__dispose) r.group.__dispose();
@@ -851,9 +980,11 @@ export function createStage(hostEl, deps) {
         }
         fieldGroup = r.group;
         fieldMats = r.fieldMats || [];
+        fieldAnim = r.animated || [];
         fogUniforms = r.fogUniforms || [];
+        rtUniforms = r.rtUniforms || [];
         fieldShadowUniforms = r.shadowUniforms || [];
-        // 影を落とすのは実体のジオメトリだけ。水面や空ドーム（実ゲームGLSL側）は落とさない。
+        charShadowUniforms = r.charShadowUniforms || [];
         fieldGroup.traverse((o) => {
           if (o.isMesh && !(o.userData && o.userData.fieldShaderPass)) o.layers.enable(LAYER_FIELD);
         });
@@ -868,6 +999,7 @@ export function createStage(hostEl, deps) {
         scene.backgroundRotation = new THREE.Euler(0, r.backgroundRotation || 0, 0);
         scene.backgroundIntensity = r.backgroundIntensity || 1;
         await setMainLight(r.light && r.light.dir ? r.light : null);
+        applyShadowMode();
       } catch (e) {
         if (seq === fieldSeq) core.note('フィールドの読み込みに失敗しました。');
       } finally {
@@ -913,6 +1045,9 @@ export function createStage(hostEl, deps) {
         fieldShadowRT = null;
       }
       fieldShadowDepthMat.dispose();
+      charShadowRT.depthTexture.dispose();
+      charShadowRT.dispose();
+      charShadowDepthMat.dispose();
       if (guard) guard.dispose();
     },
   });

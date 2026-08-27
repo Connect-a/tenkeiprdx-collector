@@ -73,7 +73,6 @@ function remapMouthUV(baseUv, vMin, vMax, col, row) {
   return out;
 }
 
-// 実ゲームはガンマ色空間。生値で受けて最後に tpToLinear で戻す（設計資料_viewer.md）。
 const TP_TO_LINEAR = 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
 
 function makeDataTexture(tex, { forceOpaque } = {}) {
@@ -100,10 +99,6 @@ const GAME_GRADE = {
   vignetteIntensity: 0.3,
   vignetteSmoothness: 0.2,
   vignetteRounded: false,
-  // Bloom実測(prod5 WebGL.data 全VolumeProfile抽出): 焼込Bloomは2個とも active=0(既定オフ)・Tonemappingインスタンス0個。
-  // ＝bloomは PPController.ShowBloom/AnimationBloom でバトルのスキル発動時に一時ONにする実行時エフェクト。
-  // ON時のパラメータ(ground-truth)= threshold0.9 / intensity1.0 / scatter0.7 / tint白 / half解像度 / トーンマップ無し。
-  // コレクターのモデルビューアは静的表示(=ゲームでは bloom オフの文脈)なので既定オフ。オーラ確認用に toggle で ON にできる。
   bloomThreshold: 0.9,
   bloomIntensity: 1.0,
   bloomScatter: 0.7,
@@ -122,8 +117,6 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
     samples: 4,
   });
   if ('colorSpace' in rt.texture) rt.texture.colorSpace = THREE_NS.LinearSRGBColorSpace || 'srgb-linear';
-  // soft-particle(靄/メテオ)用のシーン深度プリパス。不透明(キャラ)のみを描いて深度テクスチャに焼き、
-  // オーラの _CameraDepthTexture に供給する(実ゲーム同様に地面/キャラ際でフェード)。
   const depthRT = new THREE_NS.WebGLRenderTarget(size.x, size.y, {
     minFilter: THREE_NS.NearestFilter,
     magFilter: THREE_NS.NearestFilter,
@@ -132,8 +125,6 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   });
   depthRT.depthTexture = new THREE_NS.DepthTexture(size.x, size.y);
   depthRT.depthTexture.type = THREE_NS.UnsignedIntType != null ? THREE_NS.UnsignedIntType : THREE_NS.UnsignedShortType;
-  // 床面(不可視・深度のみ)。ゲームのステージ床の代わりに置き、床から立ち上る soft-particle オーラ
-  // (enemy_fire 等)が実ゲーム同様に床際でフェードしてプルーム形になるようにする(床Yは足元bbox=実値)。
   const floorScene = new THREE_NS.Scene();
   const floorMat = new THREE_NS.MeshBasicMaterial({ colorWrite: false, depthWrite: true });
   const floorMesh = new THREE_NS.Mesh(new THREE_NS.PlaneGeometry(1000, 1000), floorMat);
@@ -143,7 +134,6 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   let floorEnabled = false;
   const quadCam = new THREE_NS.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const quadScene = new THREE_NS.Scene();
-  // scatter=拡散量(実ゲーム抽出0.7)。
   const bloomScatter = G.bloomScatter != null ? G.bloomScatter : 0.7;
   const BLOOM_MIPS = 6;
   const bloomOpt = { minFilter: THREE_NS.LinearFilter, magFilter: THREE_NS.LinearFilter, format: THREE_NS.RGBAFormat, type: rtType, depthBuffer: false };
@@ -225,7 +215,6 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
       vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }',
       fragmentShader: [
         'precision highp float; varying vec2 vUv; uniform sampler2D uBg; uniform vec2 uRepeat,uOffset;',
-        // uBg は colorSpace=SRGB なので GPU が sRGB→linear デコード済み。手動 pow(2.2) は二重デコード(暗くなる)なので付けない。
         'void main(){ vec3 c=texture2D(uBg, vUv*uRepeat+uOffset).rgb; gl_FragColor=vec4(c, 1.0); }',
       ].join('\n'),
     });
@@ -254,14 +243,10 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
       'precision highp float; varying vec2 vUv; uniform sampler2D tDiffuse, uBloom;',
       'uniform vec3 uVigColor; uniform vec2 uVigParams, uScreenScale; uniform float uVigRoundness, uContrast, uBloomIntensity;',
       'vec3 l2s(vec3 c){ c=clamp(c,0.0,1.0); return mix(1.055*pow(c,vec3(1.0/2.4))-0.055, c*12.92, step(c,vec3(0.0031308))); }',
-      // 実ゲームは HDR グレーディング＝ACEScc 空間。LutBuilderHdr の実GLSL に (log2(x)+9.72)*0.0570776239
-      // （0.0570776239 = 1/17.52）と閾値 2^-15、戻しに x*17.52-9.72 の exp2 がそのまま出ている。
-      'vec3 lin2acescc(vec3 x){ x=max(x,vec3(0.0)); vec3 s=(log2(exp2(-16.0)+x*0.5)+9.72)*0.0570776239; vec3 b=(log2(max(x,vec3(1e-10)))+9.72)*0.0570776239; return mix(b,s,step(x,vec3(3.05175781e-05))); }',
-      'vec3 acescc2lin(vec3 x){ vec3 lo=(exp2(x*17.52-9.72)-exp2(-16.0))*2.0; vec3 hi=exp2(x*17.52-9.72); return min(mix(hi,lo,step(x,vec3(-0.301369876))), vec3(65504.0)); }',
+      'vec3 lin2logc(vec3 x){ return log2(max(x*5.55555582+0.0479959995, vec3(0.0)))*0.0734997839 - 0.0275523961; }',
+      'vec3 logc2lin(vec3 x){ return (exp2(x*13.6054821)-0.0479959995)*0.179999992; }',
       'void main(){',
       '  vec4 src=texture2D(tDiffuse,vUv);',
-      // bloom OFF(intensity=0)時は bloom を一切足さない。mipチェーンが HalfFloat で Inf/NaN 化していると
-      // NaN*0=NaN となり画面全体が黒く点滅するため、乗算せず分岐で切る。ON時も clamp で Inf を抑える。
       '  vec3 bc = uBloomIntensity > 0.0 ? clamp(texture2D(uBloom,vUv).rgb, 0.0, 64.0) : vec3(0.0);',
       '  vec3 c=src.rgb + bc * uBloomIntensity;',
       '  vec2 guv = vec2(0.5) + (vUv - vec2(0.5)) * uScreenScale;',
@@ -269,9 +254,8 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
       '  d.x *= uVigRoundness;',
       '  float vf = pow(max(1.0 - dot(d,d), 0.0), uVigParams.y);',
       '  c *= mix(uVigColor, vec3(1.0), vf);',
-      '  vec3 lg = lin2acescc(c);',
-      '  lg = (lg - 0.413588405) * uContrast + 0.413588405;',
-      '  c = max(acescc2lin(lg), vec3(0.0));',
+      '  vec3 lg = lin2logc(c) * uContrast + 0.0275523961;',
+      '  c = max(logc2lin(lg), vec3(0.0));',
       '  gl_FragColor=vec4(l2s(c), src.a);',
       '}',
     ].join('\n'),
@@ -299,7 +283,6 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
     setBloom(on) {
       uniforms.uBloomIntensity.value = on ? bloomOnValue : 0;
     },
-    // 床から立ち上る soft-particle オーラ用に、深度プリパスへ足元床面を有効化(y=足元)。
     setFloorY(y) {
       if (y == null || !isFinite(y)) {
         floorEnabled = false;
@@ -319,7 +302,6 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
         uniforms.uBloom.value = upMips[0] ? upMips[0].texture : null;
         updateCover(s.x, s.y);
       }
-      // 深度プリパス: オーラを隠して不透明シーンの深度のみ焼く → soft-particle へ供給。
       if (onDepth) {
         if (depthExclude) depthExclude.visible = false;
         renderer.setRenderTarget(depthRT);

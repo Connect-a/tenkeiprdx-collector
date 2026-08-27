@@ -4,6 +4,8 @@ export const FOLDER_PARENTS = { character: '_キャラ', main: '_メインシナ
 
 export const OTHER_EPISODE_SUBTYPE = 'その他エピソード';
 
+export const SCENE_TEXT_IN_FRAME_FIELD = [{ sceneId: '477201', order: 26 }];
+
 export const R18_ALT_EPISODES = [
   { id: '404113', after: '602600104', label: '第4話(R18)' },
   { id: '404114', after: '602600105', label: '第5話(R18)' },
@@ -43,7 +45,6 @@ export const MISS_STREAK_CAP = 10;
 
 export const DL_CONC = { asset: 32, decode: 8, large: 3 };
 
-// Assets.Paripari.Plugins.FBX.Motions（dump.cs）の定義順。ビューワーのモーション一覧の並びに使う。
 export const MOTION_ORDER = ['Idle', 'IdleAction', 'IdleVictory', 'Attack', 'Damage', 'AbnormalCondition', 'Victory', 'Run', 'Skill', 'CastingSpell'];
 
 export const MOTION_VOICE = {

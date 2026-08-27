@@ -1,4 +1,5 @@
 import { assetUrlOn, relKey } from '../core/paths.js';
+import { setNameAlias } from '../core/placement.js';
 import { idbStore } from '../core/idb.js';
 import { fileStore } from '../core/fsdir.js';
 import { unityDecode } from '../unity/decode.js';
@@ -344,6 +345,7 @@ async function buildIndexes(progress, masterBinIn, fromFolder) {
 
 async function commitIndexes(built) {
   _indexes = built;
+  setNameAlias((built.assets || {}).mirrorAlias);
   if (built.meta.catalogOk) {
     try {
       await idbStore.set(SK.indexCache, built);
@@ -389,6 +391,7 @@ export async function ensureIndexes(progress) {
       (!cached.meta.builtAssetRoot || cached.meta.builtAssetRoot === curBase)
     ) {
       _indexes = cached;
+      setNameAlias((cached.assets || {}).mirrorAlias);
       return _indexes;
     }
     try {

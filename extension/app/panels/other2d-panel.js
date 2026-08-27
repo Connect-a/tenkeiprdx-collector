@@ -7,11 +7,12 @@ import { texCodec } from '../../unity/texcodec.js';
 import { spineWeb } from '../../engine/story/spine-web.js';
 import { errText } from '../../core/messages.js';
 import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, groupHeading, downloadBar, errorRow } from '../ui/panel-shell.js';
+import { createZoomOverlay } from '../ui/zoom-overlay.js';
 import { bundleName } from '../../core/paths.js';
 import { el } from '../../core/dom.js';
 import { TITLE_SPRITE_NAMES } from '../../data/credits-assets.js';
 
-const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha', 'titlelogo']);
+const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha', 'titlelogo', 'minigame']);
 const isGacha = (e) => e.source === 'gacha';
 const SECTIONS = [
   ['動画', (e) => !!e.file && e.source !== 'titlelogo'],
@@ -22,6 +23,7 @@ const SECTIONS = [
   ['UIパネル', (e) => e.source === 'uipanel'],
   ['ワールドマップ', (e) => e.source === 'worldmap'],
   ['パネルミッション', (e) => e.source === 'mission'],
+  ['ミニゲーム', (e) => e.source === 'minigame', 'ミニゲームで使われていた画像です。ゲーム自体を動かすことに対応する予定はありません。'],
 ];
 
 export function createOther2dPanel(deps) {
@@ -72,6 +74,7 @@ export function createOther2dPanel(deps) {
       const node = part.bgRel ? await bundleCanvas(part) : await staticNode(part);
       cell.appendChild(node || el('div', 'note', '取得済み（画像として表示できない種類です）'));
       grid.appendChild(cell);
+      if (node && node.tagName === 'VIDEO') node.play().catch(() => {});
     }
     if (!shown) grid.appendChild(el('div', 'note', 'まだ取得していません（サイドバーの「ガチャ」から取得できます）。'));
   }
@@ -93,7 +96,7 @@ export function createOther2dPanel(deps) {
     if (part.video) {
       const url = URL.createObjectURL(f);
       _videoUrls.push(url);
-      return el('video', { class: 'statvideo', src: url, controls: true, loop: true, playsInline: true });
+      return el('video', { class: 'statvideo', src: url, controls: true, loop: true, playsInline: true, autoplay: true });
     }
     try {
       const canvas = texCodec.decodeDdsCanvas(new Uint8Array(await f.arrayBuffer()));
@@ -130,19 +133,48 @@ export function createOther2dPanel(deps) {
     }
   }
 
+  const copyCanvas = (src) => {
+    if (!src || !src.width || !src.height) return null;
+    const cv = document.createElement('canvas');
+    cv.width = src.width;
+    cv.height = src.height;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(src, 0, 0);
+    return cv;
+  };
+
+  const _zoom = createZoomOverlay({
+    id: 'other2dOverlay',
+    title: (s) => s.name || s.bundle,
+    lines: (s) => [s.bundle, `${s.w} × ${s.h}`],
+    load: (s) => copyCanvas(s.canvas),
+    emptyText: () => '画像を取り出せませんでした。',
+  });
+
   async function paintIcons(host, ids) {
     const row = el('div', 'monstericons');
     host.appendChild(row);
+    const shots = [];
     for (const id of ids) {
       if (!_have.has(id)) continue;
-      let canvases = [];
+      let texs = [];
       try {
         const bytes = await readBundle(id);
-        if (bytes) canvases = MESH_MOD.decodeAllTextureCanvases(bytes);
+        if (bytes) {
+          texs = MESH_MOD.decodeNamedTextureCanvases(bytes) || [];
+          if (!texs.length) texs = MESH_MOD.decodeAllTextureCanvases(bytes).map((canvas) => ({ name: '', canvas, width: canvas.width, height: canvas.height }));
+        }
       } catch (er) {}
-      for (const cv of canvases) {
-        cv.className = 'monstericon';
-        row.appendChild(cv);
+      const bundle = bundleName(id);
+      for (const t of texs) {
+        if (!t.canvas) continue;
+        t.canvas.className = 'monstericon zoomable';
+        t.canvas.title = (t.name || bundle) + `（${t.width} × ${t.height}）クリックで拡大`;
+        const at = shots.length;
+        shots.push({ name: t.name, bundle, w: t.width, h: t.height, canvas: t.canvas });
+        t.canvas.addEventListener('click', () => _zoom.open(shots, at));
+        row.appendChild(t.canvas);
       }
     }
     if (!row.childNodes.length) row.remove();
@@ -213,6 +245,7 @@ export function createOther2dPanel(deps) {
     if (e.file) return paintVideo(host, e);
     if (e.parts) return paintGacha(host, e);
     await paintIcons(host, e.iconIds || []);
+    if (e.source === 'minigame') return;
     const grid = el('div', 'spine-grid stand one');
     host.appendChild(grid);
     if (!(e.spineIds || []).length) grid.appendChild(el('div', 'note', 'この項目に立ち絵はありません（アイコンのみ）。'));
@@ -246,10 +279,11 @@ export function createOther2dPanel(deps) {
     if (missing.length || missingFiles) grid.appendChild(dlBar(missing, missing.length + missingFiles));
     const { listCol } = splitLayout(grid, 'other2dView', 'カードを選ぶとここに表示');
     _ordered = SECTIONS.flatMap(([, pick]) => _list.filter(pick));
-    for (const [title, pick] of SECTIONS) {
+    for (const [title, pick, hint] of SECTIONS) {
       const items = _list.filter(pick);
       if (!items.length) continue;
       groupHeading(listCol, `${title}（${items.length}）`);
+      if (hint) listCol.appendChild(el('div', 'note dim', hint));
       listCol.appendChild(el('div', 'rostercards', items.map(card)));
     }
   }

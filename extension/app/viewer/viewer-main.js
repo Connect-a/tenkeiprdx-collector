@@ -1,4 +1,6 @@
 import { getById, el } from '../../core/dom.js';
+import { showNotice } from '../ui/notice-modal.js';
+
 import { fileStore } from '../../core/fsdir.js';
 import { saveData } from '../../core/savedata.js';
 import { listEntries, ensureKinds, entryOf } from './viewer-source.js';
@@ -8,6 +10,17 @@ import { createPicker } from './viewer-picker.js';
 import { createFieldList } from './viewer-field.js';
 import { createControls } from './viewer-controls.js';
 import { createSceneIo } from './viewer-scenes.js';
+import { SHADOW_KINDS } from './viewer-shadow.js';
+
+const CONTROL_HELP = [
+  'キャラのカードにある「コントロール」をONにすると、そのキャラをキーボードで動かせます。ONにできるのは1人までです。',
+  '**W / A / S / D** … 移動。カメラの向きが基準です。',
+  '**スペース** … 攻撃。前方の近くにいるキャラに当たると、相手が攻撃してきた方を向いてのけぞります。',
+  '**J** … ジャンプ。',
+  '**E / R（押している間）** … 高さを上げる／下げる。**T** で高さを0に戻します。',
+  '**1〜9** … 対応するモーションを再生します。',
+  '**0** … 目・眉・口・服装をまとめてランダムに変えます。',
+];
 
 const state = createViewerState('3d');
 let picker = null;
@@ -57,7 +70,7 @@ async function switchMode(mode) {
   state.load({ ...state.scene, mode, chars: [] });
   document.querySelectorAll('.vw-tab').forEach((t) => t.classList.toggle('active', t.dataset.mode === mode));
   scenes.reset();
-  await loadKind(picker.kind());
+  await loadKind(picker.setMode(mode));
   await busy('表示を切り替え中…', async () => {
     await refreshFields();
     await loadStage(mode);
@@ -88,6 +101,11 @@ async function refreshFields() {
   const cur = fields.find((f) => f.kind === want.kind && f.rel === want.rel);
   sel.value = cur ? cur.key : fields[0] ? fields[0].key : '';
   getById('vwFieldLabel').textContent = state.mode === '2d' ? '背景' : 'フィールド';
+  const is3d = state.mode !== '2d';
+  getById('vwShadow').style.display = is3d ? '' : 'none';
+  getById('vwHelp').style.display = is3d ? '' : 'none';
+  getById('vwShadowLabel').style.display = is3d ? '' : 'none';
+  getById('vwShadow').value = state.scene.shadow || 'blob';
   applyField(sel.value, true);
 }
 
@@ -154,8 +172,15 @@ function bind() {
     sel.value = next.value;
     applyField(next.value);
   };
+  const shadowSel = getById('vwShadow');
+  for (const [v, t] of SHADOW_KINDS) shadowSel.appendChild(el('option', { value: v, text: t }));
+  shadowSel.addEventListener('change', () => {
+    state.setShadow(shadowSel.value);
+    if (stage && stage.syncShadow) stage.syncShadow();
+  });
   getById('vwFieldPrev').addEventListener('click', () => stepField(-1));
   getById('vwFieldNext').addEventListener('click', () => stepField(1));
+  getById('vwHelp').addEventListener('click', () => showNotice(CONTROL_HELP, { title: 'コントロール操作説明' }));
   getById('vwRecenter').addEventListener('click', () => stage && stage.resetCamera());
   getById('vwShot').addEventListener('click', () => saveShot().catch((e) => setNote('画像を保存できませんでした。' + errText(e))));
   getById('vwClear').addEventListener('click', () => {
@@ -184,9 +209,10 @@ async function init() {
       controls.rebuild();
     },
   });
-  controls = createControls(getById('vwCtrls'), { state, stage: () => stage, nameOf: (id) => (entryOf(id) || {}).displayName || '#' + id });
+  controls = createControls(getById('vwCtrls'), { state, stage: () => stage, nameOf: (id) => (entryOf(id) || {}).displayName || '#' + id, onRemove: () => picker.refreshMarks() });
   scenes = createSceneIo({ state, apply: applyScene, note: setNote });
   bind();
+  picker.setMode(state.mode);
   if (!(await connect())) return;
   await busy('読み込み中…', async () => {
     await refreshFields();

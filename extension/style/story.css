@@ -134,6 +134,7 @@
 .stillgrp-row .btn.active,
 .spine-visbtn.active,
 .m3d-partsbtn.active,
+.vw-visbtn.active,
 .stillpanel-hd .btn.active {
   background: #6c4cd6;
   color: #fff;

@@ -97,7 +97,14 @@ async function collectHome(progress, onItem, opts) {
     await t();
     done++;
     if (done % 5 === 0 || done === total)
-      prog(`DL中 ${done}/${total}（新規${counters.got}件・既にあった分${counters.skip}件）`, total ? done / total : 1, { done, total, got: counters.got, skip: counters.skip, fail: counters.fail, missing: counters.missing });
+      prog(`DL中 ${done}/${total}（新規${counters.got}件・既にあった分${counters.skip}件）`, total ? done / total : 1, {
+        done,
+        total,
+        got: counters.got,
+        skip: counters.skip,
+        fail: counters.fail,
+        missing: counters.missing,
+      });
   });
   if (sess.aborted) throw sess.aborted;
   const purged = await fileStore.purgeEmpty(dir);

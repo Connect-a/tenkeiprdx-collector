@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "天啓パラドクス コレクター",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "天啓パラドクスの非公式リソースダウンロード＆プレイヤーです。",
   "permissions": ["storage", "unlimitedStorage", "tabs"],
   "host_permissions": ["*://*.tenkei-paradox.com/*"],

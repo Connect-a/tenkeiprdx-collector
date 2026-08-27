@@ -14,11 +14,23 @@ const num = (v, def, min, max) => {
   return Math.min(max, Math.max(min, n));
 };
 const str = (v, def) => (typeof v === 'string' && v ? v : def);
+const KINDS = ['monster', 'ex', 'other3d'];
+
+const visMap = (raw) => {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const k of Object.keys(raw)) {
+    if (typeof k !== 'string' || !k) continue;
+    const a = Number(raw[k]);
+    if (Number.isFinite(a) && a >= 0 && a < 1) out[k] = a;
+  }
+  return out;
+};
 
 function defaultChar(id, kind) {
   return {
     id: String(id),
-    kind: kind === 'monster' ? 'monster' : 'character',
+    kind: KINDS.includes(kind) ? kind : 'character',
     x: 0,
     y: 0,
     z: 0,
@@ -33,8 +45,8 @@ function defaultChar(id, kind) {
     mouth: null,
     face: '',
     brow: '',
-    shadow: 'blob',
     control: false,
+    vis: {},
   };
 }
 
@@ -44,6 +56,7 @@ function defaultScene(mode) {
     app: APP_VERSION,
     mode: m,
     field: { kind: m === '3d' ? 'grid' : 'none', rel: '' },
+    shadow: 'cast',
     camera: { yaw: 0.5, pitch: 0.28, dist: 8, panX: 0, panY: 0, tx: 0, ty: 1, tz: 0 },
     chars: [],
   };
@@ -66,8 +79,8 @@ function normalizeChar(raw) {
   c.mouth = raw.mouth == null ? null : num(raw.mouth, 6, 1, 25);
   c.face = str(raw.face, '');
   c.brow = str(raw.brow, '');
-  c.shadow = raw.shadow === 'cast' || raw.shadow === 'none' ? raw.shadow : raw.shadow === false ? 'none' : 'blob';
   c.control = !!raw.control;
+  c.vis = visMap(raw.vis);
   return c;
 }
 
@@ -77,6 +90,7 @@ export function normalizeScene(raw, mode) {
   const f = raw.field || {};
   const kind = str(f.kind, base.field.kind);
   base.field = { kind, rel: str(f.rel, '') };
+  base.shadow = raw.shadow === 'blob' || raw.shadow === 'none' ? raw.shadow : 'cast';
   if (!['none', 'grid', 'battlemap', 'background'].includes(kind)) base.field = { kind: 'none', rel: '' };
   const cam = raw.camera || {};
   base.camera = {
@@ -139,6 +153,9 @@ export function createViewerState(mode) {
     },
     setField(kind, rel) {
       scene.field = { kind, rel: rel || '' };
+    },
+    setShadow(kind) {
+      scene.shadow = kind === 'blob' || kind === 'none' ? kind : 'cast';
     },
     toJSON: () => JSON.parse(JSON.stringify(scene)),
     load(raw) {

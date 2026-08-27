@@ -126,8 +126,6 @@ function evalMMGradient(mm, t, out) {
     return out;
   }
   const st = mm.minMaxState;
-  // 1=Gradient,3=TwoGradients,4=RandomColor: いずれも maxGradient を評価(4は粒子ごと乱数位置=t=P.rnd)。
-  // 4を未対応にすると maxColor(kami01では緑)に落ち、実際の紫グラデが出ず靄が緑化する。
   if (st === 1 || st === 3 || st === 4) return evalGradient(mm.maxGradient, t, out);
   if (st === 2 && mm.minColor && mm.maxColor) {
     const a = mm.minColor,
@@ -188,28 +186,22 @@ function fbmNoise(x, y, z, seed, octaves, octMul, octScale) {
   return norm > 0 ? sum / norm : 0;
 }
 
-// 実ゲームの WebGL フラグメント GLSL(shaders/game-shaders.js に焼き込み)を three RawShaderMaterial(GLSL3)で実行する。
-// 頂点は collector 自前(粒子色/worldPos/法線 を vs_INTERP0/1/2 に供給)。Unity uniform(_WorldSpaceCameraPos/MatrixV/
-// InvV/_TimeParameters/_MainColor/Speed)を毎フレーム onBeforeRender で実カメラから配線する。推測値は一切入れない。
-// 頂点色(startColor)を sRGB→linear 化する GLSL(URP linear + rt linear→最終sRGB 構成に一致させる)。
 const S2L_GLSL = 'vec3 s2l(vec3 c){return mix(pow((c+0.055)/1.055,vec3(2.4)),c/12.92,step(c,vec3(0.04045)));}\n';
-// g.varyings(頂点静的解析で確定した slot→意味)から vs_INTERP の out 宣言と代入を生成。
-// 頂点は quv(uv)/colRgb(粒子色rgb)/colA(alpha)/wp(worldPos)/nrm(法線) をローカルに用意しておくこと。
 function genVaryingIO(varyings) {
-  const outs = [], asg = [];
+  const outs = [],
+    asg = [];
   for (const vv of varyings || []) {
     outs.push('out ' + vv.type + ' vs_INTERP' + vv.slot + ';');
     let e;
-    if (vv.sem === 'uv') e = vv.type === 'vec4' ? 'vec4(quv,0.0,0.0)' : (vv.type === 'vec3' ? 'vec3(quv,0.0)' : 'quv');
+    if (vv.sem === 'uv') e = vv.type === 'vec4' ? 'vec4(quv,0.0,0.0)' : vv.type === 'vec3' ? 'vec3(quv,0.0)' : 'quv';
     else if (vv.sem === 'color') e = vv.type === 'vec4' ? 'vec4(s2l(colRgb),colA)' : 's2l(colRgb)';
     else if (vv.sem === 'worldPos') e = vv.type === 'vec4' ? 'vec4(wp,1.0)' : 'wp';
     else if (vv.sem === 'normal') e = vv.type === 'vec4' ? 'vec4(nrm,0.0)' : 'nrm';
-    else e = vv.type === 'vec4' ? 'vec4(0.0)' : (vv.type === 'vec3' ? 'vec3(0.0)' : 'vec2(0.0)');
+    else e = vv.type === 'vec4' ? 'vec4(0.0)' : vv.type === 'vec3' ? 'vec3(0.0)' : 'vec2(0.0)';
     asg.push('vs_INTERP' + vv.slot + '=' + e + ';');
   }
   return { outs: outs.join('\n'), asg: asg.join('') };
 }
-// matcap系(skill_fire_normal): worldPos(vs_INTERP1)+法線(vs_INTERP2)を供給。renderAlignment=View は uViewAlign で頂点整列。
 const GAME_VERT_MATCAP =
   'precision highp float;\n' +
   'in vec3 position;in vec3 normal;in mat4 instanceMatrix;in vec3 instanceColor;\n' +
@@ -231,10 +223,13 @@ const GAME_VERT_MATCAP =
   'gl_Position=projectionMatrix*viewMatrix*vec4(wp,1.0);}';
 function genMeshUvVertex(g) {
   const io = genVaryingIO(g.varyings);
-  return 'precision highp float;\n' +
+  return (
+    'precision highp float;\n' +
     'in vec3 position;in vec3 normal;in vec2 uv;in mat4 instanceMatrix;in vec3 instanceColor;in float iColorA;\n' +
     'uniform mat4 modelMatrix;uniform mat4 viewMatrix;uniform mat4 projectionMatrix;uniform vec3 cameraPosition;uniform float uViewAlign;\n' +
-    io.outs + '\n' + S2L_GLSL +
+    io.outs +
+    '\n' +
+    S2L_GLSL +
     'void main(){mat4 mi=modelMatrix*instanceMatrix;vec3 wp;vec3 nrm;\n' +
     'if(uViewAlign>0.5){\n' +
     ' vec3 s=vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),length(instanceMatrix[2].xyz));\n' +
@@ -245,8 +240,10 @@ function genMeshUvVertex(g) {
     ' vec3 lp=position*s;wp=center+camR*lp.x+camU*lp.y-camF*lp.z;nrm=normalize(-camF);\n' +
     '}else{wp=(mi*vec4(position,1.0)).xyz;nrm=normalize((mi*vec4(normal,0.0)).xyz);}\n' +
     'vec2 quv=uv;vec3 colRgb=instanceColor;float colA=iColorA;\n' +
-    io.asg + '\n' +
-    'gl_Position=projectionMatrix*viewMatrix*vec4(wp,1.0);}';
+    io.asg +
+    '\n' +
+    'gl_Position=projectionMatrix*viewMatrix*vec4(wp,1.0);}'
+  );
 }
 
 function mat4Col(out, m, i) {
@@ -256,26 +253,25 @@ function mat4Col(out, m, i) {
 }
 let _farDepthTex = null;
 function farDepthTexture(T) {
-  // シーン深度が無い/未供給時の既定=遠(1.0)。soft-particle フェード項が最大(=フェード無効)になる。
   if (_farDepthTex) return _farDepthTex;
   const dt = new T.DataTexture(new Float32Array([1, 1, 1, 1]), 1, 1, T.RGBAFormat, T.FloatType);
   dt.needsUpdate = true;
   _farDepthTex = dt;
   return dt;
 }
-// フラグメントが宣言する Unity uniform を検出して供給し、毎フレーム実カメラから配線する共通ヘルパ。
-// material prop(_MainColor/Speed/Color_*/Vector*_*)は「各オーラの実材質値(mp)を最優先、無ければシェーダ既定」で解決。推測値は入れない。
 function buildGameUniforms(T, g, mp) {
   const frag = (g.frag || '') + '\n' + (g.vert || ''); // 実頂点も走査(MatrixVP/_TimeParameters/材質prop は頂点でも使う)
   const has = (n) => new RegExp('\\b' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(frag);
   const u = { _TimeParameters: { value: new T.Vector4(0, 0, 0, 0) } };
-  const mc = (mp && mp.colors) || {}, mf = (mp && mp.floats) || {}, mv1 = (mp && mp.vec1) || {};
+  const mc = (mp && mp.colors) || {},
+    mf = (mp && mp.floats) || {},
+    mv1 = (mp && mp.vec1) || {};
   for (const [name, pd] of Object.entries(g.props || {})) {
     if (/^vec/.test(pd.type)) {
-      const a = mc[name] || pd.def || [0, 0, 0, 0];   // 色/Vector4: 実材質 override 優先
+      const a = mc[name] || pd.def || [0, 0, 0, 0]; // 色/Vector4: 実材質 override 優先
       u[name] = { value: new T.Vector4(a[0] || 0, a[1] || 0, a[2] || 0, a[3] == null ? 0 : a[3]) };
     } else {
-      const v = mf[name] != null ? mf[name] : (mv1[name] != null ? mv1[name] : pd.def); // float: 実材質 override 優先
+      const v = mf[name] != null ? mf[name] : mv1[name] != null ? mv1[name] : pd.def; // float: 実材質 override 優先
       u[name] = { value: v == null ? 0 : v };
     }
   }
@@ -293,30 +289,55 @@ function buildGameUniforms(T, g, mp) {
   if (has('hlslcc_mtx4x4unity_MatrixInvVP')) u.hlslcc_mtx4x4unity_MatrixInvVP = { value: mkMat4() };
   const needDepth = !!g.needsDepth || has('_CameraDepthTexture');
   if (needDepth) u._CameraDepthTexture = { value: farDepthTexture(T) };
-  const _cp = new T.Vector3(), _vp = new T.Matrix4(), _ivp = new T.Matrix4();
+  const _cp = new T.Vector3(),
+    _vp = new T.Matrix4(),
+    _ivp = new T.Matrix4();
   const wire = (renderer, camera) => {
-    const near = camera.near || 0.1, far = camera.far || 1000;
-    if (u._WorldSpaceCameraPos) { camera.getWorldPosition(_cp); u._WorldSpaceCameraPos.value.copy(_cp); }
+    const near = camera.near || 0.1,
+      far = camera.far || 1000;
+    if (u._WorldSpaceCameraPos) {
+      camera.getWorldPosition(_cp);
+      u._WorldSpaceCameraPos.value.copy(_cp);
+    }
     if (u._ProjectionParams) u._ProjectionParams.value.set(1, near, far, 1 / far);
-    if (u._ZBufferParams) { const fn = far / near; u._ZBufferParams.value.set(1 - fn, fn, (1 - fn) / far, fn / far); }
-    if (u._ScaledScreenParams && renderer) { const sz = renderer.getDrawingBufferSize(new T.Vector2()); u._ScaledScreenParams.value.set(sz.x, sz.y, 1 + 1 / sz.x, 1 + 1 / sz.y); }
+    if (u._ZBufferParams) {
+      const fn = far / near;
+      u._ZBufferParams.value.set(1 - fn, fn, (1 - fn) / far, fn / far);
+    }
+    if (u._ScaledScreenParams && renderer) {
+      const sz = renderer.getDrawingBufferSize(new T.Vector2());
+      u._ScaledScreenParams.value.set(sz.x, sz.y, 1 + 1 / sz.x, 1 + 1 / sz.y);
+    }
     if (u.hlslcc_mtx4x4unity_MatrixV) for (let i = 0; i < 4; i++) mat4Col(u.hlslcc_mtx4x4unity_MatrixV.value[i], camera.matrixWorldInverse, i);
     if (u.hlslcc_mtx4x4unity_MatrixInvV) for (let i = 0; i < 4; i++) mat4Col(u.hlslcc_mtx4x4unity_MatrixInvV.value[i], camera.matrixWorld, i);
     if (u.hlslcc_mtx4x4unity_MatrixVP || u.hlslcc_mtx4x4unity_MatrixInvVP) {
       _vp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       if (u.hlslcc_mtx4x4unity_MatrixVP) for (let i = 0; i < 4; i++) mat4Col(u.hlslcc_mtx4x4unity_MatrixVP.value[i], _vp, i);
-      if (u.hlslcc_mtx4x4unity_MatrixInvVP) { _ivp.copy(_vp).invert(); for (let i = 0; i < 4; i++) mat4Col(u.hlslcc_mtx4x4unity_MatrixInvVP.value[i], _ivp, i); }
+      if (u.hlslcc_mtx4x4unity_MatrixInvVP) {
+        _ivp.copy(_vp).invert();
+        for (let i = 0; i < 4; i++) mat4Col(u.hlslcc_mtx4x4unity_MatrixInvVP.value[i], _ivp, i);
+      }
     }
   };
-  const setDepth = (tex) => { if (u._CameraDepthTexture) u._CameraDepthTexture.value = tex || farDepthTexture(T); };
+  const setDepth = (tex) => {
+    if (u._CameraDepthTexture) u._CameraDepthTexture.value = tex || farDepthTexture(T);
+  };
   return { uniforms: u, wire, setDepth, needsDepth: needDepth };
 }
-// 実材質のブレンドを忠実適用。opaque(One/Zero)=深度書込→不透明(手前の透明パーティクルが正しく前後判定される・
-// 例: 玉が不透明で深度を書くと、後ろ(sortingOrder-1)の靄が「玉の前にある分だけ」表示され前面にも立ち上る)。
 function applyGameBlend(T, mat, blend) {
-  if (blend === 'opaque') { mat.transparent = false; mat.depthWrite = true; mat.blending = T.NormalBlending; }
-  else if (blend === 'add') { mat.transparent = true; mat.depthWrite = false; mat.blending = T.AdditiveBlending; }
-  else { mat.transparent = true; mat.depthWrite = false; mat.blending = T.NormalBlending; } // alpha
+  if (blend === 'opaque') {
+    mat.transparent = false;
+    mat.depthWrite = true;
+    mat.blending = T.NormalBlending;
+  } else if (blend === 'add') {
+    mat.transparent = true;
+    mat.depthWrite = false;
+    mat.blending = T.AdditiveBlending;
+  } else {
+    mat.transparent = true;
+    mat.depthWrite = false;
+    mat.blending = T.NormalBlending;
+  } // alpha
   mat.depthTest = true;
   mat.needsUpdate = true;
 }
@@ -336,41 +357,33 @@ function makeGameShaderMaterial(T, key, viewAlign, mp, blend, tex) {
   const useMatcapVert = !useRealVert && key === 'skill_fire_normal';
   const gu = buildGameUniforms(T, g, mp);
   const uniforms = gu.uniforms;
-  // baked shader が宣言するテクスチャ sampler に材質の mainTex をバインド(無ければ白=実質無効)。
-  // 実ゲーム通り: skill_WaterShildTex 等は texture(Texture,uv) を matcap/HSV 合成に使う。
   for (const sn of g.samplers || []) uniforms[sn] = { value: tex || whiteTexture(T) };
   uniforms.uViewAlign = { value: viewAlign ? 1 : 0 }; // GAME_VERT_MATCAP 用(汎用頂点では未使用)
   const mat = new T.RawShaderMaterial({
     glslVersion: T.GLSL3,
     uniforms,
-    vertexShader: useRealVert ? g.vert : (useMatcapVert ? GAME_VERT_MATCAP : genMeshUvVertex(g)),
+    vertexShader: useRealVert ? g.vert : useMatcapVert ? GAME_VERT_MATCAP : genMeshUvVertex(g),
     fragmentShader: g.frag,
     side: T.DoubleSide,
   });
   applyGameBlend(T, mat, blend);
   const onBeforeRender = (renderer, scene, camera) => gu.wire(renderer, camera);
-  const tick = (dt) => { uniforms._TimeParameters.value.x += dt; };
+  const tick = (dt) => {
+    uniforms._TimeParameters.value.x += dt;
+  };
   return { mat, tick, onBeforeRender, setDepth: gu.setDepth };
 }
 
-// proc.shader 名 → 焼き込み済み game-shaders.js のキー(= 'Shader Graphs/' 除去名)。
-// varying に unknown が残るシェーダ(頂点解析が曖昧)は汎用頂点に載らないので null(=proceduralTex フォールバック)。
-// 例外: skill_fire_normal は専用 matcap 頂点(GAME_VERT_MATCAP)で確実に動くので unknownVary でも採用。
 function resolveGameKey(sh) {
   if (!sh) return null;
   const key = String(sh).replace(/^Shader Graphs\//, '');
   const g = gameShaders[key];
   if (!g) return null;
   if (g.unknownVary && key !== 'skill_fire_normal') return null;
-  // 自前頂点は vs_INTERP* しか供給しない。別命名の varying(vs_TEXCOORD/vs_COLOR=URP標準シェーダ等)を読む
-  // フラグメントは駆動できないので game 経路から除外(テクスチャfallbackへ)。
   if (/\bvs_(TEXCOORD|COLOR)\d/.test(g.frag)) return null;
   return key;
 }
 
-// billboard(quad)粒子に実ゲームフラグメントGLSLを適用する backend。頂点は g.varyings(頂点静的解析で確定した
-// スロット→意味 uv/color/worldPos/normal)から生成し、各 vs_INTERP に正しい値を供給する。soft-particle は
-// _CameraDepthTexture(シーン深度プリパス)で実ゲーム同様にフェードする。material params/depth uniform は実データ配線。
 function makeGameBillboardBackend(T, key, maxP, P, o) {
   const g = gameShaders[key];
   if (!g) return null;
@@ -380,7 +393,11 @@ function makeGameBillboardBackend(T, key, maxP, P, o) {
   geo.index = quad.index;
   geo.attributes.position = quad.attributes.position;
   geo.attributes.uv = quad.attributes.uv;
-  const iOffset = new Float32Array(maxP * 3), iColor = new Float32Array(maxP * 4), iSize = new Float32Array(maxP * 2), iRot = new Float32Array(maxP), iUvOff = new Float32Array(maxP * 2);
+  const iOffset = new Float32Array(maxP * 3),
+    iColor = new Float32Array(maxP * 4),
+    iSize = new Float32Array(maxP * 2),
+    iRot = new Float32Array(maxP),
+    iUvOff = new Float32Array(maxP * 2);
   geo.setAttribute('iOffset', new T.InstancedBufferAttribute(iOffset, 3));
   geo.setAttribute('iColor', new T.InstancedBufferAttribute(iColor, 4));
   geo.setAttribute('iSize', new T.InstancedBufferAttribute(iSize, 2));
@@ -394,7 +411,9 @@ function makeGameBillboardBackend(T, key, maxP, P, o) {
     'in vec3 position;in vec2 uv;in vec3 iOffset;in vec4 iColor;in vec2 iSize;in float iRot;in vec2 iUvOff;\n' +
     'uniform mat4 modelMatrix;uniform mat4 viewMatrix;uniform mat4 projectionMatrix;uniform vec3 cameraPosition;uniform mat4 uCamWorld;\n' +
     'uniform vec2 uUvScale;uniform float uScale;uniform vec2 uPivot;uniform float uViewAligned;uniform float uRenderMode;\n' +
-    io.outs + '\n' + S2L_GLSL +
+    io.outs +
+    '\n' +
+    S2L_GLSL +
     'void main(){vec2 quv=uv*uUvScale+iUvOff;vec3 colRgb=iColor.rgb;float colA=iColor.a;vec3 p=position;p.xy-=uPivot;\n' +
     'float cr=cos(iRot),sr=sin(iRot);vec2 r=vec2(p.x*cr-p.y*sr,p.x*sr+p.y*cr)*iSize;vec3 wp;\n' +
     'if(uRenderMode>1.5){vec3 cw=(modelMatrix*vec4(iOffset,1.0)).xyz;vec3 toCam=cameraPosition-cw;toCam.y=0.0;float ll=length(toCam);toCam=ll>1e-5?toCam/ll:vec3(0.0,0.0,1.0);\n' +
@@ -402,10 +421,11 @@ function makeGameBillboardBackend(T, key, maxP, P, o) {
     ' wp=cw+rightW*(r.x*uScale)+upv*(r.y*uScale);}\n' +
     'else{vec4 mvc=viewMatrix*modelMatrix*vec4(iOffset,1.0);mvc.xy+=r*uScale;wp=(uCamWorld*mvc).xyz;}\n' +
     'vec3 nrm=normalize(cameraPosition-wp);\n' +
-    io.asg + '\n' +
+    io.asg +
+    '\n' +
     'gl_Position=projectionMatrix*viewMatrix*vec4(wp,1.0);}';
 
-  const gu = buildGameUniforms(T, g, o.matParams);  // material props(実材質override) + _TimeParameters + depth(必要時)
+  const gu = buildGameUniforms(T, g, o.matParams); // material props(実材質override) + _TimeParameters + depth(必要時)
   const uniforms = gu.uniforms;
   for (const sn of g.samplers || []) uniforms[sn] = { value: o.tex || whiteTexture(T) }; // テクスチャsampler に mainTex をバインド
   uniforms.uUvScale = { value: new T.Vector2(uvScale[0], uvScale[1]) };
@@ -415,7 +435,11 @@ function makeGameBillboardBackend(T, key, maxP, P, o) {
   uniforms.uRenderMode = { value: o.renderMode == null ? 0 : o.renderMode };
   uniforms.uCamWorld = { value: new T.Matrix4() };
   const mat = new T.RawShaderMaterial({
-    glslVersion: T.GLSL3, uniforms, vertexShader, fragmentShader: g.frag, side: T.DoubleSide,
+    glslVersion: T.GLSL3,
+    uniforms,
+    vertexShader,
+    fragmentShader: g.frag,
+    side: T.DoubleSide,
   });
   applyGameBlend(T, mat, o.blend);
   const unityMesh = new T.Mesh(geo, mat);
@@ -428,21 +452,41 @@ function makeGameBillboardBackend(T, key, maxP, P, o) {
     unityMesh,
     proc: true,
     gameMat: mat,
-    tick: (dt) => { uniforms._TimeParameters.value.x += dt; },
+    tick: (dt) => {
+      uniforms._TimeParameters.value.x += dt;
+    },
     setDepth: gu.setDepth,
     writeInst: (n, i, sm, col) => {
-      const o3 = n * 3, c4 = n * 4, s2 = n * 2;
-      iOffset[o3] = P.px[i]; iOffset[o3 + 1] = P.py[i]; iOffset[o3 + 2] = P.pz[i];
-      iColor[c4] = col[0]; iColor[c4 + 1] = col[1]; iColor[c4 + 2] = col[2]; iColor[c4 + 3] = col[3];
-      iSize[s2] = P.sx[i] * sm[0]; iSize[s2 + 1] = P.sy[i] * sm[1];
+      const o3 = n * 3,
+        c4 = n * 4,
+        s2 = n * 2;
+      iOffset[o3] = P.px[i];
+      iOffset[o3 + 1] = P.py[i];
+      iOffset[o3 + 2] = P.pz[i];
+      iColor[c4] = col[0];
+      iColor[c4 + 1] = col[1];
+      iColor[c4 + 2] = col[2];
+      iColor[c4 + 3] = col[3];
+      iSize[s2] = P.sx[i] * sm[0];
+      iSize[s2 + 1] = P.sy[i] * sm[1];
       iRot[n] = P.rz[i];
-      if (uv.on) { const fr = uv.frameOf(i); const fx = fr % uv.tilesX, fy = (fr / uv.tilesX) | 0; iUvOff[n * 2] = fx / uv.tilesX; iUvOff[n * 2 + 1] = (uv.tilesY - 1 - fy) / uv.tilesY; }
+      if (uv.on) {
+        const fr = uv.frameOf(i);
+        const fx = fr % uv.tilesX,
+          fy = (fr / uv.tilesX) | 0;
+        iUvOff[n * 2] = fx / uv.tilesX;
+        iUvOff[n * 2 + 1] = (uv.tilesY - 1 - fy) / uv.tilesY;
+      }
     },
     commit: (n) => {
       geo.instanceCount = n;
       geo.attributes.iOffset.needsUpdate = geo.attributes.iColor.needsUpdate = geo.attributes.iSize.needsUpdate = geo.attributes.iRot.needsUpdate = geo.attributes.iUvOff.needsUpdate = true;
     },
-    dispose: () => { geo.dispose(); mat.dispose(); quad.dispose(); },
+    dispose: () => {
+      geo.dispose();
+      mat.dispose();
+      quad.dispose();
+    },
   };
 }
 
@@ -452,33 +496,44 @@ function makeMeshBackend(T, maxP, P, meshGeo, tex, proc, viewAlign, procShader, 
   if (meshGeo.normals) bg.setAttribute('normal', new T.BufferAttribute(meshGeo.normals, 3));
   if (meshGeo.uv) bg.setAttribute('uv', new T.BufferAttribute(meshGeo.uv, 2));
   if (meshGeo.indices) bg.setIndex(new T.BufferAttribute(meshGeo.indices, 1));
-  // 実ゲームGLSLを焼き込んだ shader key に解決(手続き型近似でなく実コードを直実行)。
   const gameKey = proc ? resolveGameKey(procShader) : null;
   const hasGame = !!gameKey;
-  let mat, procMat = null, gameTick = null, gameOnBefore = null, gameSetDepth = null;
+  let mat,
+    procMat = null,
+    gameTick = null,
+    gameOnBefore = null,
+    gameSetDepth = null;
   if (hasGame) {
     const gm = makeGameShaderMaterial(T, gameKey, viewAlign, matParams, meshBlend, tex);
-    procMat = gm.mat; mat = gm.mat; gameTick = gm.tick; gameOnBefore = gm.onBeforeRender; gameSetDepth = gm.setDepth;
+    procMat = gm.mat;
+    mat = gm.mat;
+    gameTick = gm.tick;
+    gameOnBefore = gm.onBeforeRender;
+    gameSetDepth = gm.setDepth;
   } else {
-    // GLSL未焼込の proc mesh(Circle_add/enemy_fire 等)は proceduralTex+加算で描く。
     mat = new T.MeshBasicMaterial({ map: tex || null, transparent: true, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide });
   }
   const im = new T.InstancedMesh(bg, mat, maxP);
   im.frustumCulled = false;
   im.count = 0;
   im.instanceColor = new T.InstancedBufferAttribute(new Float32Array(maxP * 3), 3);
-  // 実ゲームGLSLは vs_INTERP1.w(粒子alpha)をエッジ/フィールド計算に使う。instanceColor(vec3)では alpha を運べないので
-  // 専用の per-instance alpha 属性を足し、rgb は非乗算(startColor そのまま)で渡す(乗算+alpha=1固定だとエッジが潰れ濃くなる)。
   let iColA = null;
-  if (hasGame) { iColA = new T.InstancedBufferAttribute(new Float32Array(maxP), 1); bg.setAttribute('iColorA', iColA); }
+  if (hasGame) {
+    iColA = new T.InstancedBufferAttribute(new Float32Array(maxP), 1);
+    bg.setAttribute('iColorA', iColA);
+  }
   if (gameOnBefore) im.onBeforeRender = gameOnBefore;
   const dm = new T.Object3D();
   return {
     unityMesh: im,
-    // proc=true は専用ShaderMaterial(slash/実GLSL)のみ。MeshBasicMaterial経路は false にして createSystem の
-    // blend上書き(加算/alpha/opaque)を効かせる。
     proc: !!procMat,
-    tick: gameTick || (procMat && procMat.uniforms && procMat.uniforms.uTime ? (dt) => { procMat.uniforms.uTime.value += dt; } : null),
+    tick:
+      gameTick ||
+      (procMat && procMat.uniforms && procMat.uniforms.uTime
+        ? (dt) => {
+            procMat.uniforms.uTime.value += dt;
+          }
+        : null),
     setDepth: gameSetDepth,
     writeInst: (n, i, sm, col) => {
       dm.position.set(P.px[i], P.py[i], P.pz[i]);
@@ -486,9 +541,10 @@ function makeMeshBackend(T, maxP, P, meshGeo, tex, proc, viewAlign, procShader, 
       dm.scale.set(P.sx[i] * sm[0], P.sy[i] * sm[1], P.sz[i] * sm[2]);
       dm.updateMatrix();
       im.setMatrixAt(n, dm.matrix);
-      // game: 非乗算 rgb + alpha 別持ち。非game: 従来どおり alpha 乗算(vec3)。
-      if (iColA) { im.instanceColor.setXYZ(n, col[0], col[1], col[2]); iColA.array[n] = col[3]; }
-      else im.instanceColor.setXYZ(n, col[0] * col[3], col[1] * col[3], col[2] * col[3]);
+      if (iColA) {
+        im.instanceColor.setXYZ(n, col[0], col[1], col[2]);
+        iColA.array[n] = col[3];
+      } else im.instanceColor.setXYZ(n, col[0] * col[3], col[1] * col[3], col[2] * col[3]);
     },
     commit: (n) => {
       im.count = n;
@@ -797,46 +853,44 @@ function createSystem(T, sys, opt) {
   const viewAligned = sys.renderAlignment == null || sys.renderAlignment === 0 || sys.renderAlignment === 3;
   const stretched = sys.renderMode === 1;
   const procShaderName = opt.proc && opt.proc.shader ? opt.proc.shader : '';
-  // baked game shader が解決できるなら(プロシージャルでもテクスチャ付きでも)実GLSLで描く。
-  // 解決できない材質のみ従来の tex 素通し/proceduralTex フォールバック。
   const meshProc = useMesh && !!resolveGameKey(procShaderName);
   const meshViewAlign = sys.renderAlignment === 0 || sys.renderAlignment == null;
-  // 実材質のブレンド('opaque'/'add'/'alpha')。opaque は深度書込＝手前の透明パーティクルが正しく前後判定される。
-  const gameBlend = opt.matOpaque ? 'opaque' : (opt.matAdditive ? 'add' : 'alpha');
-  // billboard 系(靄/メテオ等)も焼込済み game shader があれば実GLSLで描く(stretch系除く)。
-  const billboardGameKey = (!useMesh && !stretched) ? resolveGameKey(procShaderName) : null;
+  const gameBlend = opt.matOpaque ? 'opaque' : opt.matAdditive ? 'add' : 'alpha';
+  const billboardGameKey = !useMesh && !stretched ? resolveGameKey(procShaderName) : null;
   const backend = useMesh
     ? makeMeshBackend(T, maxP, P, opt.meshGeo, tex, meshProc, meshViewAlign, procShaderName, opt.proc, gameBlend)
     : billboardGameKey
       ? makeGameBillboardBackend(T, billboardGameKey, maxP, P, {
           uv: { on: uvOn, tilesX: uvTilesX, tilesY: uvTilesY, frameOf: uvFrameOf },
-          viewAligned, renderMode: sys.renderMode, pivot: sys.pivot, matParams: opt.proc, blend: gameBlend, tex,
+          viewAligned,
+          renderMode: sys.renderMode,
+          pivot: sys.pivot,
+          matParams: opt.proc,
+          blend: gameBlend,
+          tex,
         })
       : makeBillboardBackend(T, maxP, P, {
-        tex,
-        uv: { on: uvOn, tilesX: uvTilesX, tilesY: uvTilesY, frameOf: uvFrameOf },
-        solid: opt.solid,
-        viewAligned,
-        stretched,
-        lengthScale: sys.lengthScale || 2,
-        velocityScale: sys.velocityScale || 0,
-        tint: opt.tint,
-        renderMode: sys.renderMode,
-        pivot: sys.pivot,
-      });
+          tex,
+          uv: { on: uvOn, tilesX: uvTilesX, tilesY: uvTilesY, frameOf: uvFrameOf },
+          solid: opt.solid,
+          viewAligned,
+          stretched,
+          lengthScale: sys.lengthScale || 2,
+          velocityScale: sys.velocityScale || 0,
+          tint: opt.tint,
+          renderMode: sys.renderMode,
+          pivot: sys.pivot,
+        });
   const unityMesh = backend.unityMesh,
     writeInst = backend.writeInst,
     disposeFn = backend.dispose;
   const _additive = opt.matAdditive != null ? opt.matAdditive : opt.defaultBlend !== 'normal';
-  // 手続き型mesh backend は専用ShaderMaterialで blend/depth を自前設定済み(depthWrite=false等)なので上書きしない。
   if (unityMesh && unityMesh.material && !backend.proc) {
     const mm = unityMesh.material;
     if (opt.matOpaque) {
       mm.blending = T.NormalBlending;
       mm.transparent = false;
       mm.depthWrite = true;
-      // opaque かつ手続き型(実テクスチャ無し=形状は生成αに在る)は alphaTest でカットアウト
-      // (Debuff/skill_fire等)。実テクスチャのopaque(hanpen等)は全面不透明のまま。
       if (opt.proc && !opt.texture) mm.alphaTest = opt.cutoff != null ? opt.cutoff : 0.5;
     } else {
       mm.blending = _additive ? T.AdditiveBlending : T.NormalBlending;
@@ -858,7 +912,6 @@ function createSystem(T, sys, opt) {
     curLoop = -1;
   const burstFired = new Array(bursts.length).fill(0);
   const rateOver = () => (opt.emissionRateOverride != null ? opt.emissionRateOverride : evalMMCurve(em.rateOverTime, 0));
-  // 表示メッシュ系(burstのみ・rate0・looping)は再バーストせず粒子を持続させ age をラップ＝ループ境界の再spawnジャンプ/隙間を消す
   const persistLoop = looping && bursts.length > 0 && rateOver() <= 0 && opt.emissionRateOverride == null;
   const spawn = () => {
     let idx = -1;
@@ -970,8 +1023,12 @@ function createSystem(T, sys, opt) {
       if (P.age[i] >= P.life[i]) {
         if (persistLoop && P.life[i] > 1e-4) {
           P.age[i] -= P.life[i] * Math.floor(P.age[i] / P.life[i]);
-          P.px[i] = P.spx[i]; P.py[i] = P.spy[i]; P.pz[i] = P.spz[i];
-          P.vx[i] = 0; P.vy[i] = 0; P.vz[i] = 0;
+          P.px[i] = P.spx[i];
+          P.py[i] = P.spy[i];
+          P.pz[i] = P.spz[i];
+          P.vx[i] = 0;
+          P.vy[i] = 0;
+          P.vz[i] = 0;
           P.rz[i] = P.rz0[i];
         } else {
           if (emitEvents) deaths.push(P.px[i], P.py[i], P.pz[i]);
@@ -980,8 +1037,6 @@ function createSystem(T, sys, opt) {
         }
       }
       const t = P.age[i] / P.life[i];
-      // 重力は常にワールド空間(world -Y)。粒子速度はメッシュのローカル系なので、world下方向をローカルに変換した
-      // _gravDir に沿って加える(mesh が回転/spinノード配下だと local Y≠world Y になる＝靄が横流れするのを是正)。
       const gA = gravityBase * P.grav[i] * dt;
       P.vx[i] += _gravDir[0] * gA;
       P.vy[i] += _gravDir[1] * gA;
@@ -1093,7 +1148,11 @@ function createSystem(T, sys, opt) {
     doPrewarm,
     livePos,
     setDepth: backend.setDepth || null,
-    setGravDir: (x, y, z) => { _gravDir[0] = x; _gravDir[1] = y; _gravDir[2] = z; },
+    setGravDir: (x, y, z) => {
+      _gravDir[0] = x;
+      _gravDir[1] = y;
+      _gravDir[2] = z;
+    },
     ownRate: () => rateOver(),
     setSubDriven: () => {
       selfEmit = false;
@@ -1104,22 +1163,33 @@ function createSystem(T, sys, opt) {
   };
 }
 
-// Unity Quaternion.Euler(x,y,z) = Ry(y)·Rx(x)·Rz(z) (ZXY: Z→X→Y の順で適用) を three で再現。
-const _qx = { v: null }, _qy = { v: null }, _qz = { v: null };
+const _qx = { v: null },
+  _qy = { v: null },
+  _qz = { v: null };
 function unityEulerQuat(T, out, xDeg, yDeg, zDeg) {
   const d = Math.PI / 180;
-  if (!_qx.v) { _qx.v = new T.Quaternion(); _qy.v = new T.Quaternion(); _qz.v = new T.Quaternion(); }
+  if (!_qx.v) {
+    _qx.v = new T.Quaternion();
+    _qy.v = new T.Quaternion();
+    _qz.v = new T.Quaternion();
+  }
   _qx.v.setFromAxisAngle(_AX_X, xDeg * d);
   _qy.v.setFromAxisAngle(_AX_Y, yDeg * d);
   _qz.v.setFromAxisAngle(_AX_Z, zDeg * d);
   out.copy(_qy.v).multiply(_qx.v).multiply(_qz.v);
   return out;
 }
-let _AX_X = null, _AX_Y = null, _AX_Z = null;
+let _AX_X = null,
+  _AX_Y = null,
+  _AX_Z = null;
 
 function createAuraParticles(bytes, opt) {
   if (!THREE_NS) return null;
-  if (!_AX_X) { _AX_X = new THREE_NS.Vector3(1, 0, 0); _AX_Y = new THREE_NS.Vector3(0, 1, 0); _AX_Z = new THREE_NS.Vector3(0, 0, 1); }
+  if (!_AX_X) {
+    _AX_X = new THREE_NS.Vector3(1, 0, 0);
+    _AX_Y = new THREE_NS.Vector3(0, 1, 0);
+    _AX_Z = new THREE_NS.Vector3(0, 0, 1);
+  }
   const data = vfxParse.parseVfx(bytes);
   if (!data || !data.systems.length) return null;
   const group = new THREE_NS.Group();
@@ -1130,8 +1200,6 @@ function createAuraParticles(bytes, opt) {
   const gateOn = !(opt && opt.ignoreGate);
   const inactive = (gate && gate.inactive) || [];
   const emissionMap = new Map((gate && gate.emission) || []);
-  // prefab で m_IsActive=false の GameObject は既定で非表示(loop2 等スキル専用要素)。ignoreGate でも尊重する
-  // (これは Animator の gate ではなく prefab の静的既定)。ただし idle state が明示 active 化する path は表示。
   const defaultActiveSet = new Set((gate && gate.defaultActive) || []);
   const goHidden = (sys) => sys.goActive === false && !defaultActiveSet.has(sys.path);
   const gateHidden = (p) => {
@@ -1140,7 +1208,6 @@ function createAuraParticles(bytes, opt) {
     for (const [ep, ev] of emissionMap) if (ev <= 0.0001 && (p === ep || p.startsWith(ep + '/'))) return true;
     return false;
   };
-  // Transform euler アニメ(周回)ノード。子systemはこのノード配下に localPos で置き、node を回して周回を再生する。
   const spinNodes = new Map();
   for (const a of data.transformAnims || []) {
     const node = new THREE_NS.Group();
@@ -1169,10 +1236,9 @@ function createAuraParticles(bytes, opt) {
     const s = createSystem(THREE_NS, sys, so);
     s._sys = sys;
     s._subDriven = false;
-    // 周回アニメ親がある系はそのノードのローカル系に置く(localPos/localRot)。無ければ world 直置き。
     const spin = sys.animParent ? spinNodes.get(sys.animParent) : null;
     s._spin = spin;
-    const p = (spin && sys.localPos) ? sys.localPos : (sys.pos || { x: 0, y: 0, z: 0 });
+    const p = spin && sys.localPos ? sys.localPos : sys.pos || { x: 0, y: 0, z: 0 };
     s.unityMesh.position.set(p.x || 0, p.y || 0, p.z || 0);
     const sc = sys.scale || { x: 1, y: 1, z: 1 };
     s.unityMesh.scale.set(sc.x || 1, sc.y || 1, sc.z || 1);
@@ -1190,7 +1256,7 @@ function createAuraParticles(bytes, opt) {
       startColor: sys.ps && sys.ps.InitialModule ? sys.ps.InitialModule.startColor : null,
     };
     s.unityMesh.renderOrder = sys.sortingOrder || 0;
-    const q = (spin && sys.localRot) ? sys.localRot : sys.rot;
+    const q = spin && sys.localRot ? sys.localRot : sys.rot;
     if (q && (q.x || q.y || q.z || q.w !== 1)) s.unityMesh.quaternion.set(q.x || 0, q.y || 0, q.z || 0, q.w == null ? 1 : q.w);
     if (sys.renderMode !== 5) (spin ? spin.node : group).add(s.unityMesh);
     sims.push(s);
@@ -1203,8 +1269,6 @@ function createAuraParticles(bytes, opt) {
     if (!parent || !child || child === parent) continue;
     child.setSubDriven();
     child._subDriven = true;
-    // 死亡サブエミッタのみ親の birth/death イベントを要する。誕生(type0)は親の生存中ずっと
-    // 子が自身の rate で親位置に発生し続ける(Unity Birth サブエミッタ挙動)ので acc で連続駆動。
     if (lk.type === 2) parent.enableEvents();
     links.push({ parent, child, type: lk.type, prob: lk.prob, childRate: child.ownRate ? child.ownRate() : 0, acc: 0 });
   }
@@ -1213,8 +1277,8 @@ function createAuraParticles(bytes, opt) {
     _cl = new THREE_NS.Vector3(),
     _inv = new THREE_NS.Matrix4();
   const _spinQ = new THREE_NS.Quaternion();
-  const _gq = new THREE_NS.Quaternion(), _gd = new THREE_NS.Vector3();
-  // 各 sim のメッシュ world 回転(spinノード×mesh)から world -Y をローカル方向に変換し、重力方向として渡す。
+  const _gq = new THREE_NS.Quaternion(),
+    _gd = new THREE_NS.Vector3();
   const updateGravDirs = () => {
     for (const s of sims) {
       if (!s.setGravDir || !s.unityMesh) continue;
@@ -1225,15 +1289,20 @@ function createAuraParticles(bytes, opt) {
       s.setGravDir(_gd.x, _gd.y, _gd.z);
     }
   };
-  // 実キーフレーム列 keys=[[t,v],...] を区分線形補間(clip をループ)。静止→急回転→静止の実カーブを再現。
   const sampleKeys = (keys, t) => {
     const n = keys.length;
     if (n === 1) return keys[0][1];
     if (t <= keys[0][0]) return keys[0][1];
     if (t >= keys[n - 1][0]) return keys[n - 1][1];
-    let lo = 0, hi = n - 1;
-    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (keys[m][0] <= t) lo = m; else hi = m; }
-    const a = keys[lo], b = keys[hi];
+    let lo = 0,
+      hi = n - 1;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (keys[m][0] <= t) lo = m;
+      else hi = m;
+    }
+    const a = keys[lo],
+      b = keys[hi];
     const u = b[0] > a[0] ? (t - a[0]) / (b[0] - a[0]) : 0;
     return a[1] + (b[1] - a[1]) * u;
   };
@@ -1262,8 +1331,6 @@ function createAuraParticles(bytes, opt) {
         L.child.unityMesh.updateMatrix();
         _inv.copy(L.child.unityMesh.matrix).invert();
         if (L.type === 0) {
-          // Birth サブエミッタ: サブ自身の rateOverTime(実データ)で発生し、位置を親の生存粒子から継承する。
-          // (×親粒子数や×3 の目分量は誤り＝過剰発生の原因だった。総rate=子の実rateのみ。)
           const live = L.parent.livePos();
           if (!live.length) continue;
           L.parent.unityMesh.updateMatrix();
@@ -1272,7 +1339,7 @@ function createAuraParticles(bytes, opt) {
           if (toEmit <= 0) continue;
           L.acc -= toEmit;
           while (toEmit-- > 0) {
-            const base = (Math.floor(Math.random() * (live.length / 3))) * 3;
+            const base = Math.floor(Math.random() * (live.length / 3)) * 3;
             if (Math.random() > L.prob) continue;
             _wp.set(live[base], live[base + 1], live[base + 2]).applyMatrix4(L.parent.unityMesh.matrix);
             _cl.copy(_wp).applyMatrix4(_inv);
@@ -1294,7 +1361,6 @@ function createAuraParticles(bytes, opt) {
     dispose() {
       for (const s of sims) s.dispose();
     },
-    // model3d-lib が毎フレーム、シーン深度プリパスのテクスチャを soft-particle シェーダへ供給する。
     setDepthTexture(tex) {
       for (const s of sims) if (s.setDepth) s.setDepth(tex);
     },

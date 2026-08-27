@@ -123,6 +123,14 @@ async function loadStage(stageKey) {
   if (!bytes) return null;
   return loadBytes(key, bytes);
 }
+async function loadPack(rel) {
+  if (!rel) return null;
+  const key = 'pack:' + rel;
+  if (cache.has(key)) return cache.get(key);
+  const bytes = await assetStore.readAsset(DIRS.shared, rel);
+  if (!bytes) return null;
+  return loadBytes(key, bytes);
+}
 
 function apply9Slice(el, sp, opt) {
   if (!el || !sp) return;
@@ -141,6 +149,41 @@ function apply9Slice(el, sp, opt) {
   el.style.borderImageRepeat = o.repeat || 'stretch';
   el.style.borderWidth = sliceTop * k + 'px ' + sliceRight * k + 'px ' + sliceBottom * k + 'px ' + sliceLeft * k + 'px';
 }
+function compose9Slice(sp, W, H) {
+  if (!sp || !sp.canvas) return null;
+  const src = sp.canvas,
+    sw = src.width,
+    sh = src.height,
+    b = sp.border || { l: 0, r: 0, t: 0, b: 0 };
+  const bl = Math.min(b.l, sw),
+    br = Math.min(b.r, sw - Math.min(b.l, sw)),
+    bt = Math.min(b.t, sh),
+    bb = Math.min(b.b, sh - Math.min(b.t, sh));
+  const cw = Math.max(0, sw - bl - br),
+    ch = Math.max(0, sh - bt - bb),
+    dw = Math.max(0, W - bl - br),
+    dh = Math.max(0, H - bt - bb);
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(W));
+  cv.height = Math.max(1, Math.round(H));
+  const ctx = cv.getContext('2d');
+  const rows = [
+    [0, bt, 0, bt],
+    [bt, ch, bt, dh],
+    [sh - bb, bb, H - bb, bb],
+  ];
+  const cols = [
+    [0, bl, 0, bl],
+    [bl, cw, bl, dw],
+    [sw - br, br, W - br, br],
+  ];
+  for (const [sy, sH, dy, dH] of rows)
+    for (const [sx, sW, dx, dW] of cols) {
+      if (sW <= 0 || sH <= 0 || dW <= 0 || dH <= 0) continue;
+      ctx.drawImage(src, sx, sy, sW, sH, dx, dy, dW, dH);
+    }
+  return cv.toDataURL('image/png');
+}
 function applyStretch(el, sp, under) {
   if (!el || !sp) return;
   const sprite = 'url(' + sp.dataUrl + ') 0 0 / 100% 100% no-repeat';
@@ -148,4 +191,4 @@ function applyStretch(el, sp, under) {
   el.style.border = 'none';
 }
 
-export const scenarioUi = { loadStage: loadStage, apply9Slice: apply9Slice, applyStretch: applyStretch };
+export const scenarioUi = { loadStage: loadStage, loadPack: loadPack, apply9Slice: apply9Slice, applyStretch: applyStretch, compose9Slice: compose9Slice };
