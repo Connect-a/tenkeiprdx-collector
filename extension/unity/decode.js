@@ -1,11 +1,11 @@
-import { utilHelpers } from '../core/util.js';
-import { SCENE_TEXT_IN_FRAME_FIELD } from '../core/constants.js';
+import { latin1, num } from '../core/bytes.js';
 import { fsb5 } from './fsb5.js';
 import { fsb5Vorbis } from './fsb5-vorbis.js';
 import { vorbisSetup } from './vorbis-setup.js';
 import { unitySf } from './unity-sf.js';
 import * as MessagePack from '../vendor/msgpack.esm.js';
-const latin1 = utilHelpers.latin1;
+
+const SCENE_TEXT_IN_FRAME_FIELD = [{ sceneId: '477201', order: 26 }];
 
 function lz4DecodeBlock(src, destLen) {
   const dst = new Uint8Array(destLen);
@@ -301,8 +301,6 @@ function decodeCSharpLz4(bytes, opts) {
 }
 const decodeSceneBin = (binBytes) => decodeCSharpLz4(binBytes, { multiRoot: false, extTag: true });
 const decodeUserBytes = (bytes) => decodeCSharpLz4(bytes, { multiRoot: true, extTag: false });
-
-const num = utilHelpers.num;
 
 function decodeSceneCommands(decoded) {
   const scene = decoded && decoded[0];

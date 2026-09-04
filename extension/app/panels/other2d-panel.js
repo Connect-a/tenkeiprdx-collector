@@ -1,14 +1,14 @@
 import { assetStore } from '../../data/asset-store.js';
 import { fileStore } from '../../core/fsdir.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { texCodec } from '../../unity/texcodec.js';
 import { spineWeb } from '../../engine/story/spine-web.js';
 import { errText } from '../../core/messages.js';
-import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, groupHeading, downloadBar, errorRow } from '../ui/panel-shell.js';
+import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, groupHeading, downloadBar, errorRow, decodeFailNote } from '../ui/panel-shell.js';
 import { createZoomOverlay } from '../ui/zoom-overlay.js';
-import { bundleName } from '../../core/paths.js';
+import { bundleName } from '../../core/assetpath/paths.js';
 import { el } from '../../core/dom.js';
 import { TITLE_SPRITE_NAMES } from '../../data/credits-assets.js';
 
@@ -34,13 +34,19 @@ export function createOther2dPanel(deps) {
   let _players = [];
   const _videoUrls = [];
 
-  function disposePlayers() {
+  function disposeView() {
     for (const p of _players) {
       try {
         p && p.dispose && p.dispose();
       } catch (e) {}
     }
     _players = [];
+    for (const u of _videoUrls) {
+      try {
+        URL.revokeObjectURL(u);
+      } catch (e) {}
+    }
+    _videoUrls.length = 0;
   }
 
   let _haveFiles = new Set();
@@ -82,7 +88,7 @@ export function createOther2dPanel(deps) {
   async function bundleCanvas(part) {
     try {
       const bytes = await readBundle(part.bgRel);
-      const canvas = bytes && MESH_MOD && MESH_MOD.decodeTextureCanvas ? MESH_MOD.decodeTextureCanvas(bytes) : null;
+      const canvas = bytes && MESH_MOD && MESH_MOD.decodeLargestTextureCanvas ? MESH_MOD.decodeLargestTextureCanvas(bytes) : null;
       if (canvas) canvas.className = 'statimage';
       return canvas;
     } catch (er) {
@@ -114,8 +120,7 @@ export function createOther2dPanel(deps) {
     if (!_have.has(id)) return fail('未取得');
     let inputs = null;
     try {
-      const bytes = await readBundle(id);
-      if (bytes) inputs = MESH_MOD.extractSpineInputs(bytes);
+      inputs = MESH_MOD.extractSpineInputs(await readBundle(id));
     } catch (er) {}
     if (!inputs) return fail('立ち絵を取り出せませんでした');
     const box = el('div', 'spine-player-box');
@@ -155,16 +160,14 @@ export function createOther2dPanel(deps) {
   async function paintIcons(host, ids) {
     const row = el('div', 'monstericons');
     host.appendChild(row);
+    const stats = MESH_MOD.newDecodeStats();
     const shots = [];
     for (const id of ids) {
       if (!_have.has(id)) continue;
       let texs = [];
       try {
         const bytes = await readBundle(id);
-        if (bytes) {
-          texs = MESH_MOD.decodeNamedTextureCanvases(bytes) || [];
-          if (!texs.length) texs = MESH_MOD.decodeAllTextureCanvases(bytes).map((canvas) => ({ name: '', canvas, width: canvas.width, height: canvas.height }));
-        }
+        if (bytes) texs = MESH_MOD.decodeNamedTextureCanvases(bytes, null, stats) || [];
       } catch (er) {}
       const bundle = bundleName(id);
       for (const t of texs) {
@@ -178,6 +181,7 @@ export function createOther2dPanel(deps) {
       }
     }
     if (!row.childNodes.length) row.remove();
+    decodeFailNote(host, stats);
   }
 
   async function paintVideo(host, e) {
@@ -231,7 +235,7 @@ export function createOther2dPanel(deps) {
   async function openEntry(e) {
     const host = getById('other2dView');
     if (!host) return;
-    disposePlayers();
+    disposeView();
     host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     host.innerHTML = spinnerHtml('読み込み中…');
     const rt = await visualRenderer.prepareSpineRuntime(host);
@@ -258,7 +262,7 @@ export function createOther2dPanel(deps) {
     const grid = getById('rosterGrid');
     if (!grid) return;
     hideRosterControls();
-    disposePlayers();
+    disposeView();
     grid.innerHTML = spinnerHtml('その他2Dを読み込み中…');
     let st = null;
     try {
@@ -289,7 +293,7 @@ export function createOther2dPanel(deps) {
   }
 
   function reset() {
-    disposePlayers();
+    disposeView();
     clearView('other2dView', 'カードを選ぶとここに表示');
   }
 

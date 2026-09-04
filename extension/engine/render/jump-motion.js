@@ -1,4 +1,4 @@
-export const JUMP_CLIP_NAME = 'Jump';
+const JUMP_CLIP_NAME = 'Jump';
 
 const GRAVITY = 9.8;
 const RISE_RATIO = 0.5;

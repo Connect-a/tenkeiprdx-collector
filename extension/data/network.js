@@ -1,10 +1,8 @@
-import { utilHelpers } from '../core/util.js';
-import { SK } from '../core/constants.js';
-import { routeFor, routeUrl } from '../core/asset-route.js';
+import { SK } from '../core/storage-keys.js';
+import { routeFor, routeUrl } from '../core/assetpath/route.js';
 import { resolveOrigin, fallbackBases } from './origin.js';
 import { bgSleep, bgTimeout } from '../core/bgtimer.js';
 const sleep = bgSleep;
-const bytesToB64 = utilHelpers.bytesToB64;
 
 const assetRoot = async () => (await resolveOrigin()).assets;
 const assetRootAuto = async () => (await resolveOrigin({ ignoreManual: true })).assets;
@@ -148,7 +146,7 @@ async function fetchBytesRaw(url) {
   return null;
 }
 
-async function apiFetchBytes(url, method, { withStatus, rating } = {}) {
+async function apiFetchBytes(url, method) {
   const st = await chrome.storage.local.get([SK.apiAuth, SK.apiAuthBad]);
   const auth = st[SK.apiAuth];
   const expired = auth && auth.exp && Math.floor(Date.now() / 1000) >= auth.exp;
@@ -159,7 +157,7 @@ async function apiFetchBytes(url, method, { withStatus, rating } = {}) {
   }
   const headers = { Accept: 'application/vnd.msgpack', Authorization: auth.authorization };
   for (const k of ['X-Platform', 'X-Device', 'x-client-version', 'x-masterdata-version']) if (auth[k]) headers[k] = auth[k];
-  headers['X-Rating'] = rating || 'r18';
+  headers['X-Rating'] = 'r18';
   try {
     const r = await fetch(url, { method: method || 'GET', headers, credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
     if (r.status === 401 || r.status === 403) {
@@ -172,7 +170,7 @@ async function apiFetchBytes(url, method, { withStatus, rating } = {}) {
     }
     if (!r.ok) return null;
     const buf = new Uint8Array(await r.arrayBuffer());
-    return withStatus ? { status: r.status, ok: true, base64: bytesToB64(buf) } : buf;
+    return buf;
   } catch (e) {
     if (e && e.auth) throw e;
     return null;

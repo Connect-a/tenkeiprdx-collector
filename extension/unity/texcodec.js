@@ -110,8 +110,11 @@ const parseWebpSize = (webp) => {
 };
 
 const TEX_FMT = {
+  1: 'Alpha8',
   2: 'ARGB4444',
+  3: 'RGB24',
   4: 'RGBA32',
+  10: 'DXT1',
   12: 'DXT5',
   13: 'RGBA4444',
   29: 'DXT5Crunched',
@@ -255,11 +258,41 @@ const findTextureBlobStart = (buf, from, completeImageSize) => {
   return -1;
 };
 
-const NONCRUNCH_TYPE = { 12: 'tex-DXT5', 2: 'tex-ARGB4444', 13: 'tex-RGBA4444', 4: 'tex-RGBA32' };
+const decodeAlpha8 = (src, width, height) => {
+  const n = width * height;
+  if (!src || src.length < n) return null;
+  const out = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    out[i * 4] = 255;
+    out[i * 4 + 1] = 255;
+    out[i * 4 + 2] = 255;
+    out[i * 4 + 3] = src[i];
+  }
+  return out;
+};
+
+const decodeRgb24 = (src, width, height) => {
+  const n = width * height;
+  if (!src || src.length < n * 3) return null;
+  const out = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    out[i * 4] = src[i * 3];
+    out[i * 4 + 1] = src[i * 3 + 1];
+    out[i * 4 + 2] = src[i * 3 + 2];
+    out[i * 4 + 3] = 255;
+  }
+  return out;
+};
+
+const NONCRUNCH_TYPE = { 12: 'tex-DXT5', 10: 'tex-DXT1', 2: 'tex-ARGB4444', 13: 'tex-RGBA4444', 4: 'tex-RGBA32', 1: 'tex-Alpha8', 3: 'tex-RGB24' };
+const canDecodeFormat = (fmt) => Object.prototype.hasOwnProperty.call(NONCRUNCH_TYPE, fmt);
 const decodeByFormat = (fmt, bytes, width, height) => {
   if (fmt === 12) return decodeDxt5Rgba(bytes, width, height);
+  if (fmt === 10) return decodeDXT1(bytes, width, height);
   if (fmt === 2) return decodeArgb4444(bytes, width, height);
   if (fmt === 13) return decodeRgba4444(bytes, width, height);
+  if (fmt === 1) return decodeAlpha8(bytes, width, height);
+  if (fmt === 3) return decodeRgb24(bytes, width, height);
   if (fmt === 4) return bytes.length >= width * height * 4 ? bytes.subarray(0, width * height * 4) : null;
   return null;
 };
@@ -455,6 +488,7 @@ function decodeDdsCanvas(bytes) {
 }
 
 export const texCodec = {
+  canDecodeFormat,
   decodeDdsCanvas,
   decodeDXT1,
   decodeDxt5Rgba,

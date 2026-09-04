@@ -1,4 +1,4 @@
-import { FAIL_CAP, MISS_STREAK_CAP } from '../core/constants.js';
+import { FAIL_CAP, MISS_STREAK_CAP } from './acquire/limits.js';
 import { fileStore } from '../core/fsdir.js';
 import { networkClient } from './network.js';
 import { assetStore } from './asset-store.js';

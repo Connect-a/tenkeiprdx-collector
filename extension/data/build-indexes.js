@@ -1,8 +1,9 @@
-import { OTHER_EPISODE_SUBTYPE, R18_ALT_EPISODES, R18_ALT_OWNER } from '../core/constants.js';
-import { utilHelpers } from '../core/util.js';
-import { toRel, APP_DIR, APP_PREFIX, bundleName, relKey } from '../core/paths.js';
-import { catOf } from '../core/placement.js';
-const num = utilHelpers.num;
+import { R18_ALT_EPISODES, R18_ALT_OWNER } from './r18-alt.js';
+import { b64ToBytes, num } from '../core/bytes.js';
+import { toRel, APP_DIR, APP_PREFIX, bundleName, relKey } from '../core/assetpath/paths.js';
+import { catOf } from '../core/assetpath/placement.js';
+
+const OTHER_EPISODE_SUBTYPE = 'その他エピソード';
 const str = (x) => (typeof x === 'string' && x.trim() ? x : undefined);
 const int = (x) => (typeof x === 'number' ? x : typeof x === 'bigint' ? Number(x) : undefined);
 
@@ -927,13 +928,64 @@ function catalogIndexes(internalIds) {
   return out;
 }
 
+function catalogTables(cat) {
+  const eu = b64ToBytes(cat.m_EntryDataString),
+    bu = b64ToBytes(cat.m_BucketDataString);
+  const ku = cat.m_KeyDataString ? b64ToBytes(cat.m_KeyDataString) : null;
+  const eDV = new DataView(eu.buffer, eu.byteOffset, eu.byteLength);
+  const bDV = new DataView(bu.buffer, bu.byteOffset, bu.byteLength);
+  const kDV = ku ? new DataView(ku.buffer, ku.byteOffset, ku.byteLength) : null;
+  const ec = eDV.getInt32(0, true);
+  if (ec <= 0) return null;
+  const fp = (eu.byteLength - 4) / 4 / ec;
+  if (!Number.isInteger(fp) || fp < 3) return null;
+  const ent = [];
+  let p = 4;
+  for (let i = 0; i < ec; i++) {
+    ent.push({ iid: eDV.getInt32(p, true), depKey: eDV.getInt32(p + 8, true) });
+    p += fp * 4;
+  }
+  const bc = bDV.getInt32(0, true);
+  const bk = [],
+    bKeyOff = [];
+  p = 4;
+  for (let i = 0; i < bc; i++) {
+    bKeyOff.push(bDV.getInt32(p, true));
+    p += 4;
+    const n = bDV.getInt32(p, true);
+    p += 4;
+    const a = [];
+    for (let k = 0; k < n; k++) {
+      a.push(bDV.getInt32(p, true));
+      p += 4;
+    }
+    bk.push(a);
+  }
+  const readKey = (off) => {
+    if (!kDV) return null;
+    const t = ku[off];
+    if (t !== 0 && t !== 1) return null;
+    try {
+      let q = off + 1;
+      const len = kDV.getInt32(q, true);
+      q += 4;
+      let s = '';
+      if (t === 0) for (let i = 0; i < len; i++) s += String.fromCharCode(ku[q + i]);
+      else for (let i = 0; i < len; i += 2) s += String.fromCharCode(kDV.getUint16(q + i, true));
+      return s;
+    } catch (e) {
+      return null;
+    }
+  };
+  return { ent, bc, bk, bKeyOff, readKey };
+}
+
 function catalogDeps(catalogs) {
-  const b64 = utilHelpers && utilHelpers.b64ToBytes;
   const deps = {},
     folder = {},
     matByModel = {},
     matVar = {};
-  if (!b64) return { deps, folder, matByModel, matVar };
+  if (!b64ToBytes) return { deps, folder, matByModel, matVar };
   const relOf = (s) => {
     const m = mapPath(s);
     return m ? toRel(m) : null;
@@ -944,106 +996,60 @@ function catalogDeps(catalogs) {
   const matRelRe = /^materialsbundles_assets_assets\/3dmodels\//i;
   for (const cat of catalogs || []) {
     if (!cat || !cat.m_InternalIds || !cat.m_EntryDataString || !cat.m_BucketDataString) continue;
+    let t = null;
     try {
-      const ids = cat.m_InternalIds;
-      const eu = b64(cat.m_EntryDataString),
-        bu = b64(cat.m_BucketDataString);
-      const ku = cat.m_KeyDataString ? b64(cat.m_KeyDataString) : null;
-      const eDV = new DataView(eu.buffer, eu.byteOffset, eu.byteLength);
-      const bDV = new DataView(bu.buffer, bu.byteOffset, bu.byteLength);
-      const kDV = ku ? new DataView(ku.buffer, ku.byteOffset, ku.byteLength) : null;
-      const readKey = (off) => {
-        if (!kDV) return null;
-        const t = ku[off];
-        let q = off + 1;
-        if (t === 0) {
-          const len = kDV.getInt32(q, true);
-          q += 4;
-          let s = '';
-          for (let i = 0; i < len; i++) s += String.fromCharCode(ku[q + i]);
-          return s;
+      t = catalogTables(cat);
+    } catch (e) {
+      console.warn('[tp] カタログの表を読めませんでした', e && e.message);
+    }
+    if (!t) continue;
+    const { ent, bc, bk, bKeyOff, readKey } = t;
+    const ids = cat.m_InternalIds;
+    const varKeyRe = /^(\d+)_([A-Za-z][A-Za-z0-9_]*)$/;
+    for (let bi = 0; bi < bc; bi++) {
+      const key = readKey(bKeyOff[bi]);
+      if (typeof key !== 'string' || !varKeyRe.test(key)) continue;
+      const bundles = new Set();
+      for (const ei of bk[bi]) {
+        const e = ent[ei];
+        if (!e || e.depKey < 0 || !bk[e.depKey]) continue;
+        for (const di of bk[e.depKey]) {
+          const r = ent[di] && relOf(ids[ent[di].iid]);
+          if (r && matRelRe.test(r)) bundles.add(r);
         }
-        if (t === 1) {
-          const len = kDV.getInt32(q, true);
-          q += 4;
-          let s = '';
-          for (let i = 0; i < len; i += 2) s += String.fromCharCode(kDV.getUint16(q + i, true));
-          return s;
-        }
-        return null;
-      };
-      const ec = eDV.getInt32(0, true);
-      if (ec <= 0) continue;
-      const fp = (eu.byteLength - 4) / 4 / ec;
-      if (!Number.isInteger(fp) || fp < 3) continue;
-      const ent = [];
-      let p = 4;
-      for (let i = 0; i < ec; i++) {
-        ent.push({ iid: eDV.getInt32(p, true), depKey: eDV.getInt32(p + 8, true) });
-        p += fp * 4;
       }
-      const bc = bDV.getInt32(0, true);
-      const bk = [];
-      const bKeyOff = [];
-      p = 4;
-      for (let i = 0; i < bc; i++) {
-        bKeyOff.push(bDV.getInt32(p, true));
-        p += 4;
-        const n = bDV.getInt32(p, true);
-        p += 4;
-        const a = [];
-        for (let k = 0; k < n; k++) {
-          a.push(bDV.getInt32(p, true));
-          p += 4;
-        }
-        bk.push(a);
+      if (bundles.size) matVar[key] = [...new Set([...(matVar[key] || []), ...bundles])];
+    }
+    for (const e of ent) {
+      if (e.depKey < 0 || !bk[e.depKey]) continue;
+      const self = ids[e.iid];
+      const dl = bk[e.depKey].map((x) => ent[x] && ids[ent[x].iid]).filter((s) => typeof s === 'string' && s.endsWith('.bundle'));
+      const am = typeof self === 'string' && self.match(matAddrRe);
+      if (am) {
+        const mats = dl.map(relOf).filter((r) => r && matRelRe.test(r));
+        if (mats.length) matByModel[am[1]] = [...new Set([...(matByModel[am[1]] || []), ...mats])];
       }
-      const varKeyRe = /^(\d+)_([A-Za-z][A-Za-z0-9_]*)$/;
-      for (let bi = 0; bi < bc; bi++) {
-        const key = readKey(bKeyOff[bi]);
-        if (typeof key !== 'string' || !varKeyRe.test(key)) continue;
-        const bundles = new Set();
-        for (const ei of bk[bi]) {
-          const e = ent[ei];
-          if (!e || e.depKey < 0 || !bk[e.depKey]) continue;
-          for (const di of bk[e.depKey]) {
-            const r = ent[di] && relOf(ids[ent[di].iid]);
-            if (r && matRelRe.test(r)) bundles.add(r);
-          }
+      let modelId = null;
+      for (const d of dl) {
+        const r = relOf(d);
+        const mm = r && r.match(modelRe);
+        if (mm) {
+          modelId = mm[1];
+          break;
         }
-        if (bundles.size) matVar[key] = [...new Set([...(matVar[key] || []), ...bundles])];
       }
-      for (const e of ent) {
-        if (e.depKey < 0 || !bk[e.depKey]) continue;
-        const self = ids[e.iid];
-        const dl = bk[e.depKey].map((x) => ent[x] && ids[ent[x].iid]).filter((s) => typeof s === 'string' && s.endsWith('.bundle'));
-        const am = typeof self === 'string' && self.match(matAddrRe);
-        if (am) {
-          const mats = dl.map(relOf).filter((r) => r && matRelRe.test(r));
-          if (mats.length) matByModel[am[1]] = [...new Set([...(matByModel[am[1]] || []), ...mats])];
-        }
-        let modelId = null;
-        for (const d of dl) {
-          const r = relOf(d);
-          const mm = r && r.match(modelRe);
-          if (mm) {
-            modelId = mm[1];
-            break;
-          }
-        }
-        if (!modelId) continue;
-        const fm = typeof self === 'string' && self.match(folderRe);
-        if (fm && !folder[modelId]) folder[modelId] = fm[1];
-        const extra = dl
-          .map(relOf)
-          .filter(Boolean)
-          .filter((r) => {
-            const mm = r.match(modelRe);
-            return !(mm && mm[1] === modelId);
-          });
-        if (extra.length) deps[modelId] = [...new Set([...(deps[modelId] || []), ...extra])];
-      }
-    } catch (e) {}
+      if (!modelId) continue;
+      const fm = typeof self === 'string' && self.match(folderRe);
+      if (fm && !folder[modelId]) folder[modelId] = fm[1];
+      const extra = dl
+        .map(relOf)
+        .filter(Boolean)
+        .filter((r) => {
+          const mm = r.match(modelRe);
+          return !(mm && mm[1] === modelId);
+        });
+      if (extra.length) deps[modelId] = [...new Set([...(deps[modelId] || []), ...extra])];
+    }
   }
   return { deps, folder, matByModel, matVar };
 }
@@ -1214,6 +1220,8 @@ function compose({ recs, catalogIds, catalogObjs }) {
   const master = masterIndexes(recs || []);
   const assets = catalogIndexes(catalogIds || []);
   const cd = catalogDeps(catalogObjs || []);
+  const depRels = new Set(Object.values(cd.deps || {}).flat());
+  if (depRels.size && assets.battleFieldRels) assets.battleFieldRels = assets.battleFieldRels.filter((rel) => !depRels.has(rel));
   for (const [id, mats] of Object.entries(cd.matByModel || {})) {
     const o = assets.assetIndex[id];
     if (!o) continue;
@@ -1273,4 +1281,3 @@ const api = {
   ITEM_TABLES,
 };
 export const buildIndexes = api;
-if (typeof module !== 'undefined' && module.exports) module.exports = api;

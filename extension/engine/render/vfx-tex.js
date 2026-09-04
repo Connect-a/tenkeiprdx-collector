@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 
 let _softRadial = null;
-export function softRadialTex() {
+function softRadialTex() {
   if (_softRadial) return _softRadial;
   const S = 64,
     cv = document.createElement('canvas');

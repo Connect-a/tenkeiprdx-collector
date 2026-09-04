@@ -3,10 +3,11 @@ import { assetStore } from '../../data/asset-store.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { texCodec } from '../../unity/texcodec.js';
-import { auraRenderer } from './vfx-aura.js';
+import { auraParticles } from './vfx-aura.js';
 import { guardRenderer } from './gl-manager.js';
-import { DIRS } from '../../core/constants.js';
-import { utilHelpers } from '../../core/util.js';
+import { createModelCamera } from './model3d-camera.js';
+import { DIRS } from '../../core/dirs.js';
+import { observeVisibility } from '../../core/visibility.js';
 import { el, append } from '../../core/dom.js';
 import { buildGroupedVisPanel } from '../../core/vis-panel.js';
 import { createPartControl } from './model-parts.js';
@@ -16,13 +17,14 @@ const { sharedBgTexture, setSharedBgFromRgba, buildTextureMap, MOUTH_EXPRESSIONS
   model3dLib;
 
 const rawColor = (T, a) => new T.Color(a[0], a[1], a[2]);
-const gammaOut = (mat, cacheKey) => {
+const gammaOut = (mat, cacheKey, opaque) => {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     if (prev) prev.call(mat, shader, renderer);
-    shader.fragmentShader = TP_TO_LINEAR + shader.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight = tpToLinear( outgoingLight );\n#include <opaque_fragment>');
+    const head = 'outgoingLight = tpToLinear( outgoingLight );\n' + (opaque ? 'diffuseColor.a = 1.0;\n' : '');
+    shader.fragmentShader = TP_TO_LINEAR + shader.fragmentShader.replace('#include <opaque_fragment>', head + '#include <opaque_fragment>');
   };
-  mat.customProgramCacheKey = () => cacheKey;
+  mat.customProgramCacheKey = () => cacheKey + (opaque ? '-opaque' : '');
   return mat;
 };
 const hexRgb = (s) => {
@@ -57,20 +59,22 @@ const applyBgCss = (wrap) => {
 async function ensureBgCommon(wrap) {
   applyBgCss(wrap);
   if (_bgCssUrl) return;
+  let dec = null;
   try {
     const idx = await ensureIndexes();
     const rel = idx && idx.assets && idx.assets.globalAssets && idx.assets.globalAssets.stage && idx.assets.globalAssets.stage.bgCommon;
     if (!rel) return;
     const bytes = await assetStore.readAsset(DIRS.shared, rel);
-    if (!bytes) return;
-    const dec = unityMesh.decodeTextureRgba(bytes);
-    if (!dec || !dec.rgba) return;
-    setSharedBgFromRgba(dec.rgba, dec.width, dec.height);
-    try {
-      _bgCssUrl = texCodec.renderRgbaToCanvas(dec.rgba, dec.width, dec.height).toDataURL('image/png');
-    } catch (e) {}
-    applyBgCss(wrap);
+    dec = bytes ? unityMesh.decodeLargestTextureRgba(bytes) : null;
+  } catch (e) {
+    console.warn('[tp] 共通背景を読めませんでした', e);
+  }
+  if (!dec || !dec.rgba) return;
+  setSharedBgFromRgba(dec.rgba, dec.width, dec.height);
+  try {
+    _bgCssUrl = texCodec.renderRgbaToCanvas(dec.rgba, dec.width, dec.height).toDataURL('image/png');
   } catch (e) {}
+  applyBgCss(wrap);
 }
 
 function createMaterialFactory(T, deps) {
@@ -191,20 +195,23 @@ function createMaterialFactory(T, deps) {
     const ownTex = name ? tmap.byName.get(name) : null;
     const isMouth = /mouth|month/i.test(name || '');
     const params = { side: T.BackSide };
+    let opaque = false;
     if (isMouth && mouthAtlasTex) {
       params.map = mouthAtlasTex;
       params.alphaTest = 0.5;
     } else if (ownTex) {
-      params.map = makeDataTexture(ownTex, { forceOpaque: true });
+      params.map = makeDataTexture(ownTex);
+      opaque = true;
     } else if (tmap.fallback) {
-      params.map = makeDataTexture(tmap.fallback, { forceOpaque: true });
+      params.map = makeDataTexture(tmap.fallback);
+      opaque = true;
     } else if (modelMat && modelMat.color) params.color = rawColor(T, modelMat.color);
     else params.color = new T.Color(0xcccccc);
     const mat = new T.MeshBasicMaterial(params);
     const tn = tmap.toonByName.get(name);
     const toon = !isMouth && tn && (tn.colorTexPathID || tn.shadowTexPathID || tn.shadowBorderThreshold != null);
     if (toon) applyToonShadow(mat, name, tmap, emOverride);
-    gammaOut(mat, toon ? 'tp-toonshadow' : 'tp-gamma');
+    gammaOut(mat, toon ? 'tp-toonshadow' : 'tp-gamma', opaque);
     texCache.set(key, mat);
     return mat;
   };
@@ -443,7 +450,6 @@ function createExpression(T, st, deps) {
   return { applyClipExpr, updateBlink, applyMouthIndex };
 }
 
-const PITCH_LIMIT = Math.PI / 2;
 const POSE_VALUE = '__boon';
 const SPEED_OPTIONS = [
   ['0.25', '0.25x'],
@@ -598,7 +604,7 @@ function buildControls(st, deps) {
     });
   }
 
-  const aura = options.auraRenderer;
+  const aura = options.auraPicker;
   const voice = options.motionVoice;
   const hasAura = !!(aura && (aura.list || []).length && typeof aura.onChange === 'function');
   if (hasAura || voice) {
@@ -1157,21 +1163,8 @@ function render(hostEl, model, materialBundle, opt) {
   const { root, skelBones, radius, center, box, meshGroups, mouthGeoms, morphObjs, objBySmr, attachBase, weaponObjs, weaponRigs, stats } = built;
   if (postPass && postPass.setFloorY && box && isFinite(box.min.y)) postPass.setFloorY(box.min.y);
 
-  const state = { yaw: ((fbx.rotationOverrideY || 0) * Math.PI) / 180, pitch: 0.05, dist: radius * 2.2, target: center.clone() };
-  camera.near = Math.max(0.01, radius / 1000);
-  camera.far = Math.max(100, radius * 12);
-  camera.updateProjectionMatrix();
-  const applyCam = () => {
-    camera.position.set(state.target.x, state.target.y, state.target.z + state.dist);
-    camera.lookAt(state.target);
-  };
-  const applyRot = () => {
-    root.rotation.set(state.pitch, state.yaw, 0);
-    const rc = center.clone().applyEuler(root.rotation);
-    root.position.copy(center).sub(rc);
-  };
-  applyCam();
-  applyRot();
+  const rig = createModelCamera(THREE_NS, camera, renderer.domElement, { root, center, radius, rotationOverrideY: fbx.rotationOverrideY });
+  const state = rig.state;
 
   const fps = 60;
   const clips = skinnable && model.clips && model.clips.length ? model.clips : [];
@@ -1254,9 +1247,9 @@ function render(hostEl, model, materialBundle, opt) {
       } catch (e) {}
       auraFx = null;
     }
-    if (bytes && auraRenderer) {
+    if (bytes && auraParticles) {
       try {
-        auraFx = auraRenderer.createAuraParticles(bytes, { texByMatPid: texByMatPid || null, ignoreGate: true });
+        auraFx = auraParticles.createAuraParticles(bytes, { texByMatPid: texByMatPid || null, ignoreGate: true });
         if (auraFx) root.add(auraFx.group);
       } catch (e) {
         console.warn('[tp] オーラの描画に失敗', e);
@@ -1283,70 +1276,10 @@ function render(hostEl, model, materialBundle, opt) {
   };
   document.addEventListener('fullscreenchange', onFsChange);
 
-  let dragging = false,
-    panning = false,
-    lx = 0,
-    ly = 0;
-  const canvasEl = renderer.domElement;
-  canvasEl.style.touchAction = 'none';
-  canvasEl.style.cursor = 'grab';
-  canvasEl.addEventListener('contextmenu', (e) => e.preventDefault());
-  canvasEl.addEventListener('pointerdown', (e) => {
-    lx = e.clientX;
-    ly = e.clientY;
-    if (e.button === 2 || e.button === 1) {
-      panning = true;
-      canvasEl.style.cursor = 'move';
-    } else {
-      dragging = true;
-      canvasEl.style.cursor = 'grabbing';
-    }
-    canvasEl.setPointerCapture(e.pointerId);
-  });
-  canvasEl.addEventListener('pointerup', (e) => {
-    dragging = false;
-    panning = false;
-    canvasEl.style.cursor = 'grab';
-    try {
-      canvasEl.releasePointerCapture(e.pointerId);
-    } catch (x) {}
-  });
-  canvasEl.addEventListener('pointermove', (e) => {
-    const dx = e.clientX - lx,
-      dy = e.clientY - ly;
-    if (dragging) {
-      state.yaw += dx * 0.01;
-      state.pitch += dy * 0.01;
-      state.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, state.pitch));
-      lx = e.clientX;
-      ly = e.clientY;
-      applyRot();
-    } else if (panning) {
-      const panScale = state.dist * 0.0018;
-      const right = new THREE_NS.Vector3().setFromMatrixColumn(camera.matrix, 0);
-      const up = new THREE_NS.Vector3().setFromMatrixColumn(camera.matrix, 1);
-      state.target.addScaledVector(right, -dx * panScale);
-      state.target.addScaledVector(up, dy * panScale);
-      lx = e.clientX;
-      ly = e.clientY;
-      applyCam();
-    }
-  });
-  canvasEl.addEventListener(
-    'wheel',
-    (e) => {
-      e.preventDefault();
-      state.dist *= 1 + Math.sign(e.deltaY) * 0.1;
-      state.dist = Math.max(radius * 0.12, Math.min(radius * 8, state.dist));
-      applyCam();
-    },
-    { passive: false },
-  );
-
   let alive = true;
   let selfDispose = null;
   let onScreen = true;
-  const stopVis = utilHelpers.observeVisibility(canvasWrap, (vis) => {
+  const stopVis = observeVisibility(canvasWrap, (vis) => {
     onScreen = vis;
   });
   let lastT = globalThis.performance && performance.now() ? performance.now() : 0;

@@ -1,15 +1,15 @@
-import { PLACE } from '../../core/placement.js';
-import { assetStore } from '../../data/asset-store.js';
-import { DIRS, RARITY_NAMES, AFFILIATION_NAMES, MONSTER_TYPE_NAMES, MONSTER_RACE_NAMES } from '../../core/constants.js';
+import { assetStore, AREA } from '../../data/asset-store.js';
+import { AFFILIATION_NAMES, MONSTER_RACE_NAMES, MONSTER_TYPE_NAMES, RARITY_NAMES } from '../../data/master-labels.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { loadModel3d, disposeModel3d } from '../../engine/render/lazy.js';
-import { glManager } from '../../engine/render/gl-manager.js';
+import { makeRebuildLimiter } from '../../engine/render/gl-manager.js';
 import { spineWeb } from '../../engine/story/spine-web.js';
 import { charAssets } from '../../data/char-assets.js';
 import { errText } from '../../core/messages.js';
-import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, downloadBar, noteRow } from '../ui/panel-shell.js';
+import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, downloadBar, noteRow, decodeFailNote } from '../ui/panel-shell.js';
 import { el } from '../../core/dom.js';
+import { rosterQuery, setRosterQuery } from '../runtime/roster-prefs.js';
 import { kanaKey } from '../ui/ui-format.js';
 
 const ICON_ORDER = ['monstericon', 'battleicon', 'chibiicon', 'awakenicon'];
@@ -19,7 +19,7 @@ export function createMonsterPanel(deps) {
   let _list = null;
   let _have = new Set();
   let _model3d = null;
-  const _glRebuildOk = glManager.makeRebuildLimiter(8000, 2);
+  const _glRebuildOk = makeRebuildLimiter(8000, 2);
   let _spine = [];
   let _gen = 0;
   let _cards = new Map();
@@ -47,7 +47,7 @@ export function createMonsterPanel(deps) {
       byCat.get(a.cat).push(a);
     }
     return {
-      read: (rel) => (byRel.has(rel) ? assetStore.readAsset(DIRS.monster, rel, PLACE.owned(byRel.get(rel))) : Promise.resolve(null)),
+      read: (rel) => (byRel.has(rel) ? assetStore.readIn(AREA.monster(byRel.get(rel)), rel) : Promise.resolve(null)),
       of: (cat) => byCat.get(cat) || [],
     };
   }
@@ -69,13 +69,14 @@ export function createMonsterPanel(deps) {
   }
 
   async function paintIcons(host, e, v) {
+    const stats = MESH_MOD.newDecodeStats();
     for (const cat of ICON_ORDER) {
       for (const a of v.of(cat)) {
         const bytes = await v.read(a.rel);
         if (!bytes) continue;
         let cvs = [];
         try {
-          cvs = MESH_MOD.decodeAllTextureCanvases(bytes);
+          cvs = MESH_MOD.decodeAllTextureCanvases(bytes, null, stats);
         } catch (er) {}
         for (const cv of cvs) {
           cv.className = 'monstericon';
@@ -83,6 +84,7 @@ export function createMonsterPanel(deps) {
         }
       }
     }
+    decodeFailNote(host, stats);
   }
 
   async function paintSpine(host, e, v, alive) {
@@ -98,8 +100,7 @@ export function createMonsterPanel(deps) {
       grid.appendChild(cell);
       let inputs = null;
       try {
-        const bytes = await v.read(a.rel);
-        if (bytes) inputs = MESH_MOD.extractSpineInputs(bytes);
+        inputs = MESH_MOD.extractSpineInputs(await v.read(a.rel));
       } catch (er) {}
       if (!alive()) return;
       if (!inputs) {
@@ -239,7 +240,7 @@ export function createMonsterPanel(deps) {
 
   function paintCards() {
     if (!_cardsHost) return;
-    const q = ((getById('rosterSearch') || {}).value || '').trim();
+    const q = rosterQuery();
     const shown = (_list || []).filter((e) => matches(e, q));
     _cards = new Map();
     _cardsHost.innerHTML = '';
@@ -254,6 +255,7 @@ export function createMonsterPanel(deps) {
     if (!input) return;
     _searchBound = true;
     input.addEventListener('input', () => {
+      setRosterQuery(input.value);
       if (_cardsHost && _cardsHost.isConnected) paintCards();
     });
   }

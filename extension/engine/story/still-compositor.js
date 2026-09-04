@@ -93,6 +93,10 @@ export function createStillCompositor(gl) {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
   }
+  function bindAccum() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, accumFB);
+    gl.viewport(0, 0, W, H);
+  }
   function bindTemp() {
     gl.bindFramebuffer(gl.FRAMEBUFFER, tempFB);
     gl.viewport(0, 0, W, H);
@@ -133,5 +137,5 @@ export function createStillCompositor(gl) {
       W = H = 0;
     }
   }
-  return { ensure, beginAccum, bindTemp, overAccum, toCanvas, dispose: () => free(false), ok: () => !!prog && !broken };
+  return { ensure, beginAccum, bindAccum, bindTemp, overAccum, toCanvas, dispose: () => free(false), ok: () => !!prog && !broken };
 }

@@ -1,17 +1,14 @@
+import { SHARED_FILE } from '../../core/assetpath/placement.js';
 import { fileStore } from '../../core/fsdir.js';
-import { assetStore } from '../../data/asset-store.js';
-import { DIRS } from '../../core/constants.js';
-import { unityDecode } from '../../unity/decode.js';
+import { DIRS } from '../../core/dirs.js';
 import { unityMesh } from '../../unity/mesh.js';
-import { utilHelpers } from '../../core/util.js';
+import { sleep } from '../../core/async.js';
+import { readSharedBgmUrl, fadeAudio } from './story-audio.js';
 import { TITLE_AA_CACHE, TITLE_SPRITE_NAMES } from '../../data/credits-assets.js';
-
-const { audioBlobUrl, sleep } = utilHelpers;
 
 export const END_CREDIT_EPISODE_ID = 2510010;
 
 const VIDEO_FILE = 'EndCredits.mp4';
-const BGM_NAME = 'bgm_2059';
 const BGM_FADE_IN = 0.5;
 const FADE = 1;
 const WAIT_SPECIAL_THANKS = 4;
@@ -38,32 +35,10 @@ async function resolveTitleLogoCanvas() {
 async function readVideoUrl() {
   try {
     const dir = await fileStore.getDir(DIRS.shared, { create: false });
-    const f = await fileStore.readUnder(dir, 'statics/' + VIDEO_FILE);
+    const f = await fileStore.readUnder(dir, SHARED_FILE.statics(VIDEO_FILE));
     if (f) return URL.createObjectURL(f);
   } catch (e) {}
   return null;
-}
-
-async function readBgmUrl(bgmRel) {
-  if (!bgmRel) return null;
-  try {
-    const bytes = await assetStore.readAsset(DIRS.shared, bgmRel);
-    if (!bytes) return null;
-    const clips = await unityDecode.extractAudioResource(bytes);
-    if (clips && clips.length) return audioBlobUrl(clips[0].data, clips[0].mime);
-  } catch (e) {}
-  return null;
-}
-
-function fadeAudio(a, to, sec) {
-  const from = a.volume;
-  const t0 = performance.now();
-  const step = () => {
-    const k = Math.min(1, (performance.now() - t0) / (sec * 1000));
-    a.volume = from + (to - from) * k;
-    if (k < 1) requestAnimationFrame(step);
-  };
-  step();
 }
 
 export async function playEndCredits(opts) {
@@ -96,11 +71,9 @@ export async function playEndCredits(opts) {
   let audio = null;
   let done = false;
   let onVis = null;
-  if (opts.reportBgm) opts.reportBgm(true);
   const cleanup = () => {
     if (done) return;
     done = true;
-    if (opts.reportBgm) opts.reportBgm(false);
     try {
       if (onVis && globalThis.document) globalThis.document.removeEventListener('visibilitychange', onVis);
     } catch (e) {}
@@ -122,7 +95,7 @@ export async function playEndCredits(opts) {
 
   const [videoUrl, bgmUrl, resolvedLogo] = await Promise.all([
     readVideoUrl(),
-    bgmOn() ? readBgmUrl(opts.bgmRel) : Promise.resolve(null),
+    bgmOn() ? readSharedBgmUrl(opts.bgmRel) : Promise.resolve(null),
     opts.titleLogoCanvas ? Promise.resolve(opts.titleLogoCanvas) : resolveTitleLogoCanvas(),
   ]);
   const titleLogoCanvas = opts.titleLogoCanvas || resolvedLogo;

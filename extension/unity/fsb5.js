@@ -105,7 +105,7 @@ function parseFsb5(bytes, offset = 0) {
   return { ok: true, offset, totalBytes: total, version: head.version, mode: head.mode, codec: CODEC[head.mode] || 'mode' + head.mode, head, clips };
 }
 
-export function parseFsb5Stream(bytes, max = 4096) {
+function parseFsb5Stream(bytes, max = 4096) {
   const out = [];
   let p = 0;
   while (p + 60 <= bytes.length && out.length < max) {

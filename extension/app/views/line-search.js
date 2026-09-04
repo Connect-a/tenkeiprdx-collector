@@ -2,7 +2,7 @@ import { fileStore } from '../../core/fsdir.js';
 import { getById, el } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
 import { nameFix, kanaKey } from '../ui/ui-format.js';
-import { getStoryPanel } from '../runtime/panel-state.js';
+import { getPanel } from '../runtime/panel-state.js';
 
 function voiceTypeLabel(v) {
   const s = String(v || '');
@@ -55,7 +55,7 @@ export function resetLineSearch() {
 }
 
 async function jumpToLine(h) {
-  const storyPanel = getStoryPanel();
+  const storyPanel = getPanel('story');
   if (storyPanel) await storyPanel.playEpisode(h.ep, h.text);
   const stage = getById('stage');
   if (stage && stage.scrollIntoView) stage.scrollIntoView({ block: 'nearest' });

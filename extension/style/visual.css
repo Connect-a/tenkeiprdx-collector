@@ -300,33 +300,11 @@
   margin-bottom: 8px;
   user-select: none;
 }
-.skillfx-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-}
-@media (max-width: 700px) {
-  .skillfx-grid {
-    grid-template-columns: 1fr;
-  }
-}
-.skillfx-cell {
-  border: 1px solid #2a2836;
-  border-radius: 6px;
-  padding: 6px;
-  min-width: 0;
-}
 .skillfx-cap {
   font-size: 12px;
   color: #cdcbe0;
   margin-bottom: 4px;
   word-break: break-all;
-}
-.skillfx-btnrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
 }
 .skillfx-spin {
   width: 14px;

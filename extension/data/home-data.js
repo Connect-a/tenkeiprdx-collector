@@ -1,5 +1,5 @@
-import { DIRS } from '../core/constants.js';
-import { toPath } from '../core/paths.js';
+import { DIRS } from '../core/dirs.js';
+import { toPath } from '../core/assetpath/paths.js';
 import { assetRefs } from './asset-refs.js';
 import { localInventory } from './inventory.js';
 import { resolveOrigin } from './origin.js';

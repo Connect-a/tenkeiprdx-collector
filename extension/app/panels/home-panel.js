@@ -1,15 +1,16 @@
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { texCodec } from '../../unity/texcodec.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
 import { assetStore } from '../../data/asset-store.js';
 import { errText } from '../../core/messages.js';
-import { utilHelpers } from '../../core/util.js';
+import { cachedAudioUrl, revokeUrlMap } from '../../core/audio-url.js';
+import { createRevealer } from '../../core/visibility.js';
 import { voiceOut } from './voice-out.js';
 import { createHomeBgm } from './home-bgm.js';
 import { hideRosterControls } from '../ui/panel-shell.js';
-import { inDir, stripDir } from '../../core/paths.js';
+import { inDir, stripDir } from '../../core/assetpath/paths.js';
 import { el, append } from '../../core/dom.js';
-const { revokeUrlMap, cachedAudioUrl } = utilHelpers;
+import { ensureIndexes } from '../../data/index-store.js';
 
 const HOME_SECTIONS = {
   homeBgm: { label: 'ホームBGM', bgm: true, primary: (m) => m.audio },
@@ -52,9 +53,9 @@ export function createHomePanel(deps) {
   const isBgm = (section) => !!HOME_SECTIONS[section].bgm;
 
   function illustBundleToCanvas(bytes) {
-    if (!MESH_MOD || !MESH_MOD.decodeTextureCanvas) return null;
+    if (!MESH_MOD || !MESH_MOD.decodeLargestTextureCanvas) return null;
     try {
-      return MESH_MOD.decodeTextureCanvas(bytes);
+      return MESH_MOD.decodeLargestTextureCanvas(bytes);
     } catch (e) {
       return null;
     }
@@ -64,7 +65,8 @@ export function createHomePanel(deps) {
     return /\.dds$/i.test(sub || '') ? texCodec.decodeDdsCanvas(bytes) : illustBundleToCanvas(bytes);
   }
 
-  async function renderHome() {
+  async function render() {
+    _thumbReveal.reset();
     const grid = getById('rosterGrid');
     hideRosterControls();
     getById('rostercount').textContent = '';
@@ -140,7 +142,7 @@ export function createHomePanel(deps) {
   async function systemVoiceSection(host) {
     let rel = null;
     try {
-      rel = (await collectionRepository.ensureIndexes()).assets.systemVoiceRel || null;
+      rel = (await ensureIndexes()).assets.systemVoiceRel || null;
     } catch (e) {}
     let clips = [];
     let bytes = null;
@@ -264,19 +266,7 @@ export function createHomePanel(deps) {
     fillSection(grid, section, list, 'homegrid', (e) => homeCard(section, e, dlMap.get(String(e.id))));
   }
 
-  const _homeThumbObs =
-    'IntersectionObserver' in window
-      ? new IntersectionObserver(
-          (ents, obs) => {
-            for (const en of ents)
-              if (en.isIntersecting) {
-                obs.unobserve(en.target);
-                loadHomeThumb(en.target);
-              }
-          },
-          { rootMargin: '120px' },
-        )
-      : null;
+  const _thumbReveal = createRevealer({ onReveal: (node) => loadHomeThumb(node) });
   async function loadHomeThumb(host) {
     const sub = host.dataset.thumb;
     if (!sub || host.dataset.loaded) return;
@@ -294,8 +284,7 @@ export function createHomePanel(deps) {
   function homeThumb(sub) {
     if (!sub) return el('div', 'hcthumb empty');
     const th = el('div', { class: 'hcthumb', data: { thumb: sub } });
-    if (_homeThumbObs) _homeThumbObs.observe(th);
-    else loadHomeThumb(th);
+    if (!_thumbReveal.watch(th)) loadHomeThumb(th);
     return th;
   }
 
@@ -533,5 +522,5 @@ export function createHomePanel(deps) {
 
   if (deps.homeBgm) Object.assign(deps.homeBgm, { applyVolume: bgm.applyVolume });
 
-  return { renderHome, restoreHomeBgm: bgm.restore, bind, scrollToSection };
+  return { render, restoreHomeBgm: bgm.restore, bind, scrollToSection };
 }

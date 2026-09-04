@@ -1,5 +1,6 @@
 import { fileStore } from '../core/fsdir.js';
-import { utilHelpers } from '../core/util.js';
+import { sceneHave } from '../core/assetpath/placement.js';
+import { pool } from '../core/async.js';
 import { characterMeta } from './character-meta.js';
 import { folderModel } from './folder-model.js';
 import { idbStore } from '../core/idb.js';
@@ -12,12 +13,13 @@ async function scanDirEntry(handle, folderKey, fm) {
   let have = 0;
   let partial = 0;
   const epDirs = await fileStore.listDirsUnder(handle, 'story');
-  const found = await utilHelpers.pool(eps, SCAN_CONC, async (e) => {
+  const found = await pool(eps, SCAN_CONC, async (e) => {
     const ids = (e.sceneBinIds || []).map(String);
     const epDir = epDirs.get(String(e.episodeId));
     if (!ids.length || !epDir) return 0;
     const names = new Set(await fileStore.listFilesIn(epDir));
-    return ids.every((sid) => names.has(`scene_${sid}.bin`)) ? 1 : names.has(`scene_${ids[0]}.bin`) ? 2 : 0;
+    const h = sceneHave(ids, names);
+    return h === 'full' ? 1 : h === 'partial' ? 2 : 0;
   });
   for (const f of found) {
     if (f === 1) have++;
@@ -65,7 +67,7 @@ export async function cachedFolderEntries() {
 export async function scanFolder() {
   const { folderMeta } = await folderModel();
   const dirs = (await fileStore.listFolderDirs()).filter((d) => folderMeta[String(d.folderKey)]);
-  const scanned = await utilHelpers.pool(dirs, SCAN_CONC, (d) => scanDirEntry(d.handle, d.folderKey, folderMeta[String(d.folderKey)]));
+  const scanned = await pool(dirs, SCAN_CONC, (d) => scanDirEntry(d.handle, d.folderKey, folderMeta[String(d.folderKey)]));
   const out = scanned.filter(Boolean).sort((a, b) => (a.name > b.name ? 1 : -1));
   await saveScanCache(out);
   return out;

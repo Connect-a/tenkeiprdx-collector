@@ -1,0 +1,50 @@
+export const AFFILIATION_NAMES = { 1: 'リーニャ', 2: 'テーセツ', 3: 'ジャハラ', 4: 'クォンツィ', 5: 'ジェネラス', 6: 'ペイシェ', 7: 'ヒューム', 8: 'アンノウン' };
+
+export const RARITY_NAMES = { 1: 'S', 2: 'A', 3: 'B', 4: 'C', 5: 'UR' };
+
+export const MONSTER_TYPE_NAMES = { 1: 'Attacker', 2: 'Defender', 3: 'Sorcerer', 4: 'Supporter', 5: 'Jammer' };
+
+export const MONSTER_RACE_NAMES = {
+  1: 'アンデッド',
+  2: 'ドラゴン',
+  3: '魔法生物',
+  4: '亜人',
+  5: '巨人',
+  6: '水棲',
+  7: '霊体',
+  8: '不定形',
+  9: '機械',
+  10: '爬虫類',
+  11: '獣',
+  12: '虫',
+  13: '石',
+  14: '植物',
+  15: '悪魔',
+  16: '鳥',
+  17: 'アニマ',
+  18: '無機物',
+  19: '精霊',
+  20: '自然',
+};
+
+export const XPOS_CATEGORIES = [
+  [1, '\u6b63\u5e38\u4f4d'],
+  [2, '\u9a0e\u4e57\u4f4d'],
+  [4, '\u7acb\u4f4d'],
+  [8, '\u5074\u4f4d'],
+  [16, '\u5ea7\u4f4d'],
+  [32, '\u7acb\u3061\u30d0\u30c3\u30af'],
+  [64, '69'],
+  [128, '\u5f8c\u80cc\u4f4d'],
+  [256, '\u30d1\u30a4\u30ba\u30ea'],
+  [512, '\u624b\u30b3\u30ad'],
+  [1024, '\u8db3\u30b3\u30ad'],
+  [2048, '\u30d5\u30a7\u30e9'],
+  [4096, '\u30aa\u30ca\u30cb\u30fc'],
+  [8192, '\u30af\u30f3\u30cb'],
+  [16384, '\u624b\u30de\u30f3'],
+  [32768, '\u30d0\u30a4\u30d6'],
+  [65536, '\u305d\u306e\u4ed6'],
+];
+
+export const xposNames = (mask) => XPOS_CATEGORIES.filter(([bit]) => (mask || 0) & bit).map(([, name]) => name);

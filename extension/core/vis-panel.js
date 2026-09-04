@@ -1,6 +1,6 @@
 import { el, filterBox } from './dom.js';
 
-export const VIS_STATES = [
+const VIS_STATES = [
   ['1', '表示'],
   ['0.5', '半透明'],
   ['0', '非表示'],
@@ -8,7 +8,7 @@ export const VIS_STATES = [
 
 let _seq = 0;
 
-export function visRadios(initial, onPick) {
+function visRadios(initial, onPick, compact) {
   const name = 'pv' + _seq++;
   const w = el('span', 'stillradios');
   for (const [v, t] of VIS_STATES) {
@@ -16,12 +16,14 @@ export function visRadios(initial, onPick) {
     input.addEventListener('change', () => {
       if (input.checked) onPick(Number(v));
     });
-    w.appendChild(el('label', 'stillradio', [input, el('span', { text: t })]));
+    const lab = el('label', 'stillradio', compact ? [input] : [input, el('span', { text: t })]);
+    if (compact) lab.title = t;
+    w.appendChild(lab);
   }
   return w;
 }
 
-export function setRadios(root, a) {
+function setRadios(root, a) {
   root.querySelectorAll('.stillradios input[value="' + a + '"]').forEach((r) => (r.checked = true));
 }
 
@@ -57,51 +59,57 @@ const flashRow = (row) => {
 };
 
 export function buildGroupedVisPanel(panel, opt) {
-  const { title, groups, alphaOf, onSet, onResetAll, extraHead } = opt;
+  const { title, groups, alphaOf, groupAlphaOf, onSet, onGroupSet, onResetAll, extraHead, head, compact } = opt;
   panel.innerHTML = '';
   const groupAlpha = new Map();
-  const head = el('div', 'stillpanel-hd', [
-    el('span', { text: title || '表示制御' }),
-    el('button', {
-      class: 'btn xs',
-      text: '全表示',
-      on: {
-        click: () => {
-          groupAlpha.clear();
-          onResetAll();
-          setRadios(panel, 1);
+  const curGroupAlpha = (g) => (groupAlphaOf ? groupAlphaOf(g) : groupAlpha.get(g));
+  const headRow = el(
+    'div',
+    'stillpanel-hd',
+    head || [
+      el('span', { text: title || '表示制御' }),
+      el('button', {
+        class: 'btn xs',
+        text: '全表示',
+        on: {
+          click: () => {
+            groupAlpha.clear();
+            onResetAll();
+            setRadios(panel, 1);
+          },
         },
-      },
-    }),
-  ]);
-  for (const n of extraHead || []) head.appendChild(n);
-  panel.appendChild(head);
+      }),
+    ],
+  );
+  for (const n of extraHead || []) headRow.appendChild(n);
+  panel.appendChild(headRow);
   panel.appendChild(filterBox({ placeholder: '部品名でフィルタ（入力すると部品を表示）…' }, (q) => applyVisFilter(panel, q)).wrap);
-  for (const [g, names] of groups) {
+  for (const { id: g, label, names } of groups) {
     const wrap = el('div', 'stillgrp');
     const parts = el('div', { class: 'stillparts', style: { display: 'none' } });
     const setGroup = (a) => {
       groupAlpha.set(g, a);
-      onSet(names, a);
+      if (onGroupSet) onGroupSet(g, names, a);
+      else onSet(names, a);
       setRadios(parts, a);
     };
-    const grad = visRadios(1, setGroup);
+    const grad = visRadios(curGroupAlpha(g) == null ? 1 : curGroupAlpha(g), setGroup);
     const exp = el('button', { class: 'btn xs', text: '部品' });
     exp.addEventListener('click', () => {
       parts.style.display = parts.style.display === 'none' ? '' : 'none';
       syncPartsBtn(wrap);
     });
-    const grow = el('div', 'stillgrp-row', [el('span', { class: 'stillgrp-lbl', text: g + '（' + names.length + '）' }), grad, exp]);
+    const grow = el('div', 'stillgrp-row', [el('span', { class: 'stillgrp-lbl', text: label + '（' + names.length + '）' }), grad, exp]);
     grow.addEventListener('click', (e) => {
       if (e.target.closest('.stillradios') || e.target.closest('button')) return;
-      const a = nextState(groupAlpha.get(g));
+      const a = nextState(curGroupAlpha(g));
       setGroup(a);
       setRadios(grad, a);
       flashRow(grow);
     });
     wrap.appendChild(grow);
     for (const n of names) {
-      const prad = visRadios(alphaOf ? alphaOf(n) : 1, (a) => onSet([n], a));
+      const prad = visRadios(alphaOf ? alphaOf(n) : 1, (a) => onSet([n], a), compact);
       const prow = el('div', 'stillpart-row', [el('span', { class: 'stillpart-lbl', text: n }), prad]);
       prow.addEventListener('click', (e) => {
         if (e.target.closest('.stillradios')) return;

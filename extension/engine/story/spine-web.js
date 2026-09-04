@@ -1,31 +1,10 @@
-import { utilHelpers } from '../../core/util.js';
-const latin1 = utilHelpers.latin1;
+import { observeVisibility } from '../../core/visibility.js';
+import { spineAtlas } from '../../unity/spine-atlas.js';
+const TINY_PNG_BYTES = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
 const utf8 = new TextDecoder('utf-8');
-const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const DEFAULT_MIX = 0.12;
 let _rawSeq = 0;
 const lib = () => globalThis.spine;
-
-const rewriteAtlasPageNames = (atlasText, token) =>
-  atlasText
-    .split(/\r?\n/)
-    .map((line) => {
-      const t = line.trim();
-      return t && !line.startsWith(' ') && !line.includes(':') && /\.(png|jpg|jpeg|webp)$/i.test(t) ? token : line;
-    })
-    .join('\n');
-const scaleAtlasCoords = (atlasBytes, sx, sy) =>
-  new TextEncoder().encode(
-    utf8
-      .decode(atlasBytes)
-      .replace(/^([ \t]*)(size|xy|orig|offset):[ \t]*(-?\d+)[ \t]*,[ \t]*(-?\d+)[ \t]*$/gim, (m, ind, key, a, b) => `${ind}${key}: ${Math.round(Number(a) * sx)},${Math.round(Number(b) * sy)}`),
-  );
-const maybeScaleAtlas = (atlasBytes, texW, texH) => {
-  const szm = latin1.decode(atlasBytes).match(/size:\s*(\d+)\s*,\s*(\d+)/);
-  if (!szm) return atlasBytes;
-  const pw = +szm[1],
-    ph = +szm[2];
-  return pw > 0 && ph > 0 && (pw !== texW || ph !== texH) ? scaleAtlasCoords(atlasBytes, texW / pw, texH / ph) : atlasBytes;
-};
 const makeRawGLTexture = (ctx, rgba, width, height, useMipMaps) => {
   const S = lib();
   const t = Object.create(S.webgl.GLTexture.prototype);
@@ -53,6 +32,44 @@ const makeRawGLTexture = (ctx, rgba, width, height, useMipMaps) => {
   t.context.addRestorable(t);
   return t;
 };
+const buildAtlas = (ctx, input) => {
+  const S = lib();
+  const { text, pages } = spineAtlas.prepareAtlas(input, null);
+  if (!pages.length) throw new Error('spineWeb-atlas-has-no-page');
+  const cache = new Map();
+  const texOf = (tex) => {
+    let t = cache.get(tex);
+    if (!t) {
+      t = makeRawGLTexture(ctx, tex.rgba, tex.width, tex.height, false);
+      cache.set(tex, t);
+    }
+    return t;
+  };
+  return new S.TextureAtlas(text, (pageName) => {
+    const p = pages.find((q) => q.token === pageName) || pages[0];
+    if (!p || !p.tex) throw new Error('spineWeb-page-texture-missing:' + pageName);
+    return texOf(p.tex);
+  });
+};
+
+const buildSkeleton = (ctx, input) => {
+  const S = lib();
+  const atlas = buildAtlas(ctx, input);
+  const loader = new S.AtlasAttachmentLoader(atlas);
+  const bytes = input.skeletonBytes instanceof Uint8Array ? input.skeletonBytes : new Uint8Array(input.skeletonBytes);
+  const data = detectSkeletonIsJson(input.skeletonPath, bytes) ? new S.SkeletonJson(loader).readSkeletonData(utf8.decode(bytes)) : new S.SkeletonBinary(loader).readSkeletonData(bytes);
+  const skeleton = new S.Skeleton(data);
+  const stateData = new S.AnimationStateData(data);
+  stateData.defaultMix = DEFAULT_MIX;
+  const state = new S.AnimationState(stateData);
+  skeleton.setToSetupPose();
+  skeleton.updateWorldTransform();
+  const off = new S.Vector2();
+  const size = new S.Vector2();
+  skeleton.getBounds(off, size, []);
+  return { atlas, data, skeleton, state, anims: data.animations.map((a) => a.name), bounds: { x: off.x, y: off.y, w: size.x, h: size.y } };
+};
+
 const detectSkeletonIsJson = (path, bytes) => {
   const p = String(path || '').toLowerCase();
   if (p.endsWith('.json')) return true;
@@ -102,23 +119,30 @@ const buildPlayable = (host, input, opts) => {
   patchStaleDeformOnce();
   if (!host) throw new Error('host-missing');
   const o = opts || {};
-  let atlasBytes = input.atlasBytes;
-  const tex = input.texture;
-  if (!atlasBytes || !input.skeletonBytes || !tex || !tex.rgba) throw new Error('spineWeb-inputs-incomplete');
+  const textures = spineAtlas.textureListOf(input);
+  if (!input.atlasBytes || !input.skeletonBytes || !textures.length) throw new Error('spineWeb-inputs-incomplete');
 
-  atlasBytes = maybeScaleAtlas(atlasBytes, tex.width, tex.height);
-  const token = 'tp_raw_' + _rawSeq++ + '.png';
-  const atlasText = utf8.decode(atlasBytes);
-  const atlasUrl = URL.createObjectURL(new Blob([rewriteAtlasPageNames(atlasText, token)], { type: 'text/plain' }));
+  const seq = _rawSeq++;
+  const { text: atlasText, pages } = spineAtlas.prepareAtlas(input, (i) => 'tp_raw_' + seq + '_' + i + '.png');
+  if (!pages.length) throw new Error('spineWeb-atlas-has-no-page');
+  const atlasUrl = URL.createObjectURL(new Blob([atlasText], { type: 'text/plain' }));
   const parent = atlasUrl.slice(0, atlasUrl.lastIndexOf('/'));
-  const pageKey = (parent ? parent + '/' : '') + token;
+  const rawDataURIs = {};
+  const texByUrl = new Map();
+  const pageUrls = [];
+  for (const p of pages) {
+    const u = URL.createObjectURL(new Blob([TINY_PNG_BYTES], { type: 'image/png' }));
+    pageUrls.push(u);
+    rawDataURIs[(parent ? parent + '/' : '') + p.token] = u;
+    texByUrl.set(u, p.tex || textures[0]);
+  }
   const isJson = detectSkeletonIsJson(input.skeletonPath, input.skeletonBytes);
   const skeletonUrl = URL.createObjectURL(new Blob([input.skeletonBytes], { type: isJson ? 'application/json' : 'application/octet-stream' }));
 
   let erred = false;
   const cfg = {
     atlasUrl,
-    rawDataURIs: { [pageKey]: TINY_PNG },
+    rawDataURIs,
     alpha: true,
     premultipliedAlpha: o.premultipliedAlpha !== false,
     showControls: !!o.showControls,
@@ -150,12 +174,19 @@ const buildPlayable = (host, input, opts) => {
   else cfg.skelUrl = skeletonUrl;
 
   const player = new (lib().SpinePlayer)(host, cfg);
-  try {
-    if (player.assetManager && player.context) {
-      player.assetManager.textureLoader = () => makeRawGLTexture(player.context, tex.rgba, tex.width, tex.height, false);
-    }
-  } catch (e) {}
-  const _urls = [atlasUrl, skeletonUrl];
+  if (player.assetManager && player.context) {
+    const cache = new Map();
+    player.assetManager.textureLoader = (img) => {
+      const t = texByUrl.get(img && img.src) || (pages[0] && pages[0].tex) || textures[0];
+      let gt = cache.get(t);
+      if (!gt) {
+        gt = makeRawGLTexture(player.context, t.rgba, t.width, t.height, false);
+        cache.set(t, gt);
+      }
+      return gt;
+    };
+  }
+  const _urls = [atlasUrl, skeletonUrl, ...pageUrls];
   const prevDispose = player.dispose && player.dispose.bind(player);
   player.dispose = function () {
     try {
@@ -183,7 +214,7 @@ const buildPlayable = (host, input, opts) => {
 
 const gateByVisibility = (player, host) => {
   let stopped = false;
-  const disconnect = utilHelpers.observeVisibility(host, (vis) => {
+  const disconnect = observeVisibility(host, (vis) => {
     if (!vis && !stopped) {
       stopped = true;
       if (player.stopRendering) player.stopRendering();
@@ -200,4 +231,4 @@ const gateByVisibility = (player, host) => {
   };
 };
 
-export const spineWeb = { lib, runtimeReady, buildPlayable, startDefaultIdle, maybeScaleAtlas, makeRawGLTexture, detectSkeletonIsJson, patchStaleDeformOnce };
+export const spineWeb = { lib, runtimeReady, buildPlayable, buildAtlas, buildSkeleton, startDefaultIdle, makeRawGLTexture, detectSkeletonIsJson, patchStaleDeformOnce };

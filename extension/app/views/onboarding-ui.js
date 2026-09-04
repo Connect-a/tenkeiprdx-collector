@@ -1,5 +1,5 @@
 import { fileStore } from '../../core/fsdir.js';
-import { SK } from '../../core/constants.js';
+import { settings } from '../../core/settings.js';
 import { getById, el, append } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
 import { toast } from '../ui/notifier.js';
@@ -22,11 +22,7 @@ function buildEmailStep() {
       },
     },
   });
-  try {
-    chrome.storage.local.get(SK.email).then((o) => {
-      if (o && o[SK.email]) input.value = o[SK.email];
-    });
-  } catch (e) {}
+  input.value = settings.get('letterEmail') || '';
 
   const label = el('span', 'olabel', document.createTextNode('メールアドレス（入力不要）'));
   append(label, [

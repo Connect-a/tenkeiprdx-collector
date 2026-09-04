@@ -1,22 +1,20 @@
-import { assetUrlOn, relKey } from '../core/paths.js';
-import { setNameAlias } from '../core/placement.js';
+import { SHARED_FILE } from '../core/assetpath/placement.js';
+import { assetUrlOn, relKey } from '../core/assetpath/paths.js';
+import { setNameAlias } from '../core/assetpath/placement.js';
 import { idbStore } from '../core/idb.js';
 import { fileStore } from '../core/fsdir.js';
 import { unityDecode } from '../unity/decode.js';
-import { DIRS, SK } from '../core/constants.js';
+import { DIRS } from '../core/dirs.js';
+import { SK } from '../core/storage-keys.js';
 import { networkClient } from './network.js';
-import { utilHelpers } from '../core/util.js';
+import { latin1 } from '../core/bytes.js';
 import { buildIndexes as BUILD_MOD } from './build-indexes.js';
 import { parseOrigin, saveOrigin, recoverOrigin, resolveOrigin } from './origin.js';
 import { CFG } from '../config.js';
 
 const { assetRoot, fetchBytesRaw, apiFetchBytes } = networkClient;
-const { latin1, b64ToBytes } = utilHelpers;
 
 const MASTER_DIR = DIRS.master;
-const MASTER_FILE = 'masterdata.bin';
-export const CATALOG_DIR = 'catalogs';
-const USER_FILE = 'user.bin';
 
 let _indexes = null;
 let _building = null;
@@ -42,7 +40,7 @@ async function readFolderMaster() {
   try {
     const d = await fileStore.getDir(MASTER_DIR, { create: false });
     if (!d) return null;
-    return await fileStore.readBytesUnder(d, MASTER_FILE);
+    return await fileStore.readBytesUnder(d, SHARED_FILE.master);
   } catch (e) {
     return null;
   }
@@ -54,11 +52,7 @@ export async function saveMasterArtifacts() {
     if (!(fileStore && fileStore.supported) || (await fileStore.permission({ request: false })) !== 'granted') return;
     const d = await fileStore.getDir(MASTER_DIR, { create: true });
     if (!d) return;
-    await fileStore.writeUnder(d, MASTER_FILE, _rawMaster);
-    try {
-      const ur = await idbStore.get(SK.userRaw);
-      if (ur) await fileStore.writeUnder(d, USER_FILE, b64ToBytes(ur));
-    } catch (e) {}
+    await fileStore.writeUnder(d, SHARED_FILE.master, _rawMaster);
     _rawMasterSaved = true;
   } catch (e) {}
 }
@@ -197,7 +191,7 @@ async function fetchCatalogs(base, prog) {
   const readDiskCatalog = async (fname) => {
     if (!sharedDir) return null;
     try {
-      const b = await fileStore.readBytesUnder(sharedDir, CATALOG_DIR + '/' + fname);
+      const b = await fileStore.readBytesUnder(sharedDir, SHARED_FILE.catalog(fname));
       return b ? dec.decode(b) : null;
     } catch (e) {
       return null;
@@ -206,7 +200,7 @@ async function fetchCatalogs(base, prog) {
   const writeDiskCatalog = async (fname, txt) => {
     if (!sharedDir) return;
     try {
-      await fileStore.writeUnder(sharedDir, CATALOG_DIR + '/' + fname, enc.encode(txt));
+      await fileStore.writeUnder(sharedDir, SHARED_FILE.catalog(fname), enc.encode(txt));
     } catch (e) {}
   };
   if (metaIndex) await writeDiskCatalog('_metaindex.json', JSON.stringify(metaIndex));
@@ -291,17 +285,21 @@ async function fetchCatalogs(base, prog) {
     const r = await loadCatalog('player', nm, pf);
     if (!r) continue;
     if (r.fresh) await writeDiskCatalog(pf, r.txt);
+    let j = null;
     try {
-      const j = JSON.parse(r.txt);
-      for (const x of j.m_InternalIds || []) {
-        const m = String(x)
-          .split('\\')
-          .join('/')
-          .match(/^PariPari(?:Public)?Remote\/(.+)$/);
-        if (m) altRel[relKey(m[1])] = m[1];
-      }
-      altOk++;
-    } catch (e) {}
+      j = JSON.parse(r.txt);
+    } catch (e) {
+      console.warn('[tp] カタログを解析できませんでした', nm, e && e.message);
+    }
+    if (!j) continue;
+    for (const x of j.m_InternalIds || []) {
+      const m = String(x)
+        .split('\\')
+        .join('/')
+        .match(/^PariPari(?:Public)?Remote\/(.+)$/);
+      if (m) altRel[relKey(m[1])] = m[1];
+    }
+    altOk++;
   }
   await writeDiskCatalog(ETAG_FILE, JSON.stringify(nextEtags));
   diag.altCatalogs = altOk;
@@ -372,7 +370,8 @@ async function readCache(strict) {
   return null;
 }
 
-const NEWER_KEYS = ['miniGameRels', 'battleFieldRels', 'skillFxSharedRels', 'skillFxUniqueRels', 'worldMapRels', 'uiSpriteRels', 'uiPanelRels', 'gachaBgRels', 'gachaExtraRels', 'systemVoiceRel'];
+const usableForReuse = (c, curBase) =>
+  !!(c && c.meta && c.assets && c.assets.altRel && Object.keys(c.assets.altRel).length && c.meta.builtVersion === extVersion() && (!c.meta.builtAssetRoot || c.meta.builtAssetRoot === curBase));
 
 export async function ensureIndexes(progress) {
   if (_indexes) return _indexes;
@@ -380,16 +379,7 @@ export async function ensureIndexes(progress) {
   _building = (async () => {
     const cached = await readCache(true);
     const curBase = await assetRoot();
-    if (
-      cached &&
-      cached.meta &&
-      cached.assets.chibiIndex &&
-      cached.assets.altRel &&
-      Object.keys(cached.assets.altRel).length &&
-      NEWER_KEYS.every((k) => cached.assets[k] !== undefined) &&
-      cached.meta.builtVersion === extVersion() &&
-      (!cached.meta.builtAssetRoot || cached.meta.builtAssetRoot === curBase)
-    ) {
+    if (usableForReuse(cached, curBase)) {
       _indexes = cached;
       setNameAlias((cached.assets || {}).mirrorAlias);
       return _indexes;

@@ -63,5 +63,3 @@ export function makeRebuildLimiter(windowMs, maxRebuilds) {
     return true;
   };
 }
-
-export const glManager = { guardRenderer, makeRebuildLimiter };

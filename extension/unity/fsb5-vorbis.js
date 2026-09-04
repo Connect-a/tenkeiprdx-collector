@@ -85,7 +85,7 @@ function splitPackets(data) {
   return out;
 }
 
-export function toOgg(clip, setup, opts = {}) {
+function toOgg(clip, setup, opts = {}) {
   if (!setup || !setup.length) return { ok: false, reason: 'setup ヘッダがありません' };
   const packets = splitPackets(clip.data);
   if (!packets.length) return { ok: false, reason: '音声パケットを切り出せません' };

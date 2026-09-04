@@ -2,6 +2,7 @@ import * as THREE_NS from '../../vendor/three.module.js';
 import { vfxParse } from './vfx-parse.js';
 import { proceduralTex } from './vfx-tex.js';
 import { gameShaders } from './shaders/game-shaders.js';
+import { createShapeSampler } from './vfx-shape.js';
 
 let _solidTex = null;
 function solidTexture(T) {
@@ -260,7 +261,7 @@ function farDepthTexture(T) {
   return dt;
 }
 function buildGameUniforms(T, g, mp) {
-  const frag = (g.frag || '') + '\n' + (g.vert || ''); // 実頂点も走査(MatrixVP/_TimeParameters/材質prop は頂点でも使う)
+  const frag = (g.frag || '') + '\n' + (g.vert || '');
   const has = (n) => new RegExp('\\b' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(frag);
   const u = { _TimeParameters: { value: new T.Vector4(0, 0, 0, 0) } };
   const mc = (mp && mp.colors) || {},
@@ -268,16 +269,16 @@ function buildGameUniforms(T, g, mp) {
     mv1 = (mp && mp.vec1) || {};
   for (const [name, pd] of Object.entries(g.props || {})) {
     if (/^vec/.test(pd.type)) {
-      const a = mc[name] || pd.def || [0, 0, 0, 0]; // 色/Vector4: 実材質 override 優先
+      const a = mc[name] || pd.def || [0, 0, 0, 0];
       u[name] = { value: new T.Vector4(a[0] || 0, a[1] || 0, a[2] || 0, a[3] == null ? 0 : a[3]) };
     } else {
-      const v = mf[name] != null ? mf[name] : mv1[name] != null ? mv1[name] : pd.def; // float: 実材質 override 優先
+      const v = mf[name] != null ? mf[name] : mv1[name] != null ? mv1[name] : pd.def;
       u[name] = { value: v == null ? 0 : v };
     }
   }
   if (has('_AlphaToMaskAvailable')) u._AlphaToMaskAvailable = { value: 0 };
   if (has('_GlobalMipBias')) u._GlobalMipBias = { value: new T.Vector2(0, 0) };
-  if (has('unity_OrthoParams')) u.unity_OrthoParams = { value: new T.Vector4(0, 0, 0, 0) }; // w=0=透視
+  if (has('unity_OrthoParams')) u.unity_OrthoParams = { value: new T.Vector4(0, 0, 0, 0) };
   if (has('_WorldSpaceCameraPos')) u._WorldSpaceCameraPos = { value: new T.Vector3() };
   if (has('_ProjectionParams')) u._ProjectionParams = { value: new T.Vector4(1, 0.1, 1000, 0.001) };
   if (has('_ZBufferParams')) u._ZBufferParams = { value: new T.Vector4(0, 0, 0, 0) };
@@ -337,7 +338,7 @@ function applyGameBlend(T, mat, blend) {
     mat.transparent = true;
     mat.depthWrite = false;
     mat.blending = T.NormalBlending;
-  } // alpha
+  }
   mat.depthTest = true;
   mat.needsUpdate = true;
 }
@@ -358,7 +359,7 @@ function makeGameShaderMaterial(T, key, viewAlign, mp, blend, tex) {
   const gu = buildGameUniforms(T, g, mp);
   const uniforms = gu.uniforms;
   for (const sn of g.samplers || []) uniforms[sn] = { value: tex || whiteTexture(T) };
-  uniforms.uViewAlign = { value: viewAlign ? 1 : 0 }; // GAME_VERT_MATCAP 用(汎用頂点では未使用)
+  uniforms.uViewAlign = { value: viewAlign ? 1 : 0 };
   const mat = new T.RawShaderMaterial({
     glslVersion: T.GLSL3,
     uniforms,
@@ -425,9 +426,9 @@ function makeGameBillboardBackend(T, key, maxP, P, o) {
     '\n' +
     'gl_Position=projectionMatrix*viewMatrix*vec4(wp,1.0);}';
 
-  const gu = buildGameUniforms(T, g, o.matParams); // material props(実材質override) + _TimeParameters + depth(必要時)
+  const gu = buildGameUniforms(T, g, o.matParams);
   const uniforms = gu.uniforms;
-  for (const sn of g.samplers || []) uniforms[sn] = { value: o.tex || whiteTexture(T) }; // テクスチャsampler に mainTex をバインド
+  for (const sn of g.samplers || []) uniforms[sn] = { value: o.tex || whiteTexture(T) };
   uniforms.uUvScale = { value: new T.Vector2(uvScale[0], uvScale[1]) };
   uniforms.uScale = { value: 1 };
   uniforms.uPivot = { value: new T.Vector2(o.pivot ? o.pivot.x : 0, o.pivot ? o.pivot.y : 0) };
@@ -671,8 +672,7 @@ function createSystem(T, sys, opt) {
     uvMod = ps.UVModule || {},
     noiseMod = ps.NoiseModule || {},
     clampMod = ps.ClampVelocityModule || {};
-  const shapeOn = !!shapeMod.enabled,
-    forceOn = !!forceMod.enabled,
+  const forceOn = !!forceMod.enabled,
     rotOn = !!rotMod.enabled,
     rotSep = !!rotMod.separateAxes,
     velOn = !!velMod.enabled,
@@ -692,109 +692,9 @@ function createSystem(T, sys, opt) {
   const tex = opt.texture || (opt.proc && opt.proc.shader ? proceduralTex(opt.proc) : null);
   const useMesh = sys.renderMode === 4 && opt.meshGeo && opt.meshGeo.positions && opt.meshGeo.positions.length;
 
-  const D2R = Math.PI / 180;
-  const shRotE = shapeMod.m_Rotation || { x: 0, y: 0, z: 0 };
-  const shScale = shapeMod.m_Scale || { x: 1, y: 1, z: 1 };
-  const shPos = shapeMod.m_Position || { x: 0, y: 0, z: 0 };
-  const shapeRotMat = new T.Matrix4().makeRotationFromEuler(new T.Euler(shRotE.x * D2R, shRotE.y * D2R, shRotE.z * D2R, 'ZXY'));
-  const shPosV = new T.Vector3(shPos.x || 0, shPos.y || 0, shPos.z || 0);
+  const shape = createShapeSampler(T, shapeMod);
   const _sp = new T.Vector3(),
     _sd = new T.Vector3();
-  const shType = shapeMod.type | 0;
-  const shRadius = (shapeMod.radius && shapeMod.radius.value) || 0;
-  const shThick = shapeMod.radiusThickness != null ? shapeMod.radiusThickness : 1;
-  const shArc = ((shapeMod.arc && shapeMod.arc.value) || 360) * D2R;
-  const shConeAng = (shapeMod.angle || 0) * D2R;
-  const shLen = shapeMod.length || 0;
-  const shDonut = shapeMod.donutRadius || 0;
-  const sampleR = () => {
-    const inner = shRadius * (1 - shThick);
-    return Math.sqrt(inner * inner + (shRadius * shRadius - inner * inner) * Math.random());
-  };
-  const _shapeSample = [0, 0, 0, 0, 0, 0];
-  const sampleShape = (o) => {
-    if (!shapeOn) {
-      o[0] = o[1] = o[2] = 0;
-      const u = Math.random() * 2 - 1,
-        th = Math.random() * Math.PI * 2,
-        rr = Math.sqrt(1 - u * u);
-      o[3] = rr * Math.cos(th);
-      o[4] = u;
-      o[5] = rr * Math.sin(th);
-      return;
-    }
-    if (shType === 0 || shType === 1) {
-      const u = Math.random() * 2 - 1,
-        th = Math.random() * Math.PI * 2,
-        rr = Math.sqrt(1 - u * u),
-        r = sampleR();
-      o[3] = rr * Math.cos(th);
-      o[4] = u;
-      o[5] = rr * Math.sin(th);
-      o[0] = r * o[3];
-      o[1] = r * o[4];
-      o[2] = r * o[5];
-    } else if (shType === 2 || shType === 3) {
-      const u = Math.random(),
-        th = Math.random() * Math.PI * 2,
-        rr = Math.sqrt(1 - u * u),
-        r = sampleR();
-      o[3] = rr * Math.cos(th);
-      o[4] = u;
-      o[5] = rr * Math.sin(th);
-      o[0] = r * o[3];
-      o[1] = r * o[4];
-      o[2] = r * o[5];
-    } else if (shType === 10 || shType === 11) {
-      const a = Math.random() * shArc,
-        r = sampleR();
-      o[3] = Math.cos(a);
-      o[4] = 0;
-      o[5] = Math.sin(a);
-      o[0] = r * o[3];
-      o[1] = 0;
-      o[2] = r * o[5];
-    } else if (shType === 12) {
-      o[0] = (Math.random() * 2 - 1) * shRadius;
-      o[1] = 0;
-      o[2] = 0;
-      o[3] = 0;
-      o[4] = 1;
-      o[5] = 0;
-    } else if (shType === 17) {
-      const a = Math.random() * shArc,
-        phi = Math.random() * Math.PI * 2,
-        rr = shDonut * Math.sqrt(Math.random());
-      const cx = Math.cos(a),
-        cz = Math.sin(a),
-        cp = Math.cos(phi);
-      o[0] = (shRadius + rr * cp) * cx;
-      o[1] = rr * Math.sin(phi);
-      o[2] = (shRadius + rr * cp) * cz;
-      o[3] = cx * cp;
-      o[4] = Math.sin(phi);
-      o[5] = cz * cp;
-    } else {
-      const a = Math.random() * shArc,
-        r = sampleR(),
-        sa = Math.sin(shConeAng),
-        ca = Math.cos(shConeAng);
-      const cx = Math.cos(a),
-        cz = Math.sin(a);
-      o[0] = r * cx;
-      o[1] = 0;
-      o[2] = r * cz;
-      o[3] = cx * sa;
-      o[4] = ca;
-      o[5] = cz * sa;
-      if ((shType === 8 || shType === 9) && shLen > 0) {
-        const tt = Math.random() * shLen;
-        o[0] += o[3] * tt;
-        o[1] += o[4] * tt;
-        o[2] += o[5] * tt;
-      }
-    }
-  };
 
   const uvTilesX = Math.max(1, uvMod.tilesX | 0 || 1),
     uvTilesY = Math.max(1, uvMod.tilesY | 0 || 1);
@@ -935,12 +835,7 @@ function createSystem(T, sys, opt) {
     P.rz[idx] = sampleMM(init.startRotation, rn) || 0;
     P.grav[idx] = sampleMM(init.gravityModifier, rn) || 0;
     const spd = sampleMM(init.startSpeed, rn);
-    sampleShape(_shapeSample);
-    _sp
-      .set(_shapeSample[0] * shScale.x, _shapeSample[1] * shScale.y, _shapeSample[2] * shScale.z)
-      .applyMatrix4(shapeRotMat)
-      .add(shPosV);
-    _sd.set(_shapeSample[3], _shapeSample[4], _shapeSample[5]).applyMatrix4(shapeRotMat);
+    shape.sample(_sp, _sd);
     P.px[idx] = _sp.x + ox;
     P.py[idx] = _sp.y + oy;
     P.pz[idx] = _sp.z + oz;
@@ -1006,7 +901,7 @@ function createSystem(T, sys, opt) {
   const tmpCol = [1, 1, 1, 1],
     scol = [1, 1, 1, 1],
     _sm = [1, 1, 1];
-  const _gravDir = [0, -1, 0]; // world -Y をメッシュのローカル系に変換した方向(createAuraParticles が毎フレーム更新)
+  const _gravDir = [0, -1, 0];
   const update = (dt) => {
     dt *= simSpeed;
     if (backend.tick) backend.tick(dt);
@@ -1218,7 +1113,7 @@ function createAuraParticles(bytes, opt) {
   }
   for (const sys of data.systems) {
     if (gateHidden(sys.path)) continue;
-    if (goHidden(sys)) continue; // 既定非アクティブ(m_IsActive=false)のスキル専用要素を idle で描かない
+    if (goHidden(sys)) continue;
     const so = { ...(opt || {}) };
     so.forceLoop = true;
     so.meshGeo = (sys.meshPid && data.meshByPid && data.meshByPid[sys.meshPid]) || null;
@@ -1353,7 +1248,7 @@ function createAuraParticles(bytes, opt) {
             if (Math.random() > L.prob) continue;
             _wp.set(src[k], src[k + 1], src[k + 2]).applyMatrix4(L.parent.unityMesh.matrix);
             _cl.copy(_wp).applyMatrix4(_inv);
-            L.child.emitAt(_cl.x, _cl.y, _cl.z, 1); // 死亡サブは親死亡1件につき1発(旧: 目分量の3を撤去)
+            L.child.emitAt(_cl.x, _cl.y, _cl.z, 1);
           }
         }
       }
@@ -1368,4 +1263,4 @@ function createAuraParticles(bytes, opt) {
   };
 }
 
-export const auraRenderer = { createAuraParticles };
+export const auraParticles = { createAuraParticles };

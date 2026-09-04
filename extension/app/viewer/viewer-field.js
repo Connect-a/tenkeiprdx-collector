@@ -1,8 +1,8 @@
 import { ensureIndexes } from '../../data/index-store.js';
 import { assetStore } from '../../data/asset-store.js';
 import { localInventory } from '../../data/inventory.js';
-import { DIRS } from '../../core/constants.js';
-import { bundleName } from '../../core/paths.js';
+import { DIRS } from '../../core/dirs.js';
+import { bundleName } from '../../core/assetpath/paths.js';
 
 const NONE = { key: '', kind: 'none', rel: '', label: '（なし）' };
 const GRID = { key: 'grid', kind: 'grid', rel: '', label: 'グリッド' };

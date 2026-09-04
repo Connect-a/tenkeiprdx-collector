@@ -3,8 +3,9 @@ import { assetStore } from './asset-store.js';
 import { ensureIndexes } from './index-store.js';
 import { unityMesh } from '../unity/mesh.js';
 import { unityDecode } from '../unity/decode.js';
-import { DIRS } from '../core/constants.js';
+import { DIRS } from '../core/dirs.js';
 const EMPTY_MAT = { materials: [], textures: [] };
+const MAT_OPT = { keepCompressed: unityMesh.KEEP_DXT };
 
 async function readBundle(handle, rel) {
   if (!rel || !handle) return null;
@@ -21,7 +22,7 @@ async function buildWeapons(read, list) {
       const matB = w.materials ? await read(w.materials) : null;
       const model = unityMesh.parseModelBundle(mb);
       if ((w.deps || []).length) await mergeMeshDeps(model, read, w.deps);
-      out.push({ id: w.id, model, materials: matB ? unityMesh.parseMaterialBundle(matB) : EMPTY_MAT, slot: w.slot || 'wp_2', scale: w.scale || 1 });
+      out.push({ id: w.id, model, materials: matB ? unityMesh.parseMaterialBundle(matB, MAT_OPT) : EMPTY_MAT, slot: w.slot || 'wp_2', scale: w.scale || 1 });
     } catch (e) {}
   }
   return out;
@@ -50,7 +51,8 @@ async function loadModelBundle(read, modelRel, meshDeps, opts = {}) {
   try {
     const model = unityMesh.parseModelBundle(mb);
     const missing = (model.renderers || []).some((r) => !model.meshes.find((m) => String(m.pathID) === String(r.meshPathID)));
-    if (opts.always || missing || !(model.clips || []).length) await mergeMeshDeps(model, read, meshDeps);
+    const depRead = opts.depRead ? async (rel) => (await read(rel)) || (await opts.depRead(rel)) : read;
+    if (opts.always || missing || !(model.clips || []).length) await mergeMeshDeps(model, depRead, meshDeps);
     return model;
   } catch (e) {
     return null;
@@ -61,7 +63,7 @@ async function loadMaterialBundle(read, matRel) {
   const b = matRel ? await read(matRel) : null;
   if (!b) return EMPTY_MAT;
   try {
-    return unityMesh.parseMaterialBundle(b);
+    return unityMesh.parseMaterialBundle(b, MAT_OPT);
   } catch (e) {
     return EMPTY_MAT;
   }
@@ -106,7 +108,7 @@ async function load3d(cur, opts) {
   const matBytes = matPath ? await readBundle(cur.handle, matPath) : null;
   return {
     model: unityMesh.parseModelBundle(modelBytes),
-    matBundle: matBytes ? unityMesh.parseMaterialBundle(matBytes) : EMPTY_MAT,
+    matBundle: matBytes ? unityMesh.parseMaterialBundle(matBytes, MAT_OPT) : EMPTY_MAT,
     weapons: await loadWeapons(cur.handle, assets),
     mouthAtlas: await loadMouthAtlas(opts.mouthAtlasBytes),
     variations,
@@ -114,7 +116,7 @@ async function load3d(cur, opts) {
   };
 }
 
-const UI_KEYS = ['height', 'weaponAttach', 'costume', 'auraRenderer', 'motionVoice', 'auraBytes', 'auraTexMap', 'hidePartsUI'];
+const UI_KEYS = ['height', 'weaponAttach', 'costume', 'auraPicker', 'motionVoice', 'auraBytes', 'auraTexMap', 'hidePartsUI'];
 function build3dOptions(loaded, master, ui) {
   const l = loaded || {},
     m = master || {},

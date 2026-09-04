@@ -1,8 +1,9 @@
 import { bulkDownloader } from '../../data/acquire/bulk.js';
+import { SK } from '../../core/storage-keys.js';
 import { fileStore } from '../../core/fsdir.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { collectionRepository } from '../../data/collection.js';
-import { episodeCounts, questSort } from '../../data/character-meta.js';
+import { rosterState } from '../../data/roster-state.js';
 import { getById, el } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
 import { TYPE_LABEL, html } from '../ui/ui-format.js';
@@ -48,7 +49,7 @@ const assetStatusText = (it) =>
           : '';
 const assetDetailText = (it) => (it.status === 'skipped' ? '' : it.status === 'done' ? `資産${it.assetCats || 0}種・立ち絵${it.cast || 0}` : '');
 
-export function seg(id, val, onPick) {
+function seg(id, val, onPick) {
   const wrap = getById(id);
   if (!wrap) return;
   wrap.querySelectorAll('.sg').forEach((b) => {
@@ -71,16 +72,16 @@ async function collectBulkCandidates() {
     id: it.folderKey,
     name: it.displayName,
     rosterKind: it.rosterKind,
-    total: rosterKind === 'character' ? it.counts.total : episodeCounts.availableCount(it) || it.counts.total,
+    total: rosterKind === 'character' ? it.counts.total : rosterState.availableCount(it) || it.counts.total,
   }));
   const byName = (a, b) => (a.name > b.name ? 1 : -1);
-  list.sort(QUEST_KINDS.has(rosterKind) ? questSort.byQuestId((x) => x.id) : byName);
+  list.sort(QUEST_KINDS.has(rosterKind) ? rosterState.byQuestId((x) => x.id) : byName);
   return list;
 }
 
 function persistBulkOpts() {
   try {
-    chrome.storage.local.set({ bulkOpts });
+    chrome.storage.local.set({ [SK.bulkOpts]: bulkOpts });
   } catch (e) {}
 }
 
@@ -99,7 +100,7 @@ export async function refreshBulkTarget() {
 
 export async function openBulk() {
   try {
-    const o = (await chrome.storage.local.get('bulkOpts')).bulkOpts;
+    const o = (await chrome.storage.local.get(SK.bulkOpts))[SK.bulkOpts];
     if (o) Object.assign(bulkOpts, o);
     if (!DL_INTERVALS.includes(bulkOpts.dlIntervalSec)) bulkOpts.dlIntervalSec = 180;
   } catch (e) {}

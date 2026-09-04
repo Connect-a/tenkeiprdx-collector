@@ -1,15 +1,17 @@
-import { DIRS, DL_CONC } from '../../core/constants.js';
-import { PLACE } from '../../core/placement.js';
+import { SHARED_FILE } from '../../core/assetpath/placement.js';
+import { DIRS } from '../../core/dirs.js';
+import { DL_CONC } from './limits.js';
+import { PLACE } from '../../core/assetpath/placement.js';
 import { ensureIndexes } from '../index-store.js';
 import { monsterStatus, other3dStatus } from '../entity-lists.js';
 import { runBulkDownload } from './acquire-bulk.js';
-import { assetStore } from '../asset-store.js';
+import { dropSharedModelDeps } from './acquire-dedupe.js';
+import { assetStore, AREA } from '../asset-store.js';
 import { staticsList } from '../statics.js';
 import { KIND_BY_KEY, gachaFileList } from '../gacha.js';
 import { dlSession } from '../dl-session.js';
 import { localInventory } from '../inventory.js';
 import { fileStore } from '../../core/fsdir.js';
-import { DIRS as _D } from '../../core/constants.js';
 
 const everyN = (n) => (c) => (c.done % n === 0 ? `DL中 ${c.done}/${c.total}（新規${c.got}件・失敗${c.fail}件）` : null);
 const doneWithSkip = (c) => `完了 新規${c.got}件・既にあった分${c.skip}件${c.fail ? `・失敗${c.fail}件` : ''}${c.purged ? `・壊れた分を削除${c.purged}件` : ''}`;
@@ -18,7 +20,7 @@ async function saveStatics(all, progress, opts, doneLabel, onMiss) {
   const stop = (opts && opts.shouldAbort) || (() => false);
   const list = all.filter((s) => s.url);
   const noUrl = all.length - list.length;
-  const dir = await fileStore.getDir(_D.shared, { create: true });
+  const dir = await fileStore.getDir(DIRS.shared, { create: true });
   if (!dir || !list.length) return { got: 0, skip: 0, missing: 0, unresolved: noUrl, failed: 0, stopped: false };
   const sess = dlSession.create();
   let done = 0;
@@ -45,11 +47,11 @@ const gachaBgRels = async () => (await ensureIndexes()).assets.gachaBgRels || []
 const gachaExtraRels = async () => (await ensureIndexes()).assets.gachaExtraRels || [];
 const gachaBundleRels = async () => [...(await gachaBgRels()), ...(await gachaExtraRels())];
 
-const MISSING_FILE = 'statics/_gacha_missing.json';
+const MISSING_FILE = SHARED_FILE.gachaMissing;
 
 async function runGachaDownload(progress, opts) {
   const stop = (opts && opts.shouldAbort) || (() => false);
-  const dir = await fileStore.getDir(_D.shared, { create: true });
+  const dir = await fileStore.getDir(DIRS.shared, { create: true });
   const all = await gachaFileList();
   const groups = new Map();
   for (const f of all) {
@@ -93,7 +95,6 @@ async function runGachaDownload(progress, opts) {
         done: doneWithSkip,
       });
   if (Object.keys(missingIds).length) {
-    console.log('[gacha] 配信なしだったID', JSON.stringify(missingIds));
     if (dir) {
       try {
         await fileStore.writeUnder(dir, MISSING_FILE, new TextEncoder().encode(JSON.stringify({ missingIds, cdnDown }, null, 1)));
@@ -122,7 +123,7 @@ async function gachaStatus() {
     const [files, bgRels] = [await gachaFileList(), await gachaBundleRels()];
     const [haveF, haveB] = [
       await localInventory.presentFiles(
-        _D.shared,
+        DIRS.shared,
         files.map((s) => s.path),
       ),
       await assetStore.presentIds(DIRS.shared, bgRels),
@@ -157,6 +158,8 @@ async function runOther2dDownload(items, progress, opts) {
 
 async function runMonsterDownload(progress, opts) {
   const st = await monsterStatus();
+  const byId = new Map();
+  for (const a of st.refs || []) byId.set(String(a.ownerId || a.id) + '|' + a.rel, a);
   const { ctx } = await runBulkDownload(st.refs, {
     dirKey: DIRS.monster,
     progress,
@@ -165,6 +168,13 @@ async function runMonsterDownload(progress, opts) {
     placeOf: (a) => PLACE.owned(a),
     tick: everyN(20),
     done: doneWithSkip,
+    finalize: async () => {
+      const item = (id, rel) => byId.get(String(id) + '|' + rel);
+      await dropSharedModelDeps(async (id, rel) => {
+        const a = item(id, rel);
+        return a ? AREA.monster(a) : null;
+      });
+    },
   });
   return { got: ctx.got, skip: ctx.skip, missing: ctx.missing, unresolved: 0, failed: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
 }
@@ -179,6 +189,10 @@ async function runOther3dDownload(progress, opts) {
     placeOf: () => PLACE.flat,
     tick: everyN(20),
     done: doneWithSkip,
+    finalize: async () => {
+      const mine = new Set(st.refs || []);
+      await dropSharedModelDeps(async (id, rel) => (mine.has(rel) ? AREA.other : null));
+    },
   });
   return { got: ctx.got, skip: ctx.skip, missing: ctx.missing, unresolved: 0, failed: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
 }

@@ -72,6 +72,16 @@ export function downloadBar({ text, label, small, run }) {
   return el('div', 'homebar', [text ? el('span', 'note', text) : null, btn, note]);
 }
 
+export function decodeFailNote(parent, stats) {
+  if (!stats || !stats.failed) return null;
+  const detail = Object.entries(stats.reasons || {})
+    .map(([k, n]) => k + ' ×' + n)
+    .join(' / ');
+  const row = el('div', { class: 'note dim', style: { padding: '8px 0' }, text: '※ ' + stats.failed + '件は画像を取り出せませんでした。', title: detail });
+  parent.appendChild(row);
+  return row;
+}
+
 export function noteRow(parent, message) {
   const row = el('div', { class: 'note', style: { padding: '8px 0' }, text: message });
   parent.appendChild(row);

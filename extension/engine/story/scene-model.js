@@ -1,6 +1,5 @@
-import { utilHelpers } from '../../core/util.js';
+import { num } from '../../core/bytes.js';
 import { unityDecode } from '../../unity/decode.js';
-const num = utilHelpers.num;
 
 function sceneFrames(decoded, initBgm) {
   const cmds = unityDecode.decodeSceneCommands(decoded);

@@ -1,11 +1,12 @@
 import { fileStore } from '../../core/fsdir.js';
 import { assetRefs } from '../asset-refs.js';
-import { DIRS, DL_CONC } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
+import { DL_CONC } from './limits.js';
 import { resolveOrigin } from '../origin.js';
 import { dlSession } from '../dl-session.js';
 import { ensureIndexes } from '../index-store.js';
 import { homeData, otherBgmList } from '../home-data.js';
-import { utilHelpers } from '../../core/util.js';
+import { pool, safeProgress } from '../../core/async.js';
 
 async function collectHome(progress, onItem, opts) {
   const stop = (opts && opts.shouldAbort) || (() => false);
@@ -18,7 +19,7 @@ async function collectHome(progress, onItem, opts) {
   const dir = await fileStore.getDir(DIRS.home, { create: true });
   if (!dir) throw new Error('フォルダ権限がありません');
   const sharedDir = await fileStore.getDir(DIRS.shared, { create: true });
-  const prog = utilHelpers.safeProgress(progress);
+  const prog = safeProgress(progress);
   const emit = (section, entry) => {
     try {
       onItem && onItem(section, entry);
@@ -88,7 +89,7 @@ async function collectHome(progress, onItem, opts) {
   const total = tasks.length;
   let done = 0;
   let stopped = false;
-  await utilHelpers.pool(tasks, DL_CONC.asset, async (t) => {
+  await pool(tasks, DL_CONC.asset, async (t) => {
     if (sess.aborted) return;
     if (stop()) {
       stopped = true;

@@ -1,10 +1,9 @@
 import { fileStore } from '../../core/fsdir.js';
-import { FAIL_CAP, MISS_STREAK_CAP, DL_CONC } from '../../core/constants.js';
-import { utilHelpers } from '../../core/util.js';
+import { DL_CONC, FAIL_CAP, MISS_STREAK_CAP } from './limits.js';
+import { pool, safeProgress } from '../../core/async.js';
 import { assetStore } from '../asset-store.js';
 import { networkClient } from '../network.js';
 const { assetRoot } = networkClient;
-const pool = utilHelpers.pool;
 
 async function ensureDlDir(dirKey) {
   const root = fileStore && fileStore.supported ? await fileStore.ensure() : null;
@@ -23,7 +22,7 @@ export async function runBulkDownload(items, opts) {
   const list = items || [];
   const dir = await ensureDlDir(dirKey);
   const base = opts.base || (await assetRoot());
-  const prog = utilHelpers.safeProgress(opts.progress);
+  const prog = safeProgress(opts.progress);
   const total = list.length;
   const ctx = { done: 0, got: 0, skip: 0, fail: 0, missing: 0, total };
   let aborted = null;

@@ -1,5 +1,7 @@
-import { SK } from '../../core/constants.js';
+import { SK } from '../../core/storage-keys.js';
+import { settings } from '../../core/settings.js';
 import { showNotice } from '../ui/notice-modal.js';
+import { flashText } from '../ui/notifier.js';
 import { openUpgradeNotice } from '../runtime/upgrade-notice.js';
 const LETTER_MAX = 1000;
 
@@ -17,12 +19,7 @@ export function createLetterPanel(deps) {
   let storedBinlist = '';
 
   async function refreshEmail() {
-    try {
-      const st = await chrome.storage.local.get(SK.email);
-      letterEmail = (st[SK.email] || '').trim();
-    } catch (e) {
-      letterEmail = '';
-    }
+    letterEmail = (settings.get('letterEmail') || '').trim();
     const el = getById('letterEmail');
     if (el) el.value = letterEmail;
   }
@@ -95,14 +92,17 @@ export function createLetterPanel(deps) {
   async function randomName() {
     const names = [],
       pool = [];
+    let folderMeta = null;
     try {
-      const { folderMeta } = await collectionRepository.folderModel();
-      for (const m of Object.values(folderMeta || {})) {
-        if (m.rosterKind !== 'character') continue;
-        if (m.name) names.push(nameFix(m.name));
-        if (m.title) pool.push(...splitBunsetsu(nameFix(m.title)));
-      }
-    } catch (e) {}
+      folderMeta = (await collectionRepository.folderModel()).folderMeta;
+    } catch (e) {
+      console.warn('[tp] 名前の候補を読めませんでした', e);
+    }
+    for (const m of Object.values(folderMeta || {})) {
+      if (m.rosterKind !== 'character') continue;
+      if (m.name) names.push(nameFix(m.name));
+      if (m.title) pool.push(...splitBunsetsu(nameFix(m.title)));
+    }
     if (!names.length) return '';
     const name = names[Math.floor(Math.random() * names.length)];
     let nick = '';
@@ -119,17 +119,15 @@ export function createLetterPanel(deps) {
       clear = getById('emailClear');
     if (save)
       save.addEventListener('click', async () => {
-        await chrome.storage.local.set({ [SK.email]: getById('email').value.trim() });
-        getById('emailSaved').textContent = '更新';
-        setTimeout(() => (getById('emailSaved').textContent = ''), 1500);
+        settings.set('letterEmail', getById('email').value.trim());
+        flashText('emailSaved', '更新');
         refreshEmail();
       });
     if (clear)
       clear.addEventListener('click', async () => {
         getById('email').value = '';
-        await chrome.storage.local.remove(SK.email);
-        getById('emailSaved').textContent = 'クリア';
-        setTimeout(() => (getById('emailSaved').textContent = ''), 1500);
+        settings.set('letterEmail', '');
+        flashText('emailSaved', 'クリア');
         refreshEmail();
       });
   }
@@ -139,7 +137,7 @@ export function createLetterPanel(deps) {
     if (getById('letterName'))
       getById('letterName').addEventListener('input', () => {
         try {
-          localStorage.setItem('tp_name', getById('letterName').value || '');
+          settings.set('letterName', getById('letterName').value || '');
         } catch (e) {}
       });
     getById('letterRand').addEventListener('click', async () => {
@@ -147,7 +145,7 @@ export function createLetterPanel(deps) {
       if (nm) {
         getById('letterName').value = nm;
         try {
-          localStorage.setItem('tp_name', nm);
+          settings.set('letterName', nm);
         } catch (e) {}
       } else toast('索引を作ると使えるようになります。', 'err');
     });
@@ -268,6 +266,10 @@ export function createLetterPanel(deps) {
   return {
     openReport,
     bind() {
+      settings.subscribe((n) => {
+        if (n === 'letterEmail') refreshEmail();
+        else if (n === 'letterName' && getById('letterName')) getById('letterName').value = settings.get('letterName') || '';
+      });
       bindEmail();
       bindLetter();
       bindSecretRecv();
@@ -275,7 +277,7 @@ export function createLetterPanel(deps) {
     },
     async refresh() {
       try {
-        const nm = localStorage.getItem('tp_name');
+        const nm = settings.get('letterName');
         if (nm && getById('letterName')) getById('letterName').value = nm;
       } catch (e) {}
       await refreshEmail();

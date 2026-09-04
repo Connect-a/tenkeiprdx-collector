@@ -3,17 +3,21 @@ import { bind as bindStorage } from './storage-reactor.js';
 import { route } from './router-controller.js';
 import { init } from './init-orchestrator.js';
 import { showUpgradeNotice } from './upgrade-notice.js';
-import { collectionRepository } from '../../data/collection.js';
 import { LOW_QUALITY_INDEX } from '../../core/messages.js';
 import { toast } from '../ui/notifier.js';
+import { ensureIndexes, indexReady } from '../../data/index-store.js';
 
 async function warnLowQuality() {
   try {
-    if (!(await collectionRepository.indexReady())) return;
-    const idx = await collectionRepository.ensureIndexes();
+    if (!(await indexReady())) return;
+    const idx = await ensureIndexes();
     if (idx && idx.meta && idx.meta.altRelCount === 0) toast(LOW_QUALITY_INDEX, 'err');
   } catch (e) {}
 }
+
+window.addEventListener('unhandledrejection', (ev) => {
+  console.error('[tp] 未処理のエラー', ev.reason);
+});
 
 async function boot() {
   bindEvents();

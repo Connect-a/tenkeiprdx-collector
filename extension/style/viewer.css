@@ -256,10 +256,6 @@
   font-size: 13px;
   color: #e6ebf3;
 }
-.vw-cardid {
-  font-size: 11px;
-  color: #7c8798;
-}
 .vw-cardbody {
   display: flex;
   flex-direction: column;
@@ -279,11 +275,6 @@
   width: 34px;
   padding: 2px 0;
   text-align: center;
-}
-.vw-radios {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 .vw-radio {
   display: flex;

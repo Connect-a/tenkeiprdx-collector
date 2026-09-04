@@ -1,7 +1,6 @@
 import { unityDecode } from '../../unity/decode.js';
 import { unitySf } from '../../unity/unity-sf.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
-import { utilHelpers } from '../../core/util.js';
 
 const ATTR_ISACTIVE = 2086281974;
 const ATTR_EMISSION = 2883525743;
@@ -33,41 +32,6 @@ function streamedPeakValues(dataArr) {
       const val = f[p + 4];
       p += 5;
       if (Number.isFinite(time)) out.set(index, Math.max(out.has(index) ? out.get(index) : -Infinity, val));
-    }
-  }
-  return out;
-}
-
-function streamedLaneTrack(dataArr) {
-  const out = new Map();
-  if (!Array.isArray(dataArr) && !ArrayBuffer.isView(dataArr)) return out;
-  const u = Uint32Array.from(Array.from(dataArr, (x) => Number(x) >>> 0));
-  const f = new Float32Array(u.buffer);
-  let p = 0,
-    guard = 0;
-  while (p < u.length && guard++ < 8192) {
-    const time = f[p++];
-    const numKeys = u[p++];
-    if (numKeys < 0 || numKeys > 256 || p + numKeys * 5 > u.length) break;
-    for (let k = 0; k < numKeys; k++) {
-      const index = u[p];
-      const val = f[p + 4];
-      p += 5;
-      if (!Number.isFinite(time) || time < -1e6 || time > 1e6) continue;
-      let s = out.get(index);
-      if (!s) {
-        s = { first: val, last: val, min: val, max: val, tFirst: time, tLast: time };
-        out.set(index, s);
-      } else {
-        s.last = val;
-        s.tLast = time;
-        if (val < s.min) s.min = val;
-        if (val > s.max) s.max = val;
-        if (time < s.tFirst) {
-          s.tFirst = time;
-          s.first = val;
-        }
-      }
     }
   }
   return out;
@@ -219,7 +183,7 @@ function parseVfx(bytes) {
     return q;
   };
   const goName = new Map();
-  const goActive = new Map(); // goId → m_IsActive(prefab既定)。既定非アクティブ(loop2等スキル専用要素)を idle で描かないため。
+  const goActive = new Map();
   for (const o of meta.objects)
     if (o.classID === 1) {
       const g = read(o);
@@ -346,52 +310,50 @@ function parseVfx(bytes) {
   const animGate = parseAnimatorGate();
   const parseTransformAnims = () => {
     const anims = [];
-    try {
-      for (const o of meta.objects) {
-        if (o.classID !== 74) continue;
-        const clip = read(o);
-        if (!clip) continue;
-        const bindings = (clip.m_ClipBindingConstant && clip.m_ClipBindingConstant.genericBindings) || [];
-        const cd = clip.m_MuscleClip && clip.m_MuscleClip.m_Clip && (clip.m_MuscleClip.m_Clip.data || clip.m_MuscleClip.m_Clip);
-        const streamed = cd && cd.m_StreamedClip && cd.m_StreamedClip.data;
-        if (!streamed) continue;
-        const series = streamedLaneSeries(streamed);
-        const dur = (clip.m_MuscleClip && clip.m_MuscleClip.m_StopTime) || 0;
-        let lane = 0;
-        const D = (cd.m_DenseClip && cd.m_DenseClip.m_CurveCount) || 0;
-        const C = (cd.m_ConstantClip && cd.m_ConstantClip.data && cd.m_ConstantClip.data.length) || 0;
-        const S = Math.max(0, bindings.length - D - C);
-        for (let bi = 0; bi < bindings.length; bi++) {
-          const b = bindings[bi];
-          const n = bindingLaneCount(b);
-          if (bi < S) {
-            if ((b.typeID | 0) === 4 && b.attribute >>> 0 === 4) {
-              const path = hashToPath.get(Number(b.path)) || hashToPath.get(b.path >>> 0) || '';
-              const eulerStatic = [0, 0, 0];
-              let animAxis = -1,
-                keys = null;
-              for (let a = 0; a < 3; a++) {
-                const sr = series.get(lane + a);
-                if (!sr || !sr.length) continue;
-                eulerStatic[a] = sr[0][1];
-                let mn = Infinity,
-                  mx = -Infinity;
-                for (const kv of sr) {
-                  if (kv[1] < mn) mn = kv[1];
-                  if (kv[1] > mx) mx = kv[1];
-                }
-                if (mx - mn > 1) {
-                  animAxis = a;
-                  keys = sr.map((kv) => [kv[0], kv[1]]);
-                }
+    for (const o of meta.objects) {
+      if (o.classID !== 74) continue;
+      const clip = read(o);
+      if (!clip) continue;
+      const bindings = (clip.m_ClipBindingConstant && clip.m_ClipBindingConstant.genericBindings) || [];
+      const cd = clip.m_MuscleClip && clip.m_MuscleClip.m_Clip && (clip.m_MuscleClip.m_Clip.data || clip.m_MuscleClip.m_Clip);
+      const streamed = cd && cd.m_StreamedClip && cd.m_StreamedClip.data;
+      if (!streamed) continue;
+      const series = streamedLaneSeries(streamed);
+      const dur = (clip.m_MuscleClip && clip.m_MuscleClip.m_StopTime) || 0;
+      let lane = 0;
+      const D = (cd.m_DenseClip && cd.m_DenseClip.m_CurveCount) || 0;
+      const C = (cd.m_ConstantClip && cd.m_ConstantClip.data && cd.m_ConstantClip.data.length) || 0;
+      const S = Math.max(0, bindings.length - D - C);
+      for (let bi = 0; bi < bindings.length; bi++) {
+        const b = bindings[bi];
+        const n = bindingLaneCount(b);
+        if (bi < S) {
+          if ((b.typeID | 0) === 4 && b.attribute >>> 0 === 4) {
+            const path = hashToPath.get(Number(b.path)) || hashToPath.get(b.path >>> 0) || '';
+            const eulerStatic = [0, 0, 0];
+            let animAxis = -1,
+              keys = null;
+            for (let a = 0; a < 3; a++) {
+              const sr = series.get(lane + a);
+              if (!sr || !sr.length) continue;
+              eulerStatic[a] = sr[0][1];
+              let mn = Infinity,
+                mx = -Infinity;
+              for (const kv of sr) {
+                if (kv[1] < mn) mn = kv[1];
+                if (kv[1] > mx) mx = kv[1];
               }
-              if (animAxis >= 0) anims.push({ path, axis: animAxis, from: keys[0][1], to: keys[keys.length - 1][1], dur, eulerStatic, keys });
+              if (mx - mn > 1) {
+                animAxis = a;
+                keys = sr.map((kv) => [kv[0], kv[1]]);
+              }
             }
-            lane += n;
+            if (animAxis >= 0) anims.push({ path, axis: animAxis, from: keys[0][1], to: keys[keys.length - 1][1], dur, eulerStatic, keys });
           }
+          lane += n;
         }
       }
-    } catch (e) {}
+    }
     return anims;
   };
   const transformAnims = parseTransformAnims();
@@ -477,7 +439,7 @@ function parseVfx(bytes) {
       sortingOrder: rend ? rend.m_SortingOrder : 0,
       name: goName.get(goId) || '',
       path: sysPath,
-      goActive: trEnt ? effectiveActive(trEnt.pid) : true, // 既定非アクティブ(スキル専用等)は idle で描かない
+      goActive: trEnt ? effectiveActive(trEnt.pid) : true,
       matPid,
       meshPid,
     });
@@ -505,57 +467,6 @@ function parseVfx(bytes) {
       }
   }
   return { systems, meshGeo, meshByPid, unityVersion: meta.unityVersion, animGate, transformAnims };
-}
-
-function resolveDeps(catalog, prefabRe) {
-  try {
-    const b64 = utilHelpers.b64ToBytes;
-    const bd = b64(catalog.m_BucketDataString),
-      ed = b64(catalog.m_EntryDataString);
-    const dvB = new DataView(bd.buffer),
-      dvE = new DataView(ed.buffer);
-    const rI = (dv, o) => dv.getInt32(o, true);
-    const bc = rI(dvB, 0);
-    let bo = 4;
-    const buckets = [];
-    for (let i = 0; i < bc; i++) {
-      bo += 4;
-      const cnt = rI(dvB, bo);
-      bo += 4;
-      const es = [];
-      for (let k = 0; k < cnt; k++) {
-        es.push(rI(dvB, bo));
-        bo += 4;
-      }
-      buckets.push(es);
-    }
-    const ec2 = rI(dvE, 0);
-    const entries = [];
-    for (let i = 0; i < ec2; i++) {
-      const o = 4 + i * 28;
-      entries.push({ iid: rI(dvE, o), depKey: rI(dvE, o + 8) });
-    }
-    const ids = catalog.m_InternalIds || [];
-    const auraIid = ids.findIndex((s) => prefabRe.test(String(s)));
-    if (auraIid < 0) return [];
-    const deps = new Set();
-    for (const e of entries) {
-      if (e.iid !== auraIid) continue;
-      if (e.depKey >= 0 && e.depKey < buckets.length)
-        for (const ei of buckets[e.depKey]) {
-          const de = entries[ei];
-          if (de) deps.add(String(ids[de.iid]));
-        }
-    }
-    return [...deps]
-      .map((s) => {
-        const m = s.match(/([a-z0-9]+_assets_[a-z0-9]+\/[^/]+\.bundle)$/i);
-        return m ? m[1] : null;
-      })
-      .filter(Boolean);
-  } catch (e) {
-    return [];
-  }
 }
 
 function buildMaterialMap(T, depBundles) {
@@ -600,18 +511,20 @@ function buildMaterialMap(T, depBundles) {
   const parsed = [];
   const texPool = new Map();
   const shaderNameByPid = {};
-  const shaderInfoByPid = {}; // pid → {name,dst,dynamic}。ブレンドをバンドル跨ぎで解決するため全バンドル分を統合する。
+  const shaderInfoByPid = {};
   for (const bytes of depBundles) {
     if (!bytes) continue;
+    let b = null;
     try {
-      const b = MESH_MOD.parseMaterialBundle(bytes);
-      const mats = b.materials || [],
-        texs = b.textures || [];
-      parsed.push({ mats, texs });
-      if (b.shaders) Object.assign(shaderNameByPid, b.shaders);
-      if (b.shaderInfo) Object.assign(shaderInfoByPid, b.shaderInfo);
-      for (const t of texs) if (t.rgba && !texPool.has(String(t.pathID))) texPool.set(String(t.pathID), t);
+      b = MESH_MOD.parseMaterialBundle(bytes);
     } catch (e) {}
+    if (!b) continue;
+    const mats = b.materials || [],
+      texs = b.textures || [];
+    parsed.push({ mats, texs });
+    if (b.shaders) Object.assign(shaderNameByPid, b.shaders);
+    if (b.shaderInfo) Object.assign(shaderInfoByPid, b.shaderInfo);
+    for (const t of texs) if (t.rgba && !texPool.has(String(t.pathID))) texPool.set(String(t.pathID), t);
   }
   const texCache = new Map();
   const poolTex = (pid, lumAlpha) => {
@@ -656,4 +569,4 @@ function getSubEmitterLinks(systems) {
   return links;
 }
 
-export const vfxParse = { parseVfx, buildMaterialMap, resolveDeps, getSubEmitterLinks };
+export const vfxParse = { parseVfx, buildMaterialMap, getSubEmitterLinks };

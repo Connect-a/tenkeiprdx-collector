@@ -33,6 +33,8 @@ export function routeKey({ rosterKind, id, section, epId }) {
   return `${rosterKind}|${id || ''}|${sec}|${(sec && epId) || ''}`;
 }
 
+export const defaultSection = (rosterKind) => (rosterKind === 'character' ? 'image' : 'story');
+
 export function isTargetRoute(rosterKind) {
   return TARGET_KINDS.includes(rosterKind);
 }

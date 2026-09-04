@@ -1,14 +1,8 @@
-import { assetStore } from '../../data/asset-store.js';
-import { DIRS } from '../../core/constants.js';
-import { unityDecode } from '../../unity/decode.js';
-import { utilHelpers } from '../../core/util.js';
+import { readSharedBgmUrl, fadeAudio } from './story-audio.js';
 import { scenarioUi } from './scenario-ui.js';
-
-const { audioBlobUrl } = utilHelpers;
 
 export const DOKIDOKI_EPISODE_ID = 2300101;
 const BGM_FADE_IN = 0.5;
-const BGM_FADE_OUT = 0.2;
 
 async function readSharedCanvas(rel) {
   if (!rel) return null;
@@ -20,32 +14,6 @@ async function readSharedCanvas(rel) {
   } catch (e) {
     return null;
   }
-}
-async function readSharedBgmUrl(rel) {
-  if (!rel) return null;
-  try {
-    const bytes = await assetStore.readAsset(DIRS.shared, rel);
-    if (!bytes) return null;
-    const clips = await unityDecode.extractAudioResource(bytes);
-    if (clips && clips.length) return audioBlobUrl(clips[0].data, clips[0].mime);
-  } catch (e) {}
-  return null;
-}
-function fadeAudio(a, to, sec, andStop) {
-  const from = a.volume;
-  const t0 = performance.now();
-  const step = () => {
-    const k = sec > 0 ? Math.min(1, (performance.now() - t0) / (sec * 1000)) : 1;
-    a.volume = Math.max(0, Math.min(1, from + (to - from) * k));
-    if (k < 1) requestAnimationFrame(step);
-    else if (andStop) {
-      try {
-        a.pause();
-        if (a.src) URL.revokeObjectURL(a.src);
-      } catch (e) {}
-    }
-  };
-  step();
 }
 
 export function playDokidokiIntro(opts) {
@@ -59,7 +27,6 @@ export function playDokidokiIntro(opts) {
     const a = st.audio;
     st.audio = null;
     if (!a) return;
-    if (opts.reportBgm) opts.reportBgm(false);
     if (fade > 0) fadeAudio(a, 0, fade, true);
     else {
       try {
@@ -153,7 +120,6 @@ export function playDokidokiIntro(opts) {
     host.appendChild(root);
     st.root = root;
     if (bgmUrl) {
-      if (opts.reportBgm) opts.reportBgm(true);
       const a = new Audio(bgmUrl);
       a.loop = true;
       a.volume = 0;

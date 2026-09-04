@@ -1,11 +1,14 @@
 import { showNotice } from '../ui/notice-modal.js';
+import { SK, LEGACY_KEYS, LEGACY_IDB_KEYS, LEGACY_LOCAL_STORAGE_KEYS } from '../../core/storage-keys.js';
+import { idbStore } from '../../core/idb.js';
 
-const KEY = 'noticedRelease';
-const OLD_KEY = 'noticedMajor';
-const RELEASE = '2.5';
+const KEY = SK.noticedRelease;
+const RELEASE = '2.6';
 const MAJOR = RELEASE.split('.')[0];
 const TITLE = '更新のお知らせ';
 const LINES = [
+  { h: 'ver2.6.0' },
+  '設定の保存先を整理したため、**ストーリーの主人公名などの設定**が初期化されます。お手数ですが設定し直してください。',
   { h: 'ver2.5.0' },
   '索引の作り直しをしたうえで、以下の3つを実行してください。',
   '・キャラクター「アイトリア【聖夜を手伝う謙譲の大天使】」の個別ダウンロード',
@@ -53,6 +56,8 @@ export async function showUpgradeNotice() {
   await showNotice(LINES, { blocking: true, title: TITLE });
   try {
     await chrome.storage.local.set({ [KEY]: RELEASE });
-    await chrome.storage.local.remove(OLD_KEY);
+    await chrome.storage.local.remove(LEGACY_KEYS);
+    for (const k of LEGACY_LOCAL_STORAGE_KEYS) localStorage.removeItem(k);
+    for (const k of LEGACY_IDB_KEYS) await idbStore.del(k);
   } catch (e) {}
 }

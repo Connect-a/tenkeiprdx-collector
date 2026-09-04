@@ -1,18 +1,19 @@
 import { unityCrunch } from '../../unity/crunch.js';
-import { assetStore } from '../../data/asset-store.js';
 import { unityDecode } from '../../unity/decode.js';
 import { fileStore } from '../../core/fsdir.js';
-import { ensureIndexes } from '../../data/index-store.js';
-import { DIRS, DEFAULT_PLAYER_NAME } from '../../core/constants.js';
+import { DEFAULT_PLAYER_NAME, applyUserName } from '../../core/username.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { stageGl } from './stage-gl.js';
+import { createCastSource } from './cast-source.js';
+import { CAST_CATS } from '../../data/character-meta.js';
+import { createStoryBg } from './story-bg.js';
+import { createTextReveal } from './text-reveal.js';
 import { scenarioUi } from './scenario-ui.js';
 import { vfxAssets } from './vfx-assets.js';
 import { scenarioSettings } from './scenario-settings.js';
 import { sceneModel } from './scene-model.js';
 import { audioController } from './audio-controller.js';
 import { sceneEffects } from './scene-effects.js';
-import { PLACE } from '../../core/placement.js';
 const AUTO_VOICE_GAP_MS = 400;
 const AUTO_VOICE_LOAD_CAP_MS = 2500;
 const AUTO_TTS_MIN_GAP_MS = 500;
@@ -31,26 +32,6 @@ const INTRO_WAIT_MS = 2700;
 const POSMAP = { 0: 0, 1: -326, 2: -196, 3: 0, 4: 196, 5: 326 };
 const SPKFLAG = { 1: 1, 2: 2, 3: 4, 4: 8, 5: 16 };
 const FACE_ANIM = ['idle_normal', 'idle_joy', 'idle_sad', 'idle_angry', 'idle_surprise', 'idle_unique', 'idle_shy'];
-const EMO_MAP = {
-  1: 'Pleasure',
-  2: 'Sad',
-  3: 'Angry',
-  4: 'Amazing',
-  5: 'Panicked',
-  6: 'Shy',
-  7: 'Love',
-  8: 'Question',
-  10: 'Disorder',
-  11: 'Gloomy',
-  12: 'Idea',
-  13: 'Sigh',
-  14: 'Sigh',
-  15: 'Trouble',
-  16: 'Sparkle',
-  17: 'Silence',
-  18: 'Burn',
-};
-
 async function crunchReady(ms) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
@@ -68,7 +49,7 @@ function create(opts) {
   const ttsMode = o.ttsMode || (() => 'off');
   const masterVol = o.masterVol || (() => 0.5);
   const playerName = typeof o.playerName === 'function' ? o.playerName : () => o.playerName || DEFAULT_PLAYER_NAME;
-  const subUser = (s) => (s == null ? s : String(s).replace(/%username%/gi, playerName() || DEFAULT_PLAYER_NAME));
+  const subUser = (s) => applyUserName(s, playerName());
   const ST = {
     folderHandle: null,
     meta: null,
@@ -77,18 +58,28 @@ function create(opts) {
     idx: 0,
     gen: 0,
     stage: null,
-    bgCache: new Map(),
-    emoAtlas: null,
-    revealRaf: 0,
-    revealFull: '',
-    revealing: false,
+    emotionAtlas: null,
     autoActive: false,
     sceneById: null,
     choiceGroups: null,
     visited: null,
     pendingChoice: null,
     carryBgm: null,
+    openGen: 0,
+    intro: false,
+    introTimer: null,
+    introResolve: null,
   };
+  function endIntro() {
+    ST.intro = false;
+    if (ST.introTimer) {
+      clearTimeout(ST.introTimer);
+      ST.introTimer = null;
+    }
+    const resolve = ST.introResolve;
+    ST.introResolve = null;
+    if (resolve) resolve();
+  }
   const FONT_PX = { 1: '20px', 2: '14px', 3: '24px', 4: '32px' };
   const setText = (el, v) => {
     if (el) el.textContent = v;
@@ -104,223 +95,19 @@ function create(opts) {
     getEp: () => ST.ep,
     getGen: () => ST.gen,
     getCurrentText: () => subUser((ST.frames[ST.idx] || {}).text) || '',
-    onBgmPlaying: o.onBgmPlaying,
   });
   const fx = sceneEffects.create({ els, readBundle, getEp: () => ST.ep });
   function applyBgParallax(cam) {
     if (o.bgEl) o.bgEl.style.transform = `scale(${cam.zoom || 1}) translate(${-(cam.panX || 0) * 100}%, ${(cam.panY || 0) * 100}%)`;
   }
 
-  function stopReveal() {
-    if (ST.revealRaf) {
-      cancelAnimationFrame(ST.revealRaf);
-      ST.revealRaf = 0;
-    }
-    ST.revealing = false;
-  }
-  function startReveal(full) {
-    stopReveal();
-    ST.revealFull = full || '';
-    const el = els.text;
-    if (!el) return;
-    const ms = scenarioSettings.textMs();
-    if (!ST.revealFull || !ms) {
-      el.textContent = ST.revealFull;
-      return;
-    }
-    el.textContent = '';
-    ST.revealing = true;
-    const t0 = performance.now();
-    const step = () => {
-      if (!ST.revealing) return;
-      const n = Math.min(ST.revealFull.length, Math.floor((performance.now() - t0) / ms));
-      el.textContent = ST.revealFull.slice(0, n);
-      if (n >= ST.revealFull.length) {
-        stopReveal();
-        return;
-      }
-      ST.revealRaf = requestAnimationFrame(step);
-    };
-    ST.revealRaf = requestAnimationFrame(step);
-  }
-  function completeReveal() {
-    stopReveal();
-    if (els.text) els.text.textContent = ST.revealFull;
-  }
+  const reveal = createTextReveal(() => els.text);
+  const castSource = createCastSource(readBundle);
+  const bg = createStoryBg({ readBundle, getEp: () => ST.ep, getGen: () => ST.gen });
 
-  function decodeBundleCanvas(bytes) {
-    try {
-      return MESH_MOD.decodeTextureCanvas(bytes);
-    } catch (e) {
-      return null;
-    }
-  }
-  async function loadSkel(key, path) {
+  function ensureSkeleton(key, getBytes) {
     if (!ST.stage) return null;
-    let rec = ST.stage._skels.get(key);
-    if (rec) return rec;
-    let bytes = null;
-    try {
-      bytes = await readBundle(path);
-    } catch (e) {}
-    if (!bytes) return null;
-    const inp = MESH_MOD.extractSpineInputs(bytes);
-    if (!inp) return null;
-    return ST.stage.ensure(key, inp);
-  }
-  function loadSkelFromBytes(key, bytes) {
-    if (!ST.stage) return null;
-    const cached = ST.stage._skels.get(key);
-    if (cached) return cached;
-    const inp = bytes && MESH_MOD.extractSpineInputs(bytes);
-    if (!inp) return null;
-    return ST.stage.ensure(key, inp);
-  }
-  let _castFolders = null;
-  async function castFolderMap() {
-    if (_castFolders) return _castFolders;
-    _castFolders = {};
-    try {
-      for (const d of await fileStore.listFolderDirs()) _castFolders[String(d.folderKey)] = d.handle;
-    } catch (e) {}
-    return _castFolders;
-  }
-  async function ownCastBytes(id) {
-    try {
-      const h = (await castFolderMap())[id];
-      if (!h) return null;
-      let idx;
-      try {
-        idx = await ensureIndexes();
-      } catch (e) {
-        return null;
-      }
-      const a = idx.assets.assetIndex[id];
-      if (!a) return null;
-      for (const cat of ['spine', 'spinelight']) {
-        const rel = (a[cat] || [])[0];
-        if (!rel) continue;
-        const b = await assetStore.readAsset(h, rel, PLACE.visual(cat));
-        if (b) return b;
-      }
-    } catch (e) {}
-    return null;
-  }
-  async function sharedCastBytes(id) {
-    let idx;
-    try {
-      idx = await ensureIndexes();
-    } catch (e) {
-      return null;
-    }
-    const a = idx.assets.assetIndex[id];
-    if (!a) return null;
-    const cat = a.spine && a.spine.length ? 'spine' : 'spinelight';
-    const rel = (a[cat] || [])[0] || null;
-    if (!rel) return null;
-    return await assetStore.readAsset(DIRS.shared, rel);
-  }
-  async function castBytes(id, routedPath) {
-    id = String(id);
-    const own = await ownCastBytes(id);
-    if (own) return own;
-    if (routedPath) {
-      const b = await readBundle(routedPath);
-      if (b) return b;
-    }
-    return await sharedCastBytes(id);
-  }
-
-  function renderEmotions(fr) {
-    if (!ST.stage || !ST.stage.setEmotions) return;
-    if (!ST.emoAtlas || fr.still) {
-      if (ST.stage.clearEmotions) ST.stage.clearEmotions();
-      return;
-    }
-    const list = [];
-    for (const c of fr.cast) {
-      if (!c.emo) continue;
-      const nm = EMO_MAP[c.emo];
-      if (!nm) continue;
-      const sp = ST.emoAtlas.get(nm);
-      if (!sp) continue;
-      list.push({ id: c.id, code: c.emo, name: nm, sprite: sp });
-    }
-    ST.stage.setEmotions(list);
-  }
-
-  async function loadBgCanvas(bgId) {
-    if (!bgId) return null;
-    let cv = ST.bgCache.get(bgId);
-    if (!cv) {
-      const path = (ST.ep.bg && ST.ep.bg[bgId]) || null;
-      if (path) {
-        const b = await readBundle(path);
-        if (b) {
-          try {
-            cv = decodeBundleCanvas(b);
-          } catch (e) {}
-        }
-      }
-      if (!cv) {
-        try {
-          const idx = await ensureIndexes();
-          const rel = (idx.assets.sceneAssetIndex || {})[bgId];
-          if (rel) {
-            const pack = await scenarioUi.loadPack(rel);
-            const sp = pack && (pack.get(bgId) || Object.values(pack.sprites || {})[0]);
-            if (sp && sp.canvas) cv = sp.canvas;
-          }
-        } catch (e) {}
-      }
-      if (cv) ST.bgCache.set(bgId, cv);
-    }
-    return cv;
-  }
-  function bgElement(cv, bgId) {
-    let el;
-    if (cv instanceof HTMLCanvasElement) {
-      el = document.createElement('canvas');
-      el.width = cv.width;
-      el.height = cv.height;
-      try {
-        el.getContext('2d').drawImage(cv, 0, 0);
-      } catch (e) {}
-    } else {
-      el = document.createElement('div');
-      el.textContent = bgId;
-      el.style.background = '#000';
-    }
-    el.style.position = 'absolute';
-    el.style.left = el.style.top = '0';
-    el.style.width = el.style.height = '100%';
-    return el;
-  }
-  async function crossfadeBg(bgHost, bgId, flip, fadeMs, gen, instant) {
-    const cv = await loadBgCanvas(bgId);
-    if (gen !== ST.gen) return;
-    const el = bgElement(cv, bgId);
-    el.style.transform = flip ? 'scaleX(-1)' : '';
-    if (getComputedStyle(bgHost).position === 'static') bgHost.style.position = 'relative';
-    const dur = instant ? 0 : Number(fadeMs) > 0 ? Number(fadeMs) : 500;
-    if (!bgHost.children.length || dur <= 0) {
-      el.style.opacity = '1';
-      el.style.transition = '';
-      bgHost.innerHTML = '';
-      bgHost.appendChild(el);
-      return;
-    }
-    el.style.opacity = '0';
-    el.style.transition = `opacity ${dur}ms linear`;
-    bgHost.appendChild(el);
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    el.style.opacity = '1';
-    await new Promise((r) => setTimeout(r, dur));
-    if (gen !== ST.gen) {
-      el.remove();
-      return;
-    }
-    for (const c of [...bgHost.children]) if (c !== el) c.remove();
+    return ST.stage.ensureSkeleton(key, async () => MESH_MOD.extractSpineInputs(await getBytes()));
   }
 
   function autoWaitImpl(token) {
@@ -343,7 +130,7 @@ function create(opts) {
       };
       const iv = setInterval(() => {
         if (gen !== ST.gen || (token != null && token !== ST.autoToken)) return done(false);
-        if (ST.revealing) return;
+        if (reveal.revealing) return;
         if (!revealAt) revealAt = Date.now();
         if (gameVoiced) {
           const ready = a && a.src && a.duration > 0 && !isNaN(a.duration);
@@ -423,7 +210,7 @@ function create(opts) {
       try {
         for (const step of seq) {
           if (step.bg === ST.curBg && !!step.flip === !!ST.curFlip) continue;
-          await crossfadeBg(bgHost, step.bg, step.flip, step.fade, gen, instant);
+          await bg.crossfade(bgHost, step.bg, step.flip, step.fade, gen, instant);
           if (gen !== ST.gen) return;
           ST.curBg = step.bg;
           ST.curFlip = !!step.flip;
@@ -445,7 +232,10 @@ function create(opts) {
     if (opts && opts.bgOnly) {
       if (fr.still) await paintBg();
       if (gen !== ST.gen) return;
-      if (ST.stage) ST.stage.setCamera(fr.cam);
+      if (ST.stage) {
+        ST.stage.clear();
+        ST.stage.setCamera(fr.cam);
+      }
       if (els.speaker) {
         els.speaker.style.display = 'none';
         setText(els.speaker, '');
@@ -454,35 +244,34 @@ function create(opts) {
       audio.playBgm(fr);
       return;
     }
-    const cast = (ST.meta.routing && ST.meta.routing.cast) || {};
+    const castRouting = (ST.meta.routing && ST.meta.routing.cast) || {};
     if (fr.still) {
       const path = (ST.ep.cg && (ST.ep.cg[fr.still] || ST.ep.cg[String(fr.still)])) || null;
-      const rec = path ? await loadSkel('still:' + fr.still, path) : null;
+      const rec = path ? await ensureSkeleton('still:' + fr.still, () => readBundle(path)) : null;
       if (gen !== ST.gen) return;
-      if (rec && !rec.dead) ST.stage.showStill(rec, fr.stillAnim, fr.stillSpeed > 0 ? fr.stillSpeed / 1000 : 1);
+      if (rec) ST.stage.showStill(rec, fr.stillAnim, fr.stillSpeed > 0 ? fr.stillSpeed / 1000 : 1);
       else ST.stage.clear();
     } else {
       const casts = [];
       for (const c of fr.cast) {
-        const entry = cast[String(c.id)] || cast[c.id];
-        const path = entry && (entry.spine || entry.spinelight);
-        const rec = loadSkelFromBytes('c' + c.id, await castBytes(c.id, path));
+        const entry = castRouting[String(c.id)] || castRouting[c.id];
+        const path = entry && CAST_CATS.map((cat) => entry[cat]).find(Boolean);
+        const rec = await ensureSkeleton('c' + c.id, () => castSource.bytesFor(c.id, path));
         if (gen !== ST.gen) return;
         if (!rec) continue;
         const speaking = fr.speakerPos ? (fr.speakerPos & (SPKFLAG[c.pos] || 0)) !== 0 : true;
-        if (rec && !rec.dead)
-          casts.push({
-            rec,
-            id: c.id,
-            appear: c.app,
-            act: c.act,
-            emo: c.emo,
-            posMapX: POSMAP[c.pos] != null ? POSMAP[c.pos] : 0,
-            flip: !!c.flip,
-            unityAnim: FACE_ANIM[c.face] || 'idle_normal',
-            speaking,
-            zoom: !!c.zoom,
-          });
+        casts.push({
+          rec,
+          id: c.id,
+          appear: c.app,
+          act: c.act,
+          emo: c.emo,
+          posMapX: POSMAP[c.pos] != null ? POSMAP[c.pos] : 0,
+          flip: !!c.flip,
+          unityAnim: FACE_ANIM[c.face] || 'idle_normal',
+          speaking,
+          zoom: !!c.zoom,
+        });
       }
       ST.stage.setCast(casts);
     }
@@ -490,7 +279,6 @@ function create(opts) {
     if (ST.stage) ST.stage.setCamera(fr.cam);
     if (fr.still) await paintBg();
     if (gen !== ST.gen) return;
-    renderEmotions(fr);
     fx.playFrameEffect(fr, ST.idx);
     fx.applyAmbient(fr.ambient);
     fx.applyInsert(fr.insert);
@@ -500,7 +288,7 @@ function create(opts) {
       els.text.style.textAlign = fr.center ? 'center' : '';
       els.text.style.fontSize = FONT_PX[fr.fontSize] || '';
     }
-    startReveal(subUser(fr.text) || '');
+    reveal.start(subUser(fr.text) || '');
     if (els.meta)
       setText(
         els.meta,
@@ -579,16 +367,20 @@ function create(opts) {
 
   return {
     async open(folderHandle, meta, ep, options) {
+      const gen = ++ST.openGen;
       ST.folderHandle = folderHandle;
       ST.meta = meta;
       ST.ep = ep;
       await crunchReady(4000);
       if (!ST.stage) {
-        ST.stage = stageGl.create(o.canvas, Object.assign({ onCam: applyBgParallax, mosaicOn: o.mosaicOn, onStill: o.onStill }, o.stageOpts || {}));
+        ST.stage = stageGl.create(
+          o.canvas,
+          Object.assign({ onCam: applyBgParallax, mosaicOn: o.mosaicOn, onStill: o.onStill, emotionSprite: (name) => (ST.emotionAtlas ? ST.emotionAtlas.get(name) : null) }, o.stageOpts || {})
+        );
       }
-      if (!ST.emoAtlas && scenarioUi) {
+      if (!ST.emotionAtlas && scenarioUi) {
         try {
-          ST.emoAtlas = await scenarioUi.loadStage('emotion');
+          ST.emotionAtlas = await scenarioUi.loadStage('emotion');
         } catch (e) {}
       }
       audio.stopAllAudio();
@@ -601,8 +393,7 @@ function create(opts) {
       if (o.bgEl) o.bgEl.innerHTML = '';
       ST.curBg = null;
       ST.curFlip = false;
-      if (els.emoLayer) els.emoLayer.innerHTML = '';
-      ST.bgCache.clear();
+      bg.clearCache();
       audio.resetUrls();
       audio.stopBgm();
       ST.pendingChoice = null;
@@ -626,23 +417,16 @@ function create(opts) {
         }
       }
       ST.frames = frames;
-      try {
-        const vfxCodes = new Set();
-        for (const fr of frames)
-          for (const e of fr.effects || []) {
-            const c = Number(e && e.code);
-            if (c >= 11 && c <= 18) vfxCodes.add(c);
-          }
-        for (const c of vfxCodes) vfxAssets.loadVfxByCode(c).catch(() => {});
-      } catch (e) {}
+      const vfxCodes = new Set();
+      for (const fr of frames)
+        for (const e of fr.effects || []) {
+          const c = Number(e && e.code);
+          if (c >= 11 && c <= 18) vfxCodes.add(c);
+        }
+      for (const c of vfxCodes) vfxAssets.loadVfxByCode(c).catch((e) => console.warn('[tp] VFXの先読みに失敗', c, e));
       const seekIdx = options && options.seekText ? frameIndexOfText(options.seekText) : -1;
       ST.idx = seekIdx >= 0 ? seekIdx : 0;
-      ST.intro = false;
-      if (ST.introTimer) {
-        clearTimeout(ST.introTimer);
-        ST.introTimer = null;
-      }
-      ST.introResolve = null;
+      endIntro();
       const doIntro = frames.length && seekIdx < 0 && !(options && options.noIntro);
       if (doIntro) {
         await renderFrame({ bgOnly: true });
@@ -656,9 +440,8 @@ function create(opts) {
           ST.introResolve = res;
           ST.introTimer = setTimeout(res, INTRO_WAIT_MS);
         });
-        ST.intro = false;
-        ST.introResolve = null;
-        ST.introTimer = null;
+        if (gen !== ST.openGen) return frames.length;
+        endIntro();
         await renderFrame();
       } else if (frames.length) {
         await renderFrame(seekIdx >= 0 ? { instant: true } : undefined);
@@ -667,15 +450,6 @@ function create(opts) {
     },
     inIntro() {
       return !!ST.intro;
-    },
-    skipIntro() {
-      if (ST.introTimer) {
-        clearTimeout(ST.introTimer);
-        ST.introTimer = null;
-      }
-      const r = ST.introResolve;
-      ST.introResolve = null;
-      if (r) r();
     },
     go(d) {
       if (!ST.frames.length || ST.bgBusy) return;
@@ -695,8 +469,8 @@ function create(opts) {
       return renderFrame();
     },
     advance() {
-      if (ST.intro) return this.skipIntro();
-      if (ST.revealing) return completeReveal();
+      if (ST.intro) return;
+      if (reveal.revealing) return reveal.complete();
       if (ST.idx >= ST.frames.length - 1) {
         if (o.onEnd)
           try {
@@ -713,7 +487,7 @@ function create(opts) {
     mode() {
       if (!ST.frames.length) return 'idle';
       if (ST.intro) return 'intro';
-      if (ST.revealing) return 'revealing';
+      if (reveal.revealing) return 'revealing';
       if (ST.idx >= ST.frames.length - 1) return 'ended';
       return 'playing';
     },
@@ -730,10 +504,10 @@ function create(opts) {
       }
     },
     isRevealing() {
-      return !!ST.revealing;
+      return reveal.revealing;
     },
     completeReveal() {
-      completeReveal();
+      reveal.complete();
     },
     replayVoice() {
       const fr = ST.frames[ST.idx];
@@ -773,19 +547,19 @@ function create(opts) {
       audio.refreshBgm();
     },
     setStillVisibility(map) {
-      if (ST.stage && ST.stage.setStillVisibility) ST.stage.setStillVisibility(map);
+      if (ST.stage) ST.stage.setStillVisibility(map);
     },
     setUserZoom(v) {
-      if (ST.stage && ST.stage.setUserZoom) ST.stage.setUserZoom(v);
+      if (ST.stage) ST.stage.setUserZoom(v);
     },
     setUserPan(x, y) {
-      if (ST.stage && ST.stage.setUserPan) ST.stage.setUserPan(x, y);
+      if (ST.stage) ST.stage.setUserPan(x, y);
     },
     setStillClean(v) {
-      if (ST.stage && ST.stage.setStillClean) ST.stage.setStillClean(v);
+      if (ST.stage) ST.stage.setStillClean(v);
     },
     setStillSpeed(v) {
-      if (ST.stage && ST.stage.setStillSpeed) ST.stage.setStillSpeed(v);
+      if (ST.stage) ST.stage.setStillSpeed(v);
     },
     stopAudio() {
       audio.stopAllAudio();
@@ -813,7 +587,7 @@ function create(opts) {
       return ST.idx >= ST.frames.length - 1;
     },
     dispose() {
-      stopReveal();
+      reveal.stop();
       audio.stopAllAudio();
       audio.stopBgm();
       clearAuto();

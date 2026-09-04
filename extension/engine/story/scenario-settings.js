@@ -1,4 +1,4 @@
-import { SK } from '../../core/constants.js';
+import { SK } from '../../core/storage-keys.js';
 
 const VOL_MAX = 10;
 const WINDOW_ALPHA = [1, 0.5, 0];

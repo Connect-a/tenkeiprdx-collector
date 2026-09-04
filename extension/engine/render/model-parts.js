@@ -15,9 +15,9 @@ const RULES = [
   [/weapon|attachment|^ap_|^dp_|^ep_|^wp_|^ct_|^ik/i, '武器/装備'],
 ];
 
-export const GROUP_ORDER = ['髪', '髪飾り', '頭', '胴', '胸', '腕/手', '袖', '脚/足', 'スカート/裾', '下着', '衣装/布', 'リボン/装飾', '尻尾/翼', '武器/装備', 'その他'];
+const GROUP_ORDER = ['髪', '髪飾り', '頭', '胴', '胸', '腕/手', '袖', '脚/足', 'スカート/裾', '下着', '衣装/布', 'リボン/装飾', '尻尾/翼', '武器/装備', 'その他'];
 
-export function boneGroup(name) {
+function boneGroup(name) {
   const s = String(name || '');
   for (const [re, g] of RULES) if (re.test(s)) return g;
   return 'その他';
@@ -154,11 +154,13 @@ export function createPartControl(T, targets) {
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(names[b]);
   }
-  const ordered = [...groups.entries()].sort((a, b) => {
-    const i = GROUP_ORDER.indexOf(a[0]);
-    const j = GROUP_ORDER.indexOf(b[0]);
-    return (i < 0 ? 99 : i) - (j < 0 ? 99 : j);
-  });
+  const ordered = [...groups.entries()]
+    .sort((a, b) => {
+      const i = GROUP_ORDER.indexOf(a[0]);
+      const j = GROUP_ORDER.indexOf(b[0]);
+      return (i < 0 ? 99 : i) - (j < 0 ? 99 : j);
+    })
+    .map(([id, names]) => ({ id, label: id, names }));
 
   return {
     available: entries.length > 0 && used.size > 1,

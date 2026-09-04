@@ -1,45 +1,38 @@
-import { utilHelpers } from '../../core/util.js';
+import { pool } from '../../core/async.js';
 import { unityCrunch as CRUNCH_MOD } from '../../unity/crunch.js';
 import { texCodec } from '../../unity/texcodec.js';
 import { imageZoom } from './imgzoom.js';
 import { characterMeta, episodeIdOf } from '../../data/character-meta.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { spineWeb } from '../story/spine-web.js';
-import { slotGroup } from '../story/slot-group.js';
-import { DIRS } from '../../core/constants.js';
-import { bundleName } from '../../core/paths.js';
+import { groupSlots } from '../story/slot-group.js';
+import { visFactors, withSlotAlphas } from '../story/slot-alpha.js';
+import { DIRS } from '../../core/dirs.js';
+import { bundleName } from '../../core/assetpath/paths.js';
 import { el, append } from '../../core/dom.js';
 import { buildGroupedVisPanel } from '../../core/vis-panel.js';
 import { fileStore } from '../../core/fsdir.js';
 import { assetStore } from '../../data/asset-store.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { unityDecode } from '../../unity/decode.js';
-const mapLimit = (items, limit, worker) => utilHelpers.pool(Array.isArray(items) ? items : [], limit, worker);
+const mapLimit = (items, limit, worker) => pool(Array.isArray(items) ? items : [], limit, worker);
 
-const setupAlpha = (slot) => (slot.data && slot.data.color && slot.data.color.a != null ? slot.data.color.a : 1);
+const walkBundlesSafe = async (handle) => {
+  try {
+    return await fileStore.walkBundles(handle);
+  } catch (e) {
+    return [];
+  }
+};
 function installPlayerVis(player) {
   if (player.__visHooked) return player.__vis;
   player.__vis = {};
   const orig = player.drawFrame ? player.drawFrame.bind(player) : null;
   if (!orig) return player.__vis;
-  const held = new Set();
   player.drawFrame = function (rnf) {
-    try {
-      const sk = player.skeleton;
-      if (sk && sk.slots)
-        for (const slot of sk.slots) {
-          const name = slot.data.name;
-          const a = player.__vis[name];
-          if (a != null) {
-            slot.color.a = a;
-            held.add(name);
-          } else if (held.has(name)) {
-            slot.color.a = setupAlpha(slot);
-            held.delete(name);
-          }
-        }
-    } catch (e) {}
-    return orig(rnf);
+    const sk = player.skeleton;
+    if (!sk || !sk.slots) return orig(rnf);
+    return withSlotAlphas(sk, visFactors(sk, player.__vis), () => orig(rnf));
   };
   player.__visHooked = true;
   return player.__vis;
@@ -51,15 +44,8 @@ function buildVisPanel(panel, player) {
     return false;
   }
   const vis = installPlayerVis(player);
-  const groups = new Map();
-  for (const slot of sk.slots) {
-    const nm = slot.data.name;
-    const g = slotGroup(nm);
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(nm);
-  }
   buildGroupedVisPanel(panel, {
-    groups: [...groups],
+    groups: groupSlots(sk.slots.map((s) => s.data.name)),
     alphaOf: (n) => (vis[n] == null ? 1 : vis[n]),
     onSet: (names, a) => {
       for (const n of names) {
@@ -244,16 +230,14 @@ async function renderSpinePreview(cur, hostEl) {
   if (!hostEl) return { ok: false, reason: 'host-missing' };
   const baseEntries = spineVisuals((cur && cur.meta) || {}).map((v) => ({ id: v.label, label: v.label, spinePath: v.path, stand: v.stand !== false }));
   if (cur && cur.handle && fileStore.walkBundles) {
-    try {
-      const known = new Set(baseEntries.map((e) => e.spinePath));
-      for (const rel of await fileStore.walkBundles(cur.handle)) {
-        if (known.has(rel) || !/(^|\/)story\/[^/]+\/cg\//i.test(rel)) continue;
-        const rn = bundleName(rel);
-        if (!/^\d{8}_\d+$/.test(rn)) continue;
-        known.add(rel);
-        baseEntries.push({ id: 'still ' + rn, label: 'still ' + rn, spinePath: rel, stand: false });
-      }
-    } catch (e) {}
+    const known = new Set(baseEntries.map((e) => e.spinePath));
+    for (const rel of await walkBundlesSafe(cur.handle)) {
+      if (known.has(rel) || !/(^|\/)story\/[^/]+\/cg\//i.test(rel)) continue;
+      const rn = bundleName(rel);
+      if (!/^\d{8}_\d+$/.test(rn)) continue;
+      known.add(rel);
+      baseEntries.push({ id: 'still ' + rn, label: 'still ' + rn, spinePath: rel, stand: false });
+    }
   }
   const entries = baseEntries.sort((a, b) => (a.stand === b.stand ? String(a.spinePath).localeCompare(String(b.spinePath)) : a.stand ? -1 : 1));
   if (!entries.length) {
@@ -386,14 +370,12 @@ async function renderImageGallery(cur, hostEl, opt) {
   let paths = imageVisuals(cur.meta || {}).map((v) => v.path);
   if (includeStoryAssets && cur.handle && fileStore.walkBundles) {
     const known = new Set([...paths, ...spineVisuals(cur.meta || {}).map((v) => v.path)]);
-    try {
-      const SKIP = /(^|\/)(visual\/(spine|spinelight|model|weapon|illustvoice|skillfx)\/|story\/[^/]+\/(voice|bgm|se)\/|voice_gallery\.)/i;
-      for (const rel of await fileStore.walkBundles(cur.handle)) {
-        if (known.has(rel) || SKIP.test(rel)) continue;
-        known.add(rel);
-        paths.push(rel);
-      }
-    } catch (e) {}
+    const SKIP = /(^|\/)(visual\/(spine|spinelight|model|weapon|illustvoice|skillfx)\/|story\/[^/]+\/(voice|bgm|se)\/|voice_gallery\.)/i;
+    for (const rel of await walkBundlesSafe(cur.handle)) {
+      if (known.has(rel) || SKIP.test(rel)) continue;
+      known.add(rel);
+      paths.push(rel);
+    }
     paths = paths.slice(0, maxBundles);
     try {
       paths.push(...(await sharedStoryImagePaths(cur, known)));
@@ -585,6 +567,19 @@ async function renderImageGallery(cur, hostEl, opt) {
       failed: summary.failed,
       failReasonCounts: summary.failReasonCounts,
     };
+  }
+
+  const undecodable = Object.entries(summary.failReasonCounts || {}).filter(([k]) => k !== 'missing-file');
+  const undecodableCount = undecodable.reduce((a, [, n]) => a + n, 0);
+  if (undecodableCount) {
+    hostEl.appendChild(
+      el('div', {
+        class: 'note dim',
+        style: { padding: '8px 0' },
+        text: '※ ' + undecodableCount + '個のファイルから画像を取り出せませんでした。',
+        title: undecodable.map(([k, n]) => k + ' ×' + n).join(' / '),
+      }),
+    );
   }
 
   return summary;

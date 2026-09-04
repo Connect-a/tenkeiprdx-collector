@@ -2,11 +2,24 @@ import { unityDecode } from '../../unity/decode.js';
 import { unitySf } from '../../unity/unity-sf.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { assetStore } from '../../data/asset-store.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
 import { hasFieldShader, makeFieldMaterial } from '../../engine/render/field-shader.js';
 import { unityAnim } from '../../unity/anim.js';
 
-const CLS = { GAME_OBJECT: 1, TRANSFORM: 4, MESH_RENDERER: 23, MESH_FILTER: 33, MESH: 43, ANIM_CLIP: 74, ANIM_CONTROLLER: 91, ANIMATOR: 95, RENDER_SETTINGS: 104, LIGHT: 108, LIGHTMAP_SETTINGS: 157 };
+const CLS = {
+  GAME_OBJECT: 1,
+  TRANSFORM: 4,
+  MESH_RENDERER: 23,
+  MESH_FILTER: 33,
+  MESH: 43,
+  ANIM_CLIP: 74,
+  ANIM_CONTROLLER: 91,
+  ANIMATOR: 95,
+  RENDER_SETTINGS: 104,
+  LIGHT: 108,
+  LIGHTMAP_SETTINGS: 157,
+  MONO_BEHAVIOUR: 114,
+};
 const pid = (ref) => (ref && ref.m_PathID != null ? String(ref.m_PathID) : null);
 const isLocal = (ref) => ref && Number(ref.m_FileID || 0) === 0 && pid(ref) && pid(ref) !== '0';
 
@@ -55,13 +68,21 @@ function decodeMapClip(raw) {
   return rot ? { duration: dec.duration, times: rot.times, values: rot.values } : null;
 }
 
+function readOne(sf, LE, obj) {
+  try {
+    return unitySf.readObject(sf, LE, obj);
+  } catch (e) {
+    return null;
+  }
+}
+
 function readGeometry(parsed, sf, LE, obj) {
   const m = unitySf.readObject(sf, LE, obj);
   const vd = m.m_VertexData;
   if (vd && (!vd.m_DataSize || !vd.m_DataSize.__bytes || !vd.m_DataSize.__bytes.length)) {
     const bytes = sliceStream(parsed, m.m_StreamData);
-    if (!bytes) return null;
-    vd.m_DataSize = { __bytes: bytes };
+    if (bytes) vd.m_DataSize = { __bytes: bytes };
+    else if (!Number(m.m_MeshCompression || 0)) return null;
   }
   const geo = unityMesh.extractMeshGeometry(m, LE);
   return geo && geo.positions && geo.positions.length ? geo : null;
@@ -83,8 +104,10 @@ const sideOf = (T, mat) => {
   return c === 1 ? T.FrontSide : T.BackSide;
 };
 
-function buildTextures(T, bytes, maxAniso) {
-  const parsedMats = unityMesh.parseMaterialBundle(bytes);
+const dxtFormatOf = (T, fmt) => (fmt === 10 ? T.RGB_S3TC_DXT1_Format : T.RGBA_S3TC_DXT5_Format);
+
+function buildTextures(T, bytes, maxAniso, s3tc) {
+  const parsedMats = unityMesh.parseMaterialBundle(bytes, s3tc ? { keepCompressed: unityMesh.KEEP_DXT } : null);
   const texByPid = new Map();
   const cubeByPid = new Map();
   const rawByPid = new Map();
@@ -98,20 +121,26 @@ function buildTextures(T, bytes, maxAniso) {
       rawByPid.set(String(t.pathID), t);
       continue;
     }
-    if (!t.rgba) continue;
-    const tx = new T.DataTexture(t.rgba, t.width, t.height, T.RGBAFormat);
+    if (!t.rgba && !t.blocks) continue;
+    const packed = !!t.blocks;
+    const tx = packed ? new T.CompressedTexture(t.blocks, t.width, t.height, dxtFormatOf(T, t.format), T.UnsignedByteType) : new T.DataTexture(t.rgba, t.width, t.height, T.RGBAFormat);
     tx.needsUpdate = true;
     tx.flipY = false;
     tx.wrapS = wrapOf(T, t.wrapU);
     tx.wrapT = wrapOf(T, t.wrapV);
-    const mips = (t.mipCount || 1) > 1;
+    const mips = packed ? t.blocks.length > 1 : (t.mipCount || 1) > 1;
     const point = Number(t.filter) === 0;
     tx.magFilter = point ? T.NearestFilter : T.LinearFilter;
     tx.minFilter = point ? (mips ? T.NearestMipmapNearestFilter : T.NearestFilter) : mips ? T.LinearMipmapLinearFilter : T.LinearFilter;
-    tx.generateMipmaps = mips;
+    tx.generateMipmaps = packed ? false : mips;
     tx.anisotropy = Math.max(1, Math.min(maxAniso || 1, Number(t.aniso) || 1));
     tx.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
-    texByPid.set(String(t.pathID), { tex: tx, name: t.name, width: t.width, height: t.height, rgba: t.rgba });
+    const rec = { tex: tx, name: t.name, width: t.width, height: t.height, rgba: t.rgba };
+    if (!t.rgba && t.decode) {
+      let done = null;
+      Object.defineProperty(rec, 'rgba', { get: () => (done = done || t.decode()), configurable: true });
+    }
+    texByPid.set(String(t.pathID), rec);
   }
   return { mats: parsedMats.materials || [], texByPid, cubeByPid, rawByPid };
 }
@@ -230,11 +259,46 @@ function lightmapTexture(T, rec, bptc) {
 }
 
 const LIT_SHADER = /Baked Lit|^Universal Render Pipeline\/(Lit|Simple Lit)$/;
-const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const gammaToLinear = (c) => (c <= 0.04045 ? c / 12.92 : c < 1 ? Math.pow((c + 0.055) / 1.055, 2.4) : Math.pow(c, 2.2));
 const linearToSrgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
-const FLAT_SH = (l0) => [l0.map((x) => x / SH_C[0]), [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+const FLAT_SH = (l0) => [l0.slice(), [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+
+const AMB_SKY = [1 / 6, 0.2721655, 0, 0, 0, 0, -0.0260417, 0, -0.078125];
+const AMB_EQ = [2 / 3, 0, 0, 0, 0, 0, 0.0520833, 0, 0.15625];
+const AMB_GR = [1 / 6, -0.2721655, 0, 0, 0, 0, -0.0260417, 0, -0.078125];
+const AMB_TRILIGHT = 1;
+const AMB_FLAT = 3;
+
+function ambientColor(c, dr, dg, db) {
+  return c ? [Number(c.r) || 0, Number(c.g) || 0, Number(c.b) || 0] : [dr, dg, db];
+}
+
+function gradientSH(mode, sky, eq, gr) {
+  const sh = [];
+  for (let k = 0; k < 9; k++) sh.push([0, 0, 0]);
+  for (let c = 0; c < 3; c++) {
+    const ls = gammaToLinear(sky[c]);
+    if (mode === AMB_FLAT) {
+      sh[0][c] = ls;
+      continue;
+    }
+    const le = gammaToLinear(eq[c]);
+    const lg = gammaToLinear(gr[c]);
+    for (let k = 0; k < 9; k++) sh[k][c] = ls * AMB_SKY[k] + le * AMB_EQ[k] + lg * AMB_GR[k];
+  }
+  return sh;
+}
 
 function ambientOf(rs) {
+  const mode = Number(rs && rs.m_AmbientMode);
+  if (mode === AMB_TRILIGHT || mode === AMB_FLAT) {
+    return gradientSH(
+      mode,
+      ambientColor(rs.m_AmbientSkyColor, 0.212, 0.227, 0.259),
+      ambientColor(rs.m_AmbientEquatorColor, 0.114, 0.125, 0.133),
+      ambientColor(rs.m_AmbientGroundColor, 0.047, 0.043, 0.035),
+    );
+  }
   const probe = rs && rs.m_AmbientProbe;
   if (probe) {
     const keys = Object.keys(probe).sort((a, b) => parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10));
@@ -242,12 +306,10 @@ function ambientOf(rs) {
     if (v.length >= 27) {
       const sh = [];
       for (let i = 0; i < 9; i++) sh.push([v[i], v[i + 9], v[i + 18]]);
-      if (sh.some((c) => c.some((x) => x !== 0))) return sh;
+      return sh;
     }
   }
-  const c = (rs && rs.m_AmbientSkyColor) || null;
-  const rgb = c ? [Number(c.r) || 0, Number(c.g) || 0, Number(c.b) || 0] : [1, 1, 1];
-  return FLAT_SH(rgb.map(srgbToLinear));
+  return FLAT_SH(ambientColor(rs && rs.m_AmbientSkyColor, 1, 1, 1).map(gammaToLinear));
 }
 
 function lightProbesOf(ssf, ssfp) {
@@ -328,29 +390,27 @@ function probeShAt(lp, x, y, z) {
   return out;
 }
 
-const SH_C = [0.2820948, 0.325735, 0.2731371, 0.0788479, 0.1365686];
 function sampleSH(sh, nx, ny, nz, out) {
   for (let k = 0; k < 3; k++) {
-    let r = SH_C[0] * sh[0][k];
-    r += SH_C[1] * (sh[1][k] * ny + sh[2][k] * nz + sh[3][k] * nx);
-    r += SH_C[2] * (sh[4][k] * nx * ny + sh[5][k] * ny * nz + sh[7][k] * nx * nz);
-    r += SH_C[3] * sh[6][k] * (3 * nz * nz - 1);
-    r += SH_C[4] * sh[8][k] * (nx * nx - ny * ny);
+    let r = sh[0][k];
+    r += sh[1][k] * ny + sh[2][k] * nz + sh[3][k] * nx;
+    r += sh[4][k] * nx * ny + sh[5][k] * ny * nz + sh[7][k] * nx * nz;
+    r += sh[6][k] * (3 * nz * nz - 1);
+    r += sh[8][k] * (nx * nx - ny * ny);
     out[k] = linearToSrgb(Math.max(0, r));
   }
   return out;
 }
 
 function shConstants(sh) {
-  const [fC0, fC1, fC2, fC3, fC4] = SH_C;
   const out = {};
   const names = ['unity_SHAr', 'unity_SHAg', 'unity_SHAb'];
   const namesB = ['unity_SHBr', 'unity_SHBg', 'unity_SHBb'];
   for (let k = 0; k < 3; k++) {
-    out[names[k]] = [sh[3][k] * fC1, sh[1][k] * fC1, sh[2][k] * fC1, sh[0][k] * fC0 - sh[6][k] * fC3];
-    out[namesB[k]] = [sh[4][k] * fC2, sh[5][k] * fC2, sh[6][k] * fC3 * 3, sh[7][k] * fC2];
+    out[names[k]] = [sh[3][k], sh[1][k], sh[2][k], sh[0][k] - sh[6][k]];
+    out[namesB[k]] = [sh[4][k], sh[5][k], sh[6][k] * 3, sh[7][k]];
   }
-  out.unity_SHC = [sh[8][0] * fC4, sh[8][1] * fC4, sh[8][2] * fC4, 1];
+  out.unity_SHC = [sh[8][0], sh[8][1], sh[8][2], 1];
   return out;
 }
 
@@ -660,9 +720,17 @@ function groundNear(geos, x, z, refY) {
       }
     }
   }
-  let best = null;
-  for (const p of pts) if (p[2] !== null && (best === null || p[2] > best)) best = p[2];
-  return best;
+  let hi = null;
+  let lo = null;
+  let hits = 0;
+  for (const p of pts) {
+    if (p[2] === null) continue;
+    hits++;
+    if (hi === null || p[2] > hi) hi = p[2];
+    if (lo === null || p[2] < lo) lo = p[2];
+  }
+  if (hits < pts.length || hi - lo > GROUND_FOOT) return null;
+  return hi;
 }
 
 function bakeLightmapUv(geo, parts) {
@@ -680,16 +748,14 @@ function bakeLightmapUv(geo, parts) {
   return out;
 }
 
-export async function loadBattleField(T, rel, opt) {
-  const bytes = await assetStore.readAsset(DIRS.shared, rel);
-  if (!bytes) return null;
+function readFieldBundle(T, bytes, opt) {
   const parsed = unityDecode.parseUnityFS(bytes);
   const cabs = parsed.nodes.filter((n) => !/\.resS$|\.resource$/.test(n.path));
   const main = cabs.find((n) => !/sharedAssets$/.test(n.path));
   if (!main) return null;
 
   const bptc = !opt || opt.bptc !== false;
-  const { mats, texByPid, cubeByPid, rawByPid } = buildTextures(T, bytes, (opt && opt.maxAniso) || 1);
+  const { mats, texByPid, cubeByPid, rawByPid } = buildTextures(T, bytes, (opt && opt.maxAniso) || 1, !!(opt && opt.s3tc));
   const matByPid = new Map(mats.map((m) => [String(m.pathID), m]));
 
   const sf = parsed.data.subarray(main.off, main.off + main.sz);
@@ -714,6 +780,30 @@ export async function loadBattleField(T, rel, opt) {
     return { index: i, sx: t.x == null ? 1 : Number(t.x), sy: t.y == null ? 1 : Number(t.y), ox: Number(t.z) || 0, oy: Number(t.w) || 0 };
   };
 
+  let bloom = null;
+  for (const n of cabs) {
+    if (n === main) continue;
+    const buf = parsed.data.subarray(n.off, n.off + n.sz);
+    let p;
+    try {
+      p = unitySf.parseSerializedFile(buf);
+    } catch (e) {
+      continue;
+    }
+    for (const o of p.objects) {
+      if (o.classID !== CLS.MONO_BEHAVIOUR) continue;
+      const v = readOne(buf, p.LE, o);
+      if (!v || v.m_Name !== 'Bloom' || !v.active || !v.intensity) continue;
+      const on = (x) => x && x.m_OverrideState;
+      const t = on(v.tint) ? v.tint.m_Value : null;
+      bloom = {
+        intensity: on(v.intensity) ? Number(v.intensity.m_Value) : null,
+        threshold: on(v.threshold) ? Number(v.threshold.m_Value) : null,
+        tint: t ? [Number(t.r), Number(t.g), Number(t.b)] : null,
+      };
+    }
+  }
+
   let ambient = FLAT_SH([1, 1, 1]);
   for (const o of sfp.objects) {
     if (o.classID !== CLS.RENDER_SETTINGS) continue;
@@ -723,69 +813,6 @@ export async function loadBattleField(T, rel, opt) {
     break;
   }
 
-  let whiteTex = null;
-  const white = () => {
-    if (!whiteTex) {
-      whiteTex = new T.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, T.RGBAFormat);
-      whiteTex.needsUpdate = true;
-    }
-    return whiteTex;
-  };
-  const env = {
-    light: null,
-    specCube: null,
-    specCubeRT: null,
-    globals: {},
-    rsRead: false,
-    shadowUniforms: [],
-    fog: null,
-    fogUniforms: [],
-    rtUniforms: [],
-    charShadow: (opt && opt.charShadow) || null,
-    charShadowUniforms: [],
-  };
-  const fieldMats = [];
-  const matCache = new Map();
-  const materialFor = (p, lmIndex, shOverride, shKey) => {
-    const k = `${p || ''}|${lmIndex}|${shKey || ''}`;
-    if (matCache.has(k)) return matCache.get(k);
-    const mat = matByPid.get(String(p || ''));
-    let m = null;
-    if (mat && hasFieldShader(mat.shaderName)) {
-      const lm = lmIndex >= 0 ? lightMaps[lmIndex] : null;
-      const dir = lmIndex >= 0 ? dirLightMaps[lmIndex] : null;
-      try {
-        m = makeFieldMaterial(T, mat.shaderName, mat, {
-          textureOf: (pid) => (texByPid.get(String(pid)) || {}).tex || null,
-          white,
-          side: (x) => sideOf(T, x),
-          gi: lm ? (dir ? 'lmdir' : 'lm') : 'sh',
-          scene: shOverride ? Object.assign({}, env.globals, shConstants(shOverride)) : env.globals,
-          cube: () => env.specCube,
-          sceneTexture: (name) => (name === 'unity_Lightmap' ? lm : name === 'unity_LightmapInd' ? dir : undefined),
-          fogMode: env.fog ? env.fog.mode : 0,
-          fogParams: env.fog ? env.fog.params : null,
-          fogColor: env.fog ? env.fog.color : null,
-          charShadow: env.charShadow,
-        });
-      } catch (e) {
-        m = null;
-      }
-      if (m) fieldMats.push(m);
-    }
-    if (!m) m = threeMaterial(T, mat, texByPid, lmIndex >= 0 ? lightMaps[lmIndex] : null, lmIndex >= 0 ? dirLightMaps[lmIndex] : null, env);
-    matCache.set(k, m);
-    return m;
-  };
-  const usesFieldShader = (p) => {
-    const mat = matByPid.get(String(p || ''));
-    return !!(mat && hasFieldShader(mat.shaderName));
-  };
-  const queueOf = (p) => {
-    const mat = matByPid.get(String(p || ''));
-    const q = mat ? Number(mat.renderQueue) : 0;
-    return q > 0 ? q : 2000;
-  };
   const byId = new Map(sfp.objects.map((o) => [String(o.pathID), o]));
 
   const sharedNode = cabs.find((n) => /sharedAssets$/.test(n.path));
@@ -903,64 +930,6 @@ export async function loadBattleField(T, rel, opt) {
     return m;
   };
 
-  for (const o of sfp.objects) {
-    if (o.classID === CLS.RENDER_SETTINGS && !env.rsRead) {
-      try {
-        const rs = unitySf.readObject(sf, sfp.LE, o);
-        env.rsRead = true;
-        const ref = rs.m_CustomReflection && pid(rs.m_CustomReflection) !== '0' ? rs.m_CustomReflection : rs.m_GeneratedSkyboxReflection;
-        const rec = ref ? cubeByPid.get(pid(ref)) : null;
-        if (rec) {
-          env.specCube = cubeTexture(T, rec, 1);
-          env.specCube.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
-        } else {
-          const made = skyboxCube(T, opt && opt.renderer, skyboxInfo(T, rs, matByPid, cubeByPid, texByPid));
-          env.specCube = made.tex;
-          env.specCubeRT = made.rt;
-        }
-        const fc = rs.m_FogColor || {};
-        Object.assign(env.globals, shConstants(ambient), {
-          unity_LightmapST: [1, 1, 0, 0],
-          unity_SpecCube0_HDR: [1, 1, 0, 0],
-          _MainLightCookieTextureFormat: -1,
-          unity_LightData: [0, 0, 1, 0],
-          unity_FogColor: [Number(fc.r) || 0, Number(fc.g) || 0, Number(fc.b) || 0, 1],
-          unity_FogParams: rs.m_Fog ? fogParams(rs) : [0, 0, 0, 0],
-        });
-        if (rs.m_Fog) env.fog = { mode: Number(rs.m_FogMode) || 1, params: fogParams(rs), color: [Number(fc.r) || 0, Number(fc.g) || 0, Number(fc.b) || 0] };
-      } catch (e) {}
-    } else if (o.classID === CLS.LIGHT && !env.light) {
-      try {
-        const l = unitySf.readObject(sf, sfp.LE, o);
-        if (Number(l.m_Type) !== 1 || Number(l.m_Lightmapping) === 2) continue;
-        const c = l.m_Color || { r: 1, g: 1, b: 1 };
-        const e = worldMatrix(pid(l.m_GameObject)).elements;
-        const len = Math.hypot(e[8], e[9], e[10]) || 1;
-        const k = Number(l.m_Intensity) || 1;
-        const sh = l.m_Shadows || {};
-        const type = Number(sh.m_Type) || 0;
-        const strength = type === 0 ? 0 : sh.m_Strength == null ? 1 : Number(sh.m_Strength);
-        env.light = {
-          intensity: k,
-          r: c.r,
-          g: c.g,
-          b: c.b,
-          dir: [-e[8] / len, -e[9] / len, -e[10] / len],
-          color: [c.r * k, c.g * k, c.b * k],
-          shadow: { type, strength, bias: Number(sh.m_Bias) || 0, normalBias: Number(sh.m_NormalBias) || 0 },
-        };
-        env.globals._MainLightPosition = [env.light.dir[0], env.light.dir[1], env.light.dir[2], 0];
-        env.globals._MainLightColor = [c.r * k, c.g * k, c.b * k, 1];
-        env.globals._MainLightShadowParams = [strength, 0, 0, 0];
-        env.globals._CascadeShadowSplitSpheres0 = [0, 0, 0, 0];
-        env.globals._CascadeShadowSplitSpheres1 = [0, 0, 0, 0];
-        env.globals._CascadeShadowSplitSpheres2 = [0, 0, 0, 0];
-        env.globals._CascadeShadowSplitSpheres3 = [0, 0, 0, 0];
-        env.globals._CascadeShadowSplitSphereRadii = [1e18, 1e18, 1e18, 1e18];
-      } catch (e) {}
-    }
-  }
-
   const goName = new Map();
   const goSelfActive = new Map();
   for (const o of sfp.objects) {
@@ -985,6 +954,161 @@ export async function loadBattleField(T, rel, opt) {
     }
     return ok;
   };
+
+  return {
+    sf,
+    sfp,
+    matByPid,
+    texByPid,
+    cubeByPid,
+    lightMaps,
+    dirLightMaps,
+    lightmapRef,
+    lightProbes,
+    bloom,
+    ambient,
+    geometryOf,
+    filterByGo,
+    animByGo,
+    trById,
+    trByGo,
+    worldMatrix,
+    goName,
+    isActive,
+  };
+}
+
+function readSceneEnv(T, src, opt) {
+  const { sf, sfp, matByPid, texByPid, cubeByPid, ambient, worldMatrix } = src;
+  const env = {
+    light: null,
+    specCube: null,
+    specCubeRT: null,
+    globals: {},
+    rsRead: false,
+    shadowUniforms: [],
+    fog: null,
+    fogUniforms: [],
+    rtUniforms: [],
+    charShadow: (opt && opt.charShadow) || null,
+    charShadowUniforms: [],
+  };
+  for (const o of sfp.objects) {
+    if (o.classID === CLS.RENDER_SETTINGS && !env.rsRead) {
+      const rs = readOne(sf, sfp.LE, o);
+      if (!rs) continue;
+      env.rsRead = true;
+      const ref = rs.m_CustomReflection && pid(rs.m_CustomReflection) !== '0' ? rs.m_CustomReflection : rs.m_GeneratedSkyboxReflection;
+      const rec = ref ? cubeByPid.get(pid(ref)) : null;
+      if (rec) {
+        env.specCube = cubeTexture(T, rec, 1);
+        env.specCube.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
+      } else {
+        const made = skyboxCube(T, opt && opt.renderer, skyboxInfo(T, rs, matByPid, cubeByPid, texByPid));
+        env.specCube = made.tex;
+        env.specCubeRT = made.rt;
+      }
+      const fc = rs.m_FogColor || {};
+      Object.assign(env.globals, shConstants(ambient), {
+        unity_LightmapST: [1, 1, 0, 0],
+        unity_SpecCube0_HDR: [1, 1, 0, 0],
+        _MainLightCookieTextureFormat: -1,
+        unity_LightData: [0, 0, 1, 0],
+        unity_FogColor: [Number(fc.r) || 0, Number(fc.g) || 0, Number(fc.b) || 0, 1],
+        unity_FogParams: rs.m_Fog ? fogParams(rs) : [0, 0, 0, 0],
+      });
+      if (rs.m_Fog) env.fog = { mode: Number(rs.m_FogMode) || 1, params: fogParams(rs), color: [Number(fc.r) || 0, Number(fc.g) || 0, Number(fc.b) || 0] };
+    } else if (o.classID === CLS.LIGHT && !env.light) {
+      const l = readOne(sf, sfp.LE, o);
+      if (!l || Number(l.m_Type) !== 1 || Number(l.m_Lightmapping) === 2) continue;
+      const c = l.m_Color || { r: 1, g: 1, b: 1 };
+      const e = worldMatrix(pid(l.m_GameObject)).elements;
+      const len = Math.hypot(e[8], e[9], e[10]) || 1;
+      const k = Number(l.m_Intensity) || 1;
+      const sh = l.m_Shadows || {};
+      const type = Number(sh.m_Type) || 0;
+      const strength = type === 0 ? 0 : sh.m_Strength == null ? 1 : Number(sh.m_Strength);
+      env.light = {
+        intensity: k,
+        r: c.r,
+        g: c.g,
+        b: c.b,
+        dir: [-e[8] / len, -e[9] / len, -e[10] / len],
+        color: [c.r * k, c.g * k, c.b * k],
+        shadow: { type, strength, bias: Number(sh.m_Bias) || 0, normalBias: Number(sh.m_NormalBias) || 0 },
+      };
+      env.globals._MainLightPosition = [env.light.dir[0], env.light.dir[1], env.light.dir[2], 0];
+      env.globals._MainLightColor = [c.r * k, c.g * k, c.b * k, 1];
+      env.globals._MainLightShadowParams = [strength, 0, 0, 0];
+      env.globals._CascadeShadowSplitSpheres0 = [0, 0, 0, 0];
+      env.globals._CascadeShadowSplitSpheres1 = [0, 0, 0, 0];
+      env.globals._CascadeShadowSplitSpheres2 = [0, 0, 0, 0];
+      env.globals._CascadeShadowSplitSpheres3 = [0, 0, 0, 0];
+      env.globals._CascadeShadowSplitSphereRadii = [1e18, 1e18, 1e18, 1e18];
+    }
+  }
+  return env;
+}
+
+function makeMaterialFactory(T, src, env) {
+  const { matByPid, texByPid, lightMaps, dirLightMaps } = src;
+  let whiteTex = null;
+  const white = () => {
+    if (!whiteTex) {
+      whiteTex = new T.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, T.RGBAFormat);
+      whiteTex.needsUpdate = true;
+    }
+    return whiteTex;
+  };
+  const fieldMats = [];
+  const matCache = new Map();
+  const materialFor = (p, lmIndex, shOverride, shKey) => {
+    const k = `${p || ''}|${lmIndex}|${shKey || ''}`;
+    if (matCache.has(k)) return matCache.get(k);
+    const mat = matByPid.get(String(p || ''));
+    let m = null;
+    if (mat && hasFieldShader(mat.shaderName)) {
+      const lm = lmIndex >= 0 ? lightMaps[lmIndex] : null;
+      const dir = lmIndex >= 0 ? dirLightMaps[lmIndex] : null;
+      try {
+        m = makeFieldMaterial(T, mat.shaderName, mat, {
+          textureOf: (pid) => (texByPid.get(String(pid)) || {}).tex || null,
+          white,
+          side: (x) => sideOf(T, x),
+          gi: lm ? (dir ? 'lmdir' : 'lm') : 'sh',
+          scene: shOverride ? Object.assign({}, env.globals, shConstants(shOverride)) : env.globals,
+          cube: () => env.specCube,
+          sceneTexture: (name) => (name === 'unity_Lightmap' ? lm : name === 'unity_LightmapInd' ? dir : undefined),
+          fogMode: env.fog ? env.fog.mode : 0,
+          fogParams: env.fog ? env.fog.params : null,
+          fogColor: env.fog ? env.fog.color : null,
+          charShadow: env.charShadow,
+          rtUniforms: env.rtUniforms,
+        });
+      } catch (e) {
+        m = null;
+      }
+      if (m) fieldMats.push(m);
+    }
+    if (!m) m = threeMaterial(T, mat, texByPid, lmIndex >= 0 ? lightMaps[lmIndex] : null, lmIndex >= 0 ? dirLightMaps[lmIndex] : null, env);
+    matCache.set(k, m);
+    return m;
+  };
+  const usesFieldShader = (p) => {
+    const mat = matByPid.get(String(p || ''));
+    return !!(mat && hasFieldShader(mat.shaderName));
+  };
+  const queueOf = (p) => {
+    const mat = matByPid.get(String(p || ''));
+    const q = mat ? Number(mat.renderQueue) : 0;
+    return q > 0 ? q : 2000;
+  };
+  return { materialFor, usesFieldShader, queueOf, fieldMats, matCache };
+}
+
+function buildFieldScene(T, src, mf) {
+  const { sf, sfp, lightmapRef, lightProbes, ambient, geometryOf, filterByGo, animByGo, trById, trByGo, worldMatrix, goName, isActive } = src;
+  const { materialFor, usesFieldShader, queueOf } = mf;
 
   const perMesh = new Map();
   const loose = [];
@@ -1040,9 +1164,12 @@ export async function loadBattleField(T, rel, opt) {
     const lmRaw = lightmapRef(mr);
     const lm = cnt > 0 && lmRaw ? { index: lmRaw.index, sx: 1, sy: 1, ox: 0, oy: 0 } : lmRaw;
     const parts = [];
+    const cast = Number(mr.m_CastShadows) !== 0;
     range.forEach((sm, i) => {
       if (!sm || !sm.indexCount || Number(sm.topology) !== 0) return;
-      parts.push({ start: sm.indexStart, count: sm.indexCount, matPid: pid(matRefs[i] || matRefs[0]), lm });
+      const mp = pid(matRefs[i] || matRefs[0]);
+      if (!mp || mp === '0') return;
+      parts.push({ start: sm.indexStart, count: sm.indexCount, matPid: mp, lm, cast });
     });
     if (!parts.length) continue;
     const goPid = pid(mr.m_GameObject);
@@ -1164,19 +1291,29 @@ export async function loadBattleField(T, rel, opt) {
     return mesh;
   };
   const addSplit = (geo, parts, matrix) => {
-    const a = addMesh(
-      geo,
-      parts.filter((p) => !usesFieldShader(p.matPid)),
-      matrix,
-      false,
-    );
-    const b = addMesh(
-      geo,
-      parts.filter((p) => usesFieldShader(p.matPid)),
-      matrix,
-      true,
-    );
-    return [a, b].filter(Boolean);
+    const out = [];
+    for (const cast of [true, false]) {
+      const ps = parts.filter((p) => (p.cast !== false) === cast);
+      if (!ps.length) continue;
+      const a = addMesh(
+        geo,
+        ps.filter((p) => !usesFieldShader(p.matPid)),
+        matrix,
+        false,
+      );
+      const b = addMesh(
+        geo,
+        ps.filter((p) => usesFieldShader(p.matPid)),
+        matrix,
+        true,
+      );
+      for (const m of [a, b]) {
+        if (!m) continue;
+        if (!cast) m.userData.noShadowCast = true;
+        out.push(m);
+      }
+    }
+    return out;
   };
   for (const { geo, parts } of perMesh.values()) addSplit(geo, parts, null);
   for (const { geo, parts, matrix } of loose) addSplit(geo, parts, matrix);
@@ -1186,24 +1323,23 @@ export async function loadBattleField(T, rel, opt) {
     const meshes = addSplit(a.geo, a.parts, new T.Matrix4().multiplyMatrices(a.parent, rest).multiply(a.rel));
     if (meshes.length) animItems.push({ meshes, parent: a.parent, pos: a.pos, scale: a.scale, rel: a.rel, track: a.track });
   }
-  if (!drawn) return null;
+  if (!drawn) return { drawn: 0 };
 
   let origin = null;
   let originRank = 0;
   for (const o of sfp.objects) {
     if (o.classID !== CLS.TRANSFORM) continue;
-    try {
-      const t = unitySf.readObject(sf, sfp.LE, o);
-      const nm = goName.get(pid(t.m_GameObject)) || '';
-      const rooted = !isLocal(t.m_Father);
-      const kind = /^field/i.test(nm) ? 3 : /^battlestage$/i.test(nm) ? 2 : rooted && /^battlemap/i.test(nm) ? 1 : 0;
-      const rank = kind * 2 + (rooted ? 1 : 0);
-      if (!kind || rank <= originRank) continue;
-      const p = t.m_LocalPosition;
-      if (!p) continue;
-      originRank = rank;
-      origin = { x: Number(p.x) || 0, y: Number(p.y) || 0, z: Number(p.z) || 0 };
-    } catch (e) {}
+    const t = readOne(sf, sfp.LE, o);
+    if (!t) continue;
+    const nm = goName.get(pid(t.m_GameObject)) || '';
+    const rooted = !isLocal(t.m_Father);
+    const kind = /^field/i.test(nm) ? 3 : /^battlestage$/i.test(nm) ? 2 : rooted && /^battlemap/i.test(nm) ? 1 : 0;
+    const rank = kind * 2 + (rooted ? 1 : 0);
+    if (!kind || rank <= originRank) continue;
+    const p = t.m_LocalPosition;
+    if (!p) continue;
+    originRank = rank;
+    origin = { x: Number(p.x) || 0, y: Number(p.y) || 0, z: Number(p.z) || 0 };
   }
 
   if (origin) {
@@ -1213,71 +1349,91 @@ export async function loadBattleField(T, rel, opt) {
       origin.z,
       origin.y,
     );
-    if (g !== null && Math.abs(g - origin.y) <= 5) origin.y = g;
+    if (g !== null) origin.y = g;
   }
 
+  return { group, owned, animated: animItems, origin, drawn };
+}
+
+function readFieldSky(T, src) {
+  const { sf, sfp, matByPid, cubeByPid, texByPid } = src;
   let fog = null;
   let background = null;
   let backgroundRotation = 0;
-  let backgroundIntensity = 1;
+  const backgroundIntensity = 1;
   for (const o of sfp.objects) {
     if (o.classID === CLS.RENDER_SETTINGS) {
-      try {
-        const rs = unitySf.readObject(sf, sfp.LE, o);
-        if (rs.m_Fog) {
-          const fc = rs.m_FogColor || { r: 0.5, g: 0.5, b: 0.5 };
-          const mode = Number(rs.m_FogMode);
-          const col = new T.Color(fc.r, fc.g, fc.b);
-          if (mode === 1) fog = new T.Fog(col, Number(rs.m_LinearFogStart) || 60, Number(rs.m_LinearFogEnd) || 300);
-          else fog = new T.FogExp2(col, Number(rs.m_FogDensity) || 0.01);
-        }
-        const sky = skyboxInfo(T, rs, matByPid, cubeByPid, texByPid);
-        const skyMat = sky.mat,
-          skyCube = sky.cube,
-          skyTex = sky.tex,
-          exposure = sky.exposure;
-        backgroundRotation = sky.rotation;
-        if (skyCube) {
-          background = cubeTexture(T, skyCube, sky.scale);
-        } else if (skyTex) {
-          background = skyTexture(T, skyTex, sky.scale);
-        } else if (skyMat) {
-          background = flatSkyColor(T, skyMat, exposure);
-        } else {
-          const a = rs.m_AmbientSkyColor || { r: 0.2, g: 0.22, b: 0.26 };
-          background = new T.Color(Math.min(1, a.r), Math.min(1, a.g), Math.min(1, a.b));
-        }
-      } catch (e) {}
+      const rs = readOne(sf, sfp.LE, o);
+      if (!rs) continue;
+      if (rs.m_Fog) {
+        const fc = rs.m_FogColor || { r: 0.5, g: 0.5, b: 0.5 };
+        const mode = Number(rs.m_FogMode);
+        const col = new T.Color(fc.r, fc.g, fc.b);
+        if (mode === 1) fog = new T.Fog(col, Number(rs.m_LinearFogStart) || 60, Number(rs.m_LinearFogEnd) || 300);
+        else fog = new T.FogExp2(col, Number(rs.m_FogDensity) || 0.01);
+      }
+      const sky = skyboxInfo(T, rs, matByPid, cubeByPid, texByPid);
+      const skyMat = sky.mat,
+        skyCube = sky.cube,
+        skyTex = sky.tex,
+        exposure = sky.exposure;
+      backgroundRotation = sky.rotation;
+      if (skyCube) {
+        background = cubeTexture(T, skyCube, sky.scale);
+      } else if (skyTex) {
+        background = skyTexture(T, skyTex, sky.scale);
+      } else if (skyMat) {
+        background = flatSkyColor(T, skyMat, exposure);
+      } else {
+        const a = rs.m_AmbientSkyColor || { r: 0.2, g: 0.22, b: 0.26 };
+        background = new T.Color(Math.min(1, a.r), Math.min(1, a.g), Math.min(1, a.b));
+      }
     }
   }
+  return { fog, background, backgroundRotation, backgroundIntensity };
+}
 
+export async function loadBattleField(T, rel, opt) {
+  const bytes = await assetStore.readAsset(DIRS.shared, rel);
+  if (!bytes) return null;
+  const src = readFieldBundle(T, bytes, opt);
+  if (!src) return null;
+  const env = readSceneEnv(T, src, opt);
+  const mf = makeMaterialFactory(T, src, env);
+  const built = buildFieldScene(T, src, mf);
+  if (!built.drawn) return null;
+  const sky = readFieldSky(T, src);
+
+  const { group, owned, animated, origin, drawn } = built;
   group.__dispose = () => {
     if (env.specCubeRT) env.specCubeRT.dispose();
     else if (env.specCube) env.specCube.dispose();
     for (const g of owned) g.dispose();
-    for (const m of matCache.values()) m.dispose();
-    for (const t of texByPid.values()) t.tex.dispose();
-    for (const t of lightMaps) if (t) t.dispose();
-    for (const t of dirLightMaps) if (t) t.dispose();
+    for (const m of mf.matCache.values()) m.dispose();
+    for (const t of src.texByPid.values()) t.tex.dispose();
+    for (const t of src.lightMaps) if (t) t.dispose();
+    for (const t of src.dirLightMaps) if (t) t.dispose();
     if (env.specCube) env.specCube.dispose();
-    if (background && background.isTexture) background.dispose();
+    if (sky.background && sky.background.isTexture) sky.background.dispose();
   };
   return {
     group,
-    fog,
-    background,
-    backgroundRotation,
-    backgroundIntensity,
+    fog: sky.fog,
+    background: sky.background,
+    backgroundRotation: sky.backgroundRotation,
+    backgroundIntensity: sky.backgroundIntensity,
     light: env.light,
     origin,
     meshCount: drawn,
-    lightmaps: lightMaps.filter(Boolean).length,
-    fieldMats,
+    lightmaps: src.lightMaps.filter(Boolean).length,
+    fieldMats: mf.fieldMats,
     shadowUniforms: env.shadowUniforms,
     fogUniforms: env.fogUniforms,
     rtUniforms: env.rtUniforms,
     charShadowUniforms: env.charShadowUniforms,
-    animated: animItems,
+    ambient: src.ambient,
+    bloom: src.bloom,
+    animated,
   };
 }
 
@@ -1310,5 +1466,3 @@ export function stepFieldAnimation(T, items, t) {
     }
   }
 }
-
-export { gammaPipeline };

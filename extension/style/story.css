@@ -86,12 +86,6 @@
   color: #b0aac4;
 }
 
-.stillnote {
-  color: #8a84a3;
-  font-size: 12px;
-  padding: 4px 0;
-}
-
 .stillclean {
   display: inline-flex;
   align-items: center;
@@ -116,18 +110,6 @@
   border-radius: 6px;
   padding: 2px 4px;
   font-size: 12px;
-}
-
-.zoomctl {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #b0aac4;
-}
-
-.zoomctl input[type='range'] {
-  width: 120px;
 }
 
 .controls .btn.active,

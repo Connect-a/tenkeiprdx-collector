@@ -1,6 +1,6 @@
 import { ensureIndexes } from './index-store.js';
 import { apiTypeForKind } from './character-meta.js';
-import { AFFILIATION_NAMES, RARITY_NAMES } from '../core/constants.js';
+import { AFFILIATION_NAMES, RARITY_NAMES } from './master-labels.js';
 import { CHARACTER_CV } from './character-cv.js';
 
 const CV_UNKNOWN = '【不明】';

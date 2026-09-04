@@ -1,12 +1,13 @@
 import { spineWeb } from '../../engine/story/spine-web.js';
 import { visualRenderer } from '../../engine/render/visual.js';
 import { spineInputsFor } from './viewer-source.js';
-import { slotGroup } from '../../engine/story/slot-group.js';
+import { groupSlots } from '../../engine/story/slot-group.js';
+import { visFactors, withSlotAlphas } from '../../engine/story/slot-alpha.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { texCodec } from '../../unity/texcodec.js';
 import { fileStore } from '../../core/fsdir.js';
 import { assetStore } from '../../data/asset-store.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
 import { createStageCore } from './viewer-stage-core.js';
 import { el } from '../../core/dom.js';
 
@@ -57,25 +58,7 @@ const SLIDERS = [['z', '前後', -6, 6, 1]];
 const idleAnim = (names) => (names || []).find((n) => n === 'idle_normal') || (names || []).find((n) => /idle/i.test(n)) || (names || [])[0] || '';
 
 function buildSkeleton(ctx, inputs) {
-  const spine = SP();
-  const atlasBytes = spineWeb.maybeScaleAtlas(inputs.atlasBytes, inputs.texture.width, inputs.texture.height);
-  const tex = spineWeb.makeRawGLTexture(ctx, inputs.texture.rgba, inputs.texture.width, inputs.texture.height, false);
-  const atlas = new spine.TextureAtlas(new TextDecoder('utf-8').decode(atlasBytes), () => tex);
-  const loader = new spine.AtlasAttachmentLoader(atlas);
-  const isJson = spineWeb.detectSkeletonIsJson(inputs.skeletonPath, inputs.skeletonBytes);
-  const data = isJson
-    ? new spine.SkeletonJson(loader).readSkeletonData(new TextDecoder('utf-8').decode(inputs.skeletonBytes))
-    : new spine.SkeletonBinary(loader).readSkeletonData(inputs.skeletonBytes instanceof Uint8Array ? inputs.skeletonBytes : new Uint8Array(inputs.skeletonBytes));
-  const skeleton = new spine.Skeleton(data);
-  const stateData = new spine.AnimationStateData(data);
-  stateData.defaultMix = 0.12;
-  const anim = new spine.AnimationState(stateData);
-  skeleton.setToSetupPose();
-  skeleton.updateWorldTransform();
-  const off = new spine.Vector2();
-  const size = new spine.Vector2();
-  skeleton.getBounds(off, size, []);
-  return { atlas, skeleton, anim, anims: data.animations.map((a) => a.name), bounds: { x: off.x, y: off.y, w: size.x, h: size.y }, entry: null, cur: null, vis: {} };
+  return { ...spineWeb.buildSkeleton(ctx, inputs), entry: null, cur: null, vis: {} };
 }
 
 export function createStage(hostEl, deps) {
@@ -288,8 +271,8 @@ export function createStage(hostEl, deps) {
       for (const c of state.scene.chars.slice().sort((a, b) => (b.z || 0) - (a.z || 0))) {
         const rec = core.live(c.id);
         if (!rec) continue;
-        rec.anim.update(c.paused ? 0 : delta);
-        rec.anim.apply(rec.skeleton);
+        rec.state.update(c.paused ? 0 : delta);
+        rec.state.apply(rec.skeleton);
         const b = rec.bounds;
         if (!(b.h > 0)) continue;
         const scale = (refH > 0 ? (H * 0.5) / refH : BASE_SCALE * (H / REF_H)) * (c.scale || 1) * zoom;
@@ -308,13 +291,7 @@ export function createStage(hostEl, deps) {
         const cx = px + (c.x || 0) * (W / 12) * zoom;
         const cy = py + (c.y || 0) * (H / 12) * zoom;
         rects.set(String(c.id), { cx: cx / dpr, cy: (H - cy) / dpr, w: (b.w * scale) / dpr, h: (b.h * scale) / dpr, rot: -th });
-        for (const slot of rec.skeleton.slots || []) {
-          const a = rec.vis[slot.data.name];
-          if (a != null) slot.color.a *= a;
-        }
-        try {
-          renderer.drawSkeleton(rec.skeleton, true);
-        } catch (e) {}
+        withSlotAlphas(rec.skeleton, visFactors(rec.skeleton, rec.vis), () => renderer.drawSkeleton(rec.skeleton, true));
       }
       renderer.end();
       const r = selected ? rects.get(selected) : null;
@@ -361,7 +338,7 @@ export function createStage(hostEl, deps) {
       if (!pick) return;
       if (rec.cur !== pick) {
         try {
-          rec.entry = rec.anim.setAnimation(0, pick, true);
+          rec.entry = rec.state.setAnimation(0, pick, true);
           rec.cur = pick;
         } catch (e) {}
       }
@@ -379,15 +356,8 @@ export function createStage(hostEl, deps) {
     visInfo(id) {
       const rec = core.live(id);
       if (!rec || !rec.skeleton) return null;
-      const groups = new Map();
-      for (const slot of rec.skeleton.slots || []) {
-        const nm = slot.data.name;
-        const g = slotGroup(nm);
-        if (!groups.has(g)) groups.set(g, []);
-        groups.get(g).push(nm);
-      }
       return {
-        groups: [...groups],
+        groups: groupSlots((rec.skeleton.slots || []).map((s) => s.data.name)),
         alphaOf: (n) => (rec.vis[n] == null ? 1 : rec.vis[n]),
         set: (names, a) => {
           for (const n of names) {

@@ -22,19 +22,23 @@ function ensureWorker() {
   clearTimeout(_idleTerm);
   if (_worker !== undefined) return _worker;
   _worker = null;
+  let w = null;
   try {
-    const w = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })));
-    w.onmessage = (e) => {
-      const fn = _waiting.get(e.data);
-      if (!fn) return;
-      _waiting.delete(e.data);
-      fn();
-    };
-    w.onerror = () => {
-      if (_worker === w) _worker = null;
-    };
-    _worker = w;
-  } catch (e) {}
+    w = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })));
+  } catch (e) {
+    console.warn('[tp] バックグラウンドタイマーを起動できませんでした', e);
+    return _worker;
+  }
+  w.onmessage = (e) => {
+    const fn = _waiting.get(e.data);
+    if (!fn) return;
+    _waiting.delete(e.data);
+    fn();
+  };
+  w.onerror = () => {
+    if (_worker === w) _worker = null;
+  };
+  _worker = w;
   return _worker;
 }
 

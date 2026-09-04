@@ -1,7 +1,6 @@
 import { idbStore } from './idb.js';
-import { DIRS, FOLDER_PARENTS } from './constants.js';
-import { utilHelpers } from './util.js';
-const pool = utilHelpers.pool;
+import { DIRS, FOLDER_PARENTS } from './dirs.js';
+import { pool } from './async.js';
 const DIR_HANDLE_KEY = 'homeDir';
 const supported = typeof self !== 'undefined' && 'showDirectoryPicker' in self;
 let _handle = null;

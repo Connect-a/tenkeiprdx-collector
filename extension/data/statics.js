@@ -1,6 +1,5 @@
+import { SHARED_FILE } from '../core/assetpath/placement.js';
 import { resolveOrigin } from './origin.js';
-
-const STATICS_DIR = 'statics';
 
 const VIDEO_DIR = 'InGameStatics/VideoFiles';
 const VIDEOS = [
@@ -13,7 +12,7 @@ const VIDEOS = [
 
 const FILES = VIDEOS.map(([n, name]) => ({ key: 'video_' + n.toLowerCase(), name, sub: `${VIDEO_DIR}/${n}.mp4`, file: `${n}.mp4`, kind: 'video' }));
 
-const withUrl = (list, base) => list.map((f) => ({ ...f, url: base ? `${base}/${f.sub}` : null, path: `${STATICS_DIR}/${f.file}` }));
+const withUrl = (list, base) => list.map((f) => ({ ...f, url: base ? `${base}/${f.sub}` : null, path: SHARED_FILE.statics(f.file) }));
 
 async function staticsBase() {
   try {

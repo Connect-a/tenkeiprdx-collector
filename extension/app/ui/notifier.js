@@ -24,3 +24,20 @@ export function toast(msg, tone, opts) {
   if (!sticky) setTimeout(close, opts.dur || 4500);
   return { close, el: t };
 }
+
+const _flashTimers = new Map();
+
+export function flashText(id, message, ms) {
+  const node = getById(id);
+  if (!node) return;
+  clearTimeout(_flashTimers.get(id));
+  node.textContent = message;
+  _flashTimers.set(
+    id,
+    setTimeout(() => {
+      const n = getById(id);
+      if (n) n.textContent = '';
+      _flashTimers.delete(id);
+    }, ms || 1500),
+  );
+}

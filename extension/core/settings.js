@@ -1,15 +1,17 @@
 const DEFS = {
-  voiceMode: { key: 'storyVoiceMode', def: 'voice', values: ['voice', 'voice+tts', 'tts', 'off'] },
-  show3d: { key: 'imgShow3d', def: true, type: 'bool' },
-  showSpine: { key: 'imgShowSpine', def: true, type: 'bool' },
-  imageFlipY: { key: 'imgFlipY', def: true, type: 'bool' },
+  voiceMode: { key: 'voiceMode', def: 'voice', values: ['voice', 'voice+tts', 'tts', 'off'] },
+  show3d: { key: 'show3d', def: true, type: 'bool' },
+  showSpine: { key: 'showSpine', def: true, type: 'bool' },
+  imageFlipY: { key: 'imageFlipY', def: true, type: 'bool' },
   masterVolume: { key: 'masterVolume', def: 0.5, type: 'num', min: 0, max: 1.5, scale: 100 },
   motionVoice: { key: 'motionVoice', def: true, type: 'bool' },
   homeBgmVolume: { key: 'homeBgmVolume', def: 0.7, type: 'num', min: 0, max: 1.5, scale: 100 },
   homeBgmMode: { key: 'homeBgmMode', def: 'repeat', values: ['repeat', 'sequence', 'shuffle'] },
   homeBgmPlaying: { key: 'homeBgmPlaying', def: true, type: 'bool' },
   homeBgmPriority: { key: 'homeBgmPriority', def: false, type: 'bool' },
-  playerName: { key: 'storyPlayerName', def: '', type: 'text', max: 16 },
+  playerName: { key: 'playerName', def: '', type: 'text', max: 16, store: 'file' },
+  letterName: { key: 'letterName', def: '', type: 'text', max: 40, store: 'file' },
+  letterEmail: { key: 'letterEmail', def: '', type: 'text', max: 120, store: 'file' },
   storyMosaic: { key: 'storyMosaic', def: false, type: 'bool' },
   stillGroupMale: { key: 'stillGroupMale', def: 1, type: 'num', min: 0, max: 1 },
   stillGroupPenis: { key: 'stillGroupPenis', def: 1, type: 'num', min: 0, max: 1 },
@@ -31,7 +33,10 @@ const DEFS = {
   exThumbCache: { key: 'exThumbCache', def: false, type: 'bool' },
 };
 
+import { saveData } from './savedata.js';
+
 const state = {};
+const isFile = (d) => d.store === 'file';
 const subs = new Set();
 let loaded = null;
 
@@ -65,13 +70,24 @@ async function load() {
   if (loaded) return loaded;
   loaded = (async () => {
     for (const [n, d] of Object.entries(DEFS)) state[n] = d.def;
+    const entries = Object.entries(DEFS);
     try {
-      const o = await chrome.storage.local.get(Object.values(DEFS).map((d) => d.key));
-      for (const [n, d] of Object.entries(DEFS)) state[n] = coerce(d, o[d.key]);
+      const o = await chrome.storage.local.get(entries.filter(([, d]) => !isFile(d)).map(([, d]) => d.key));
+      for (const [n, d] of entries) if (!isFile(d)) state[n] = coerce(d, o[d.key]);
     } catch (e) {}
+    await loadFilePrefs();
     return state;
   })();
   return loaded;
+}
+
+async function loadFilePrefs() {
+  try {
+    const o = await saveData.loadPrefs();
+    for (const [n, d] of Object.entries(DEFS)) if (isFile(d)) state[n] = coerce(d, o[d.key]);
+  } catch (e) {}
+  for (const [n, d] of Object.entries(DEFS)) if (isFile(d)) notify(n);
+  return state;
 }
 
 const get = (name) => (name in state ? state[name] : DEFS[name] && DEFS[name].def);
@@ -83,7 +99,8 @@ function set(name, value) {
   if (state[name] === v) return;
   state[name] = v;
   try {
-    chrome.storage.local.set({ [d.key]: v });
+    if (isFile(d)) saveData.savePrefs({ [d.key]: v });
+    else chrome.storage.local.set({ [d.key]: v });
   } catch (e) {}
   notify(name);
 }
@@ -108,6 +125,7 @@ function bind(el, name) {
 
 export const settings = {
   load,
+  loadFilePrefs,
   get,
   set,
   bind,

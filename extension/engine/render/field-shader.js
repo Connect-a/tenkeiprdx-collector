@@ -1,8 +1,7 @@
 import { FIELD_SHADERS } from './shaders/field-shaders.js';
 
 let disabled = false;
-export const fieldShadersDisabled = () => disabled;
-export const disableFieldShaders = () => (disabled = true);
+const GAME_NEAR = 0.3;
 export const hasFieldShader = (name) => !disabled && !!FIELD_SHADERS[String(name || '')];
 
 export function noteShaderError(gl, program, vs) {
@@ -44,7 +43,7 @@ const GLOBAL_INIT = {
   hlslcc_mtx4x4_MainLightWorldToShadow: () => new Float32Array(80),
 };
 
-const SHADOW_SAMPLERS = ['hlslcc_zcmp_MainLightShadowmapTexture', '_MainLightShadowmapTexture'];
+const SHADOW_SAMPLERS = new Set(['hlslcc_zcmp_MainLightShadowmapTexture', '_MainLightShadowmapTexture']);
 
 function propValue(T, mat, p) {
   const floats = (mat && mat.allFloats) || {};
@@ -84,20 +83,30 @@ const CHAR_SHADOW_FN =
   '  return mix(1.0, texture(tpCharShadowMap, c.xyz), tpCharShadowStrength);\n' +
   '}\n';
 
+const TO_LINEAR_FN = 'uniform float uTpEncode;\n' + 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
+
+const wrapCache = new Map();
+
 function wrapOutput(frag, fog, charShadow) {
-  if (!fog && !charShadow) return frag;
   if (!/\bvoid\s+main\s*\(\s*\)/.test(frag) || !/\bSV_Target0\b/.test(frag)) return frag;
+  const key = (fog ? 1 : 0) | (charShadow ? 2 : 0);
+  let byKey = wrapCache.get(frag);
+  if (byKey && byKey.has(key)) return byKey.get(key);
+  if (!byKey) wrapCache.set(frag, (byKey = new Map()));
   const body = frag.replace(/\bvoid\s+main\s*\(\s*\)/, 'void tpUnityMain()');
-  return (
+  const out =
     body +
     '\n' +
     (fog ? FOG_FN : '') +
     (charShadow ? CHAR_SHADOW_FN : '') +
+    TO_LINEAR_FN +
     'void main(){tpUnityMain();' +
     (charShadow ? 'SV_Target0.rgb=SV_Target0.rgb*tpCharShadow();' : '') +
     (fog ? 'SV_Target0.rgb=tpMixFog(SV_Target0.rgb);' : '') +
-    '}\n'
-  );
+    'SV_Target0.rgb=mix(SV_Target0.rgb, tpToLinear(SV_Target0.rgb), uTpEncode);' +
+    '}\n';
+  byKey.set(key, out);
+  return out;
 }
 
 function addVaryings(vert, fog, charShadow) {
@@ -141,7 +150,7 @@ export function makeFieldMaterial(T, shaderName, mat, deps) {
       uniforms[s] = { value: (deps.cube && deps.cube(s)) || null };
       continue;
     }
-    if (SHADOW_SAMPLERS.includes(s)) {
+    if (SHADOW_SAMPLERS.has(s)) {
       uniforms[s] = { value: null };
       needScene.push(s);
       continue;
@@ -179,6 +188,8 @@ export function makeFieldMaterial(T, shaderName, mat, deps) {
     uniforms.tpCharShadowMatrix = { value: new T.Matrix4() };
     uniforms.tpCharShadowStrength = { value: 0 };
   }
+  uniforms.uTpEncode = { value: 1 };
+  if (deps.rtUniforms) deps.rtUniforms.push(uniforms);
   const lm = uniforms.unity_Lightmap && uniforms.unity_Lightmap.value;
   const m = new T.RawShaderMaterial({
     glslVersion: T.GLSL3,
@@ -195,37 +206,77 @@ export function makeFieldMaterial(T, shaderName, mat, deps) {
   return m;
 }
 
+const SHARED = {
+  _TimeParameters: [0, 0, 0, 0],
+  _ProjectionParams: [0, 0, 0, 0],
+  _ZBufferParams: [0, 0, 0, 0],
+  _ScaledScreenParams: [0, 0, 0, 0],
+  _ScreenParams: [0, 0, 0, 0],
+  _WorldSpaceCameraPos: [0, 0, 0],
+  hlslcc_mtx4x4unity_MatrixV: null,
+  hlslcc_mtx4x4unity_MatrixInvV: null,
+  hlslcc_mtx4x4unity_MatrixVP: null,
+  hlslcc_mtx4x4unity_MatrixInvVP: null,
+  hlslcc_mtx4x4unity_MatrixP: null,
+  hlslcc_mtx4x4_MainLightWorldToShadow: new Float32Array(80),
+  _MainLightShadowmapSize: [0, 0, 0, 0],
+};
+const _vp = { m: null, invVP: null, invV: null };
+const set4 = (a, x, y, z, w) => {
+  a[0] = x;
+  a[1] = y;
+  a[2] = z;
+  a[3] = w;
+};
+
+export function seedFieldShadowSamplers(mats, shadow) {
+  const shadowMap = shadow && shadow.map ? shadow.map.depthTexture : null;
+  for (const m of mats) {
+    const u = m.uniforms;
+    for (const s of m.userData.fieldScene || []) if (SHADOW_SAMPLERS.has(s) && u[s]) u[s].value = shadowMap;
+  }
+}
+
 export function updateFieldUniforms(mats, T, ctx) {
   const { camera, time, width, height, opaque, depth, shadow, charShadow } = ctx;
   const shadowMap = shadow && shadow.map ? shadow.map.depthTexture : null;
   const shadowRows = shadow && shadow.matrix ? shadow.matrix.elements : null;
-  const vp = new T.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-  const invVP = new T.Matrix4().copy(vp).invert();
-  const invV = new T.Matrix4().copy(camera.matrixWorldInverse).invert();
+  if (!_vp.m) {
+    _vp.m = new T.Matrix4();
+    _vp.invVP = new T.Matrix4();
+    _vp.invV = new T.Matrix4();
+  }
+  const vp = _vp.m.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  const invVP = _vp.invVP.copy(vp).invert();
+  const invV = _vp.invV.copy(camera.matrixWorldInverse).invert();
   const near = camera.near;
   const far = camera.far;
+
+  set4(SHARED._TimeParameters, time, Math.sin(time), Math.cos(time), 0);
+  set4(SHARED._ProjectionParams, 1, near, far, 1 / far);
+  set4(SHARED._ZBufferParams, 1 - far / near, far / near, (1 - far / near) / far, far / near / far);
+  set4(SHARED._ScaledScreenParams, width, height, 1 + 1 / width, 1 + 1 / height);
+  set4(SHARED._ScreenParams, width, height, 1 + 1 / width, 1 + 1 / height);
+  SHARED._WorldSpaceCameraPos[0] = camera.position.x;
+  SHARED._WorldSpaceCameraPos[1] = camera.position.y;
+  SHARED._WorldSpaceCameraPos[2] = camera.position.z;
+  SHARED.hlslcc_mtx4x4unity_MatrixV = cols(camera.matrixWorldInverse);
+  SHARED.hlslcc_mtx4x4unity_MatrixInvV = cols(invV);
+  SHARED.hlslcc_mtx4x4unity_MatrixVP = cols(vp);
+  SHARED.hlslcc_mtx4x4unity_MatrixInvVP = cols(invVP);
+  SHARED.hlslcc_mtx4x4unity_MatrixP = cols(camera.projectionMatrix);
+  if (shadowRows) SHARED.hlslcc_mtx4x4_MainLightWorldToShadow.set(shadowRows.subarray ? shadowRows.subarray(0, 16) : shadowRows.slice(0, 16), 0);
+  if (shadow && shadow.mapSize) set4(SHARED._MainLightShadowmapSize, 1 / shadow.mapSize.x, 1 / shadow.mapSize.y, shadow.mapSize.x, shadow.mapSize.y);
+
   for (const m of mats) {
     const u = m.uniforms;
     for (const name of m.userData.fieldGlobals || []) {
       const slot = u[name];
       if (!slot) continue;
-      if (name === '_TimeParameters') slot.value = [time, Math.sin(time), Math.cos(time), 0];
-      else if (name === '_ProjectionParams') slot.value = [1, near, far, 1 / far];
-      else if (name === '_ZBufferParams') slot.value = [1 - far / near, far / near, (1 - far / near) / far, far / near / far];
-      else if (name === '_ScaledScreenParams' || name === '_ScreenParams') slot.value = [width, height, 1 + 1 / width, 1 + 1 / height];
-      else if (name === '_WorldSpaceCameraPos') slot.value = [camera.position.x, camera.position.y, camera.position.z];
-      else if (name === 'hlslcc_mtx4x4unity_MatrixV') slot.value = cols(camera.matrixWorldInverse);
-      else if (name === 'hlslcc_mtx4x4unity_MatrixInvV') slot.value = cols(invV);
-      else if (name === 'hlslcc_mtx4x4unity_MatrixVP') slot.value = cols(vp);
-      else if (name === 'hlslcc_mtx4x4unity_MatrixInvVP') slot.value = cols(invVP);
-      else if (name === 'hlslcc_mtx4x4unity_MatrixP') slot.value = cols(camera.projectionMatrix);
-      else if (name === 'hlslcc_mtx4x4_MainLightWorldToShadow' && shadowRows) {
-        const a = slot.value.length === 80 ? slot.value : new Float32Array(80);
-        a.set(shadowRows.subarray ? shadowRows.subarray(0, 16) : shadowRows.slice(0, 16), 0);
-        slot.value = a;
-      } else if (name === '_MainLightShadowmapSize' && shadow && shadow.mapSize) slot.value = [1 / shadow.mapSize.x, 1 / shadow.mapSize.y, shadow.mapSize.x, shadow.mapSize.y];
+      const v = SHARED[name];
+      if (v && slot.value !== v) slot.value = v;
     }
-    if (u.tpFogControl) u.tpFogControl.value = [u.tpFogControl.value[0], near, 0, 0];
+    if (u.tpFogControl) u.tpFogControl.value[1] = GAME_NEAR;
     if (u.tpCharShadowMap) {
       const on = !!(charShadow && charShadow.map && charShadow.strength > 0);
       u.tpCharShadowMap.value = charShadow && charShadow.map ? charShadow.map : null;
@@ -235,7 +286,7 @@ export function updateFieldUniforms(mats, T, ctx) {
     for (const s of m.userData.fieldScene || []) {
       if (s === '_CameraOpaqueTexture' && u[s]) u[s].value = opaque;
       if (s === '_CameraDepthTexture' && u[s]) u[s].value = depth;
-      if (SHADOW_SAMPLERS.includes(s) && u[s]) u[s].value = shadowMap;
+      if (SHADOW_SAMPLERS.has(s) && u[s]) u[s].value = shadowMap;
     }
   }
 }
