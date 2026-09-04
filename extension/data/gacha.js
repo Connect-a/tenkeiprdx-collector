@@ -1,7 +1,7 @@
+import { SHARED_FILE } from '../core/assetpath/placement.js';
 import { ensureIndexes } from './index-store.js';
 import { resolveOrigin } from './origin.js';
 
-const STATICS_DIR = 'statics';
 const VIDEO_DIR = 'InGameStatics/VideoFiles';
 const DDS_DIR = 'InGameStatics/Gacha/DDS';
 
@@ -13,7 +13,7 @@ const expand = (spec) =>
   });
 const OLD_GACHA = expand('1001,1002,1004,1005,2030-2033,3020,3021,3024-3027,3029-3032,3035-3049,4011-4014,6018-6020,6025-6027,7001');
 
-export const GACHA_MISSING = {
+const GACHA_MISSING = {
   video: OLD_GACHA,
   banner: [],
   foreground: OLD_GACHA,
@@ -22,12 +22,12 @@ export const GACHA_MISSING = {
   ticket: ['1040028', '1040096', '1040137', '1040141', '1040158', '1040189', '1040207', '1040220', '1040228', '1040280', '1040281', '1040306', '1040328', '1040329', '104000211'],
 };
 
-export const GACHA_ONLY = {
+const GACHA_ONLY = {
   stamp: ['1001', '1005', '2030', '2033', '13050', '13057'],
   stampTitle: ['1001', '1005', '2030', '2033', '13050', '13057'],
 };
 
-export const GACHA_KINDS = [
+const GACHA_KINDS = [
   { key: 'video', label: '演出動画', ext: 'mp4', sub: (id) => `${VIDEO_DIR}/Gacha_${id}.mp4`, file: (id) => `Gacha_${id}.mp4` },
   { key: 'banner', label: 'バナー', ext: 'dds', sub: (id) => `${DDS_DIR}/banner_${id}.dds`, file: (id) => `banner_${id}.dds` },
   { key: 'foreground', label: '前景', ext: 'dds', sub: (id) => `${DDS_DIR}/foreground_${id}.dds`, file: (id) => `foreground_${id}.dds` },
@@ -39,7 +39,7 @@ export const GACHA_KINDS = [
 export const KIND_BY_KEY = new Map(GACHA_KINDS.map((k) => [k.key, k]));
 const TICKET_ITEM_TYPE = 4;
 
-export async function gachaIds() {
+async function gachaIds() {
   const x = await ensureIndexes();
   const ids = new Set();
   for (const rel of x.assets.gachaBgRels || []) {
@@ -50,7 +50,7 @@ export async function gachaIds() {
   return [...ids].sort((a, b) => Number(a) - Number(b));
 }
 
-export async function gachaTicketIds() {
+async function gachaTicketIds() {
   const x = await ensureIndexes();
   const out = new Map();
   for (const it of x.master.itemMaster || []) if (Number(it.itemType) === TICKET_ITEM_TYPE) out.set(String(it.id), it.name || String(it.id));
@@ -85,7 +85,7 @@ export async function gachaFileList() {
       name,
       sub,
       file: kind.file(id),
-      path: `${STATICS_DIR}/${kind.file(id)}`,
+      path: SHARED_FILE.statics(kind.file(id)),
       url: base ? `${base}/${sub}` : null,
     });
   };
@@ -95,5 +95,3 @@ export async function gachaFileList() {
   }
   return out;
 }
-
-export const gachaData = { GACHA_KINDS, GACHA_MISSING, GACHA_ONLY, KIND_BY_KEY, gachaIds, gachaTicketIds, gachaFileList };

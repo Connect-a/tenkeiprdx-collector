@@ -69,38 +69,38 @@ const DOKIDOKI = {
 const SENNEN = {
   2200104: {
     2: [
-      { content: '着物、似合ってるね', sceneMasterId: '901801', order: 0 },
-      { content: 'その履き物、変わってるね', sceneMasterId: '901802', order: 1 },
+      { content: '「そのきもの似合ってるな」', sceneMasterId: '901801', order: 1 },
+      { content: '「そのはきもの似合ってるな」', sceneMasterId: '901802', order: 2 },
     ],
   },
   2200110: {
     3: [
-      { content: '月はどうだった？', sceneMasterId: '901805', order: 0 },
-      { content: 'ウサちゃんズのこと', sceneMasterId: '901806', order: 1 },
+      { content: '「月ウサギってかわいいよな」', sceneMasterId: '901805', order: 1 },
+      { content: '「ウサちゃんズってかわいいな」', sceneMasterId: '901806', order: 2 },
     ],
   },
   2200204: {
     4: [
-      { content: 'この子はいつ現れた？', sceneMasterId: '901808', order: 0 },
-      { content: '最初に会ったのはいつ？', sceneMasterId: '901809', order: 1 },
+      { content: '「おまえと会ったのはいつだっけ？」', sceneMasterId: '901808', order: 1 },
+      { content: '「最初に会ったのはいつだっけ？」', sceneMasterId: '901809', order: 2 },
     ],
   },
   2200212: {
     5: [
-      { content: 'パンツのこと', sceneMasterId: '901810', order: 0 },
-      { content: 'ブラのこと', sceneMasterId: '901811', order: 1 },
+      { content: '「パンティーパンティー」', sceneMasterId: '901810', order: 1 },
+      { content: '「ブラジャーブラジャー」', sceneMasterId: '901811', order: 2 },
     ],
   },
   2200312: {
     6: [
-      { content: 'ヤヤ', sceneMasterId: '901812', order: 0 },
-      { content: '鏡界のヤヤ', sceneMasterId: '901813', order: 1 },
+      { content: 'ヤヤ', sceneMasterId: '901812', order: 1 },
+      { content: '鏡界から来たヤヤ', sceneMasterId: '901813', order: 2 },
     ],
   },
   2200315: {
     7: [
-      { content: 'お餅、まだある？', sceneMasterId: '901814', order: 0 },
-      { content: 'おもちゃで遊ぶ？', sceneMasterId: '901815', order: 1 },
+      { content: 'おもち？', sceneMasterId: '901814', order: 1 },
+      { content: 'おもちゃ？', sceneMasterId: '901815', order: 2 },
     ],
   },
 };

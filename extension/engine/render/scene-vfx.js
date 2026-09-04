@@ -621,7 +621,7 @@ function createSceneVfx(bytes, opt) {
   const psByObjPid = new Map();
   for (const sys of data.systems) {
     if ((sys.renderMode | 0) === 5) continue;
-    if (gateHidden(sys.path) || goHidden(sys)) continue; // never-active / m_IsActive=false は描かない
+    if (gateHidden(sys.path) || goHidden(sys)) continue;
     if (isLocalMesh(sys)) {
       try {
         const cm = makeLocalQuad(sys, texByMatPid);

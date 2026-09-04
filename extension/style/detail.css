@@ -214,12 +214,6 @@
   color: #8a84a0;
 }
 
-.dlsub {
-  margin: 2px 0 8px 76px;
-  font-size: 11.5px;
-  color: #8a84a0;
-}
-
 .dlbar.err {
   border-color: #d64c6c;
   background: #3a2530;
@@ -401,10 +395,6 @@
   white-space: nowrap;
 }
 
-.bulktable .bk-meta {
-  white-space: nowrap;
-}
-
 .bulktable tr.done .bk-name {
   color: #8fe0a6;
 }
@@ -418,22 +408,6 @@
 }
 
 .bulktable tr.skipped .bk-name {
-  color: #8a84a3;
-}
-
-.bulktable .bk-meta.ok {
-  color: #8fe0a6;
-}
-
-.bulktable .bk-meta.bad {
-  color: #ff9db0;
-}
-
-.bulktable .bk-meta.warn {
-  color: #f0c579;
-}
-
-.bulktable .bk-meta.skip {
   color: #8a84a3;
 }
 

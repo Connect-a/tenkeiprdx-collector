@@ -3,7 +3,7 @@ import { assetStore } from '../../data/asset-store.js';
 import { texCodec } from '../../unity/texcodec.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { unityDecode } from '../../unity/decode.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
 import { ensureIndexes } from '../../data/index-store.js';
 const cache = new Map();
 
@@ -28,7 +28,7 @@ function decodeAtlas(parsed, bytes) {
       } catch (e) {}
     }
   }
-  const t = MESH_MOD && MESH_MOD.decodeTextureRgba(bytes, parsed);
+  const t = MESH_MOD && MESH_MOD.decodeLargestTextureRgba(bytes, parsed);
   return t && t.rgba ? { meta: meta, rgba: t.rgba, TW: t.width, TH: t.height } : null;
 }
 

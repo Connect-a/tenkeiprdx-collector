@@ -1,17 +1,19 @@
 import { collectionRepository } from '../../data/collection.js';
-import { episodeCounts, questSort } from '../../data/character-meta.js';
-import { XPOS_CATEGORIES } from '../../core/constants.js';
+import { rosterState } from '../../data/roster-state.js';
+import { XPOS_CATEGORIES } from '../../data/master-labels.js';
 import { settings } from '../../core/settings.js';
 import { getById, el, append } from '../../core/dom.js';
+import { createRevealer } from '../../core/visibility.js';
 import { playerState } from '../runtime/player-state.js';
+import { loadRosterPrefs, rememberRosterPref as remember, characterComparer, rosterQuery } from '../runtime/roster-prefs.js';
 import { TYPE_LABEL, spinnerHtml, kanaKey } from '../ui/ui-format.js';
 import { toast } from '../ui/notifier.js';
 import { navTo } from '../runtime/router-controller.js';
 import { buildOnboard } from './onboarding-ui.js';
-import { getOtherPanel, getHomePanel, getItemPanel, getOther2dPanel, getMonsterPanel } from '../runtime/panel-state.js';
-import { focusTarget } from './roster-view.js';
+import { getPanel, focusPanelTarget } from '../runtime/panel-state.js';
 import { hideRosterControls, groupHeading } from '../ui/panel-shell.js';
 import { renderExScenes, resetExScenes, setThumbCache } from './exscene-view.js';
+import { indexReady } from '../../data/index-store.js';
 
 const GROUP_ORDER = ['リーニャ', 'テーセツ', 'ジャハラ', 'クォンツィ', 'ジェネラス', 'ペイシェ', 'ヒューム', 'アンノウン'];
 const RANK_ORDER = ['UR', 'S', 'A', 'B'];
@@ -21,7 +23,6 @@ let renderSeq = 0;
 const VERIFY_CONC = 8;
 const verified = new Set();
 const queue = [];
-let observer = null;
 let draining = false;
 
 async function verifyOne(folderKey) {
@@ -45,24 +46,21 @@ async function drainQueue() {
   draining = false;
 }
 
+const cardReveal = createRevealer({
+  onReveal: (node) => {
+    const fk = node.dataset.fk;
+    if (!fk || verified.has(fk)) return;
+    verified.add(fk);
+    queue.push(fk);
+  },
+  onBatch: () => {
+    if (queue.length) drainQueue();
+  },
+});
+
 function watchCards(grid) {
-  if (observer) observer.disconnect();
-  if (typeof IntersectionObserver !== 'function') return;
-  observer = new IntersectionObserver(
-    (entries) => {
-      for (const en of entries) {
-        if (!en.isIntersecting) continue;
-        observer.unobserve(en.target);
-        const fk = en.target.dataset.fk;
-        if (!fk || verified.has(fk)) continue;
-        verified.add(fk);
-        queue.push(fk);
-      }
-      if (queue.length) drainQueue();
-    },
-    { rootMargin: '200px' },
-  );
-  for (const card of grid.querySelectorAll('.rcard')) if (!verified.has(card.dataset.fk)) observer.observe(card);
+  cardReveal.reset();
+  cardReveal.watchAll([...grid.querySelectorAll('.rcard')].filter((card) => !verified.has(card.dataset.fk)));
 }
 
 function fillSelect({ selId, field, order, allLabel, current, onChange }) {
@@ -81,39 +79,13 @@ function fillSelect({ selId, field, order, allLabel, current, onChange }) {
   if (sel.value !== current) onChange(sel.value);
 }
 
-const BWH_INDEX = { b: 0, w: 1, h: 2 };
-
-const PREF_KEYS = ['rosterOwn', 'rosterGroup', 'rosterRank', 'rosterSort', 'rosterSortAsc', 'rosterXpos', 'exMode', 'exFavOnly'];
-
 export function restoreRosterPrefs() {
-  for (const k of PREF_KEYS) playerState[k] = settings.get(k);
+  loadRosterPrefs();
   const search = getById('rosterSearch');
-  if (search) search.value = settings.get('rosterSearch') || '';
+  if (search) search.value = playerState.rosterSearch || '';
   const own = getById('rosterOwn');
   if (own) own.querySelectorAll('.rf').forEach((b) => b.classList.toggle('active', b.dataset.rosterOwn === playerState.rosterOwn));
   setThumbCache(settings.get('exThumbCache'));
-}
-
-const remember = (name, value) => {
-  playerState[name] = value;
-  settings.set(name, value);
-};
-
-export function characterComparer(byName) {
-  const dir = playerState.rosterSortAsc ? 1 : -1;
-  const key = playerState.rosterSort;
-  if (key === 'id') return (a, b) => dir * (Number(a.folderKey) - Number(b.folderKey));
-  const i = BWH_INDEX[key];
-  if (i != null)
-    return (a, b) => {
-      const av = a.bwh ? a.bwh[i] : null;
-      const bv = b.bwh ? b.bwh[i] : null;
-      if (av == null && bv == null) return byName(a, b);
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      return dir * (av - bv) || byName(a, b);
-    };
-  return (a, b) => dir * byName(a, b);
 }
 
 function buildExModeControls() {
@@ -214,8 +186,8 @@ export async function renderRoster(opts) {
   }
   const seq = ++renderSeq;
   const stale = () => seq !== renderSeq;
-  const otherPanel = getOtherPanel();
-  const homePanel = getHomePanel();
+  const otherPanel = getPanel('other');
+  const homePanel = getPanel('home');
 
   if (playerState.rosterKind !== 'character' || !playerState.exMode) {
     resetExScenes();
@@ -223,20 +195,20 @@ export async function renderRoster(opts) {
   }
 
   if (otherPanel && playerState.rosterKind !== 'other') otherPanel.reset();
-  const o2 = getOther2dPanel();
+  const o2 = getPanel('other2d');
   if (o2 && playerState.rosterKind !== 'other2d') o2.reset();
-  const ep = getMonsterPanel();
+  const ep = getPanel('monster');
   if (ep && playerState.rosterKind !== 'monster') ep.reset();
   if (playerState.rosterKind === 'home') {
     if (homePanel) {
-      await homePanel.renderHome();
+      await homePanel.render();
       if (stale()) return;
-      focusTarget(homePanel, target);
+      focusPanelTarget(homePanel, target);
     }
     return;
   }
   if (playerState.rosterKind === 'item') {
-    const itemPanel = getItemPanel();
+    const itemPanel = getPanel('item');
     if (itemPanel) await itemPanel.render();
     return;
   }
@@ -244,7 +216,7 @@ export async function renderRoster(opts) {
     if (ep) {
       await ep.render();
       if (stale()) return;
-      focusTarget(ep, target);
+      focusPanelTarget(ep, target);
     }
     return;
   }
@@ -255,9 +227,9 @@ export async function renderRoster(opts) {
   if (playerState.rosterKind === 'other') {
     hideRosterControls();
     if (otherPanel) {
-      await otherPanel.renderList(getById('rosterGrid'));
+      await otherPanel.render(getById('rosterGrid'));
       if (stale()) return;
-      focusTarget(otherPanel, target);
+      focusPanelTarget(otherPanel, target);
     } else {
       getById('rosterGrid').innerHTML = '';
     }
@@ -282,7 +254,7 @@ export async function renderRoster(opts) {
 
   let hasIndex = false;
   try {
-    hasIndex = await collectionRepository.indexReady();
+    hasIndex = await indexReady();
   } catch (e) {}
   if (stale()) return;
 
@@ -353,12 +325,12 @@ export async function rosterModel() {
   } catch (e) {
     items = [];
   }
-  const f = (getById('rosterSearch').value || '').trim();
+  const f = rosterQuery();
   const fk = kanaKey(f);
   const byName = (a, b) => (a.displayName > b.displayName ? 1 : -1);
   const matchSearch = (it) => !f || kanaKey(it.displayName).includes(fk) || String(it.folderKey).includes(f);
 
-  const summaryOf = (all) => `${all.filter((x) => episodeCounts.availableCount(x) > 0).length} / ${all.length}`;
+  const summaryOf = (all) => `${all.filter((x) => rosterState.availableCount(x) > 0).length} / ${all.length}`;
 
   if (rosterKind === 'character') {
     const full = [];
@@ -370,8 +342,8 @@ export async function rosterModel() {
       if (playerState.rosterOwn === 'owned' && !it.owned) continue;
       if (playerState.rosterOwn === 'unowned' && it.owned) continue;
       if (!matchSearch(it)) continue;
-      if (!it.owned) (episodeCounts.distOnly(it) ? full : unowned).push(it);
-      else if (episodeCounts.storyFull(it)) full.push(it);
+      if (!it.owned) (rosterState.distOnly(it) ? full : unowned).push(it);
+      else if (rosterState.storyFull(it)) full.push(it);
       else partial.push(it);
     }
     const cmp = characterComparer(byName);
@@ -405,14 +377,14 @@ export async function rosterModel() {
     };
   }
 
-  const byOrder = questSort.byQuestId((x) => x.folderKey);
+  const byOrder = rosterState.byQuestId((x) => x.folderKey);
   const done = [];
   const progress = [];
   const locked = [];
   for (const it of items) {
     if (!matchSearch(it)) continue;
-    const avail = episodeCounts.availableCount(it);
-    (episodeCounts.storyFull(it) ? done : avail > 0 ? progress : locked).push(it);
+    const avail = rosterState.availableCount(it);
+    (rosterState.storyFull(it) ? done : avail > 0 ? progress : locked).push(it);
   }
   done.sort(byOrder);
   progress.sort(byOrder);
@@ -457,8 +429,8 @@ function cardVM(it, opts) {
   const isQuest = kind === 'main' || kind === 'event';
   const isSpecial = kind === 'special';
   const c = it.counts;
-  const avail = episodeCounts.availableCount(it);
-  const storyFull = episodeCounts.storyFull(it);
+  const avail = rosterState.availableCount(it);
+  const storyFull = rosterState.storyFull(it);
   let name = it.displayName;
   if (opts.trim && name.startsWith(opts.trim)) name = name.slice(opts.trim.length).trim();
   if (opts.suffix) name += '　' + opts.suffix;
@@ -468,7 +440,7 @@ function cardVM(it, opts) {
     name,
     active: isCharacter ? !!it.owned : isSpecial ? !!it.hasDownload || avail > 0 : avail > 0,
     full: (isCharacter || isQuest) && storyFull,
-    byDist: !episodeCounts.allOpen(it) && episodeCounts.distFull(it),
+    byDist: !rosterState.allOpen(it) && rosterState.distFull(it),
     hasDownload: !!it.hasDownload,
     partial: !!it.hasDownload && (c.have || 0) < (c.open || 0),
     status: isCharacter ? (it.level != null ? `Lv${it.level}` : '未所持') : isQuest ? (storyFull ? '全クリア' : c.open > 0 ? `${c.open}話クリア` : '未クリア') : avail > 0 ? '解放済み' : '未解放',
@@ -505,14 +477,18 @@ function rcard(vm) {
 }
 
 export async function updateCard(folderKey) {
+  if (!playerState.rosterOpen) return;
+  const grid = getById('rosterGrid');
+  if (!grid) return;
+  const old = grid.querySelector(`.rcard[data-fk="${CSS.escape(String(folderKey))}"]`);
+  if (!old) return;
+  let item = null;
   try {
-    if (!playerState.rosterOpen) return;
-    const grid = getById('rosterGrid');
-    if (!grid) return;
-    const old = grid.querySelector(`.rcard[data-fk="${CSS.escape(String(folderKey))}"]`);
-    if (!old) return;
-    const item = await collectionRepository.buildRosterItemFor(String(folderKey), { dl: playerState.dl, distSet: playerState.binlistScenes });
-    if (!item || item.rosterKind !== playerState.rosterKind) return;
-    old.replaceWith(rcard(cardVM(item, {})));
-  } catch (e) {}
+    item = await collectionRepository.buildRosterItemFor(String(folderKey), { dl: playerState.dl, distSet: playerState.binlistScenes });
+  } catch (e) {
+    console.warn('[tp] カードを更新できませんでした', folderKey, e);
+    return;
+  }
+  if (!item || item.rosterKind !== playerState.rosterKind) return;
+  old.replaceWith(rcard(cardVM(item, {})));
 }

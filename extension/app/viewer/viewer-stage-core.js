@@ -54,6 +54,7 @@ export function createStageCore(hostEl, deps) {
       items.set(key, token);
       const entry = core.entryOf(key);
       core.busy(true, `${(entry && entry.displayName) || '#' + key} を読み込み中…`);
+      core.note('');
       try {
         const it = await impl.create(key, entry, state.get(key));
         if (!it) {

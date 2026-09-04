@@ -1,5 +1,5 @@
 import { downloadRunner } from './download-runner.js';
-import { SK } from '../../core/constants.js';
+import { SK } from '../../core/storage-keys.js';
 import { failureReport, failureSummary, hasFailures } from '../../core/failure-report.js';
 import { bgTimeout } from '../../core/bgtimer.js';
 const STATE_KEY = SK.bulkState;

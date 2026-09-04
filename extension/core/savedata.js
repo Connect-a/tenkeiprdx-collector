@@ -1,7 +1,8 @@
 import { fileStore } from './fsdir.js';
-import { DIRS } from './constants.js';
+import { DIRS } from './dirs.js';
 
 const SCENES_SUB = 'scenes';
+const PREFS_PATH = 'settings.json';
 const FILE_RE = /^[^\\/:*?"<>|\x00-\x1f ]{1,60}$/;
 const nameOk = (n) => FILE_RE.test(String(n || '')) && !/^\.+$/.test(String(n));
 
@@ -13,7 +14,7 @@ async function dir(create) {
   }
 }
 
-export async function readJson(path) {
+async function readJson(path) {
   const d = await dir(false);
   if (!d) return null;
   try {
@@ -25,7 +26,7 @@ export async function readJson(path) {
   }
 }
 
-export async function writeJson(path, value) {
+async function writeJson(path, value) {
   const d = await dir(true);
   if (!d) return false;
   try {
@@ -36,7 +37,7 @@ export async function writeJson(path, value) {
   }
 }
 
-export async function removeJson(path) {
+async function removeJson(path) {
   const d = await dir(false);
   if (!d) return false;
   try {
@@ -49,7 +50,7 @@ export async function removeJson(path) {
 
 const scenePath = (name) => `${SCENES_SUB}/${name}.json`;
 
-export async function listScenes() {
+async function listScenes() {
   const d = await dir(false);
   if (!d) return [];
   try {
@@ -62,13 +63,13 @@ export async function listScenes() {
   }
 }
 
-export const loadScene = (name) => (nameOk(name) ? readJson(scenePath(name)) : Promise.resolve(null));
-export const saveScene = (name, value) => (nameOk(name) ? writeJson(scenePath(name), value) : Promise.resolve(false));
-export const deleteScene = (name) => (nameOk(name) ? removeJson(scenePath(name)) : Promise.resolve(false));
+const loadScene = (name) => (nameOk(name) ? readJson(scenePath(name)) : Promise.resolve(null));
+const saveScene = (name, value) => (nameOk(name) ? writeJson(scenePath(name), value) : Promise.resolve(false));
+const deleteScene = (name) => (nameOk(name) ? removeJson(scenePath(name)) : Promise.resolve(false));
 
 const SHOTS_SUB = 'images';
 
-export async function saveImage(name, blob) {
+async function saveImage(name, blob) {
   if (!nameOk(name)) return '';
   const d = await dir(true);
   if (!d || !blob) return '';
@@ -83,12 +84,21 @@ export async function saveImage(name, blob) {
 
 const FAV_PATH = 'favorites.json';
 
-export async function loadFavorites() {
+async function loadFavorites() {
   const v = await readJson(FAV_PATH);
   if (Array.isArray(v)) return v.map(String);
   return v && Array.isArray(v.items) ? v.items.map(String) : null;
 }
 
-export const saveFavorites = (items) => writeJson(FAV_PATH, { items: [...new Set((items || []).map(String))].sort() });
+const saveFavorites = (items) => writeJson(FAV_PATH, { items: [...new Set((items || []).map(String))].sort() });
 
-export const saveData = { readJson, writeJson, removeJson, listScenes, loadScene, saveScene, deleteScene, saveImage, loadFavorites, saveFavorites, nameOk };
+async function loadPrefs() {
+  return (await readJson(PREFS_PATH)) || {};
+}
+
+async function savePrefs(patch) {
+  const cur = (await readJson(PREFS_PATH)) || {};
+  return writeJson(PREFS_PATH, { ...cur, ...patch });
+}
+
+export const saveData = { loadPrefs, savePrefs, readJson, writeJson, removeJson, listScenes, loadScene, saveScene, deleteScene, saveImage, loadFavorites, saveFavorites, nameOk };

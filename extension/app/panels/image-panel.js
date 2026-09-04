@@ -1,19 +1,20 @@
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { loadModel3d, model3dSync, disposeModel3d, loadAura as getAuraRenderer } from '../../engine/render/lazy.js';
-import { glManager } from '../../engine/render/gl-manager.js';
+import { makeRebuildLimiter } from '../../engine/render/gl-manager.js';
 import { charAssets } from '../../data/char-assets.js';
 import { errText } from '../../core/messages.js';
-import { MOTION_VOICE, DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
+import { MOTION_VOICE } from '../../engine/render/motion-names.js';
 import { characterMeta } from '../../data/character-meta.js';
 import { voiceOut } from './voice-out.js';
-import { utilHelpers } from '../../core/util.js';
+import { cachedAudioUrl } from '../../core/audio-url.js';
 import { settings } from '../../core/settings.js';
 import { el } from '../../core/dom.js';
 import { downloadBar } from '../ui/panel-shell.js';
 import { createSkillFxView } from '../views/skillfx-view.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { buildIndexes } from '../../data/build-indexes.js';
-import { PLACE } from '../../core/placement.js';
+import { PLACE } from '../../core/assetpath/placement.js';
 
 export function createImagePanel(deps) {
   const { playerState, getById, visualRenderer, toast, spinnerHtml } = deps;
@@ -31,7 +32,7 @@ export function createImagePanel(deps) {
   let _syncSpeed = 1;
   const _skillFx = createSkillFxView();
   let _visuals = Promise.resolve();
-  const _glRebuildOk = glManager.makeRebuildLimiter(8000, 2);
+  const _glRebuildOk = makeRebuildLimiter(8000, 2);
   const onGlContextLost = () => {
     if (_glRebuildOk()) {
       render3dModel();
@@ -58,7 +59,7 @@ export function createImagePanel(deps) {
       const clips = await charAssets.extractClips(playerState.cur.handle, bundle);
       const clip = clips.find((c) => voiceNoOf(c.name) === no);
       if (!clip) return;
-      voiceOut.play(await utilHelpers.cachedAudioUrl(playerState.cur.voiceUrls, clip.name, async () => clip));
+      voiceOut.play(await cachedAudioUrl(playerState.cur.voiceUrls, clip.name, async () => clip));
     } catch (e) {}
   }
 
@@ -237,7 +238,7 @@ export function createImagePanel(deps) {
       const opts = charAssets.build3dOptions(d, playerState.cur.meta, {
         height: 560,
         costume: costumeOpt,
-        auraRenderer: auraOpt,
+        auraPicker: auraOpt,
         motionVoice: voiceOpt,
         auraBytes: auraLoaded && auraLoaded.bytes,
         auraTexMap: auraLoaded && auraLoaded.texByMatPid,

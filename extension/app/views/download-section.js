@@ -1,3 +1,4 @@
+import { SHARED_FILE } from '../../core/assetpath/placement.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { collectionRepository } from '../../data/collection.js';
 import { errText, LOW_QUALITY_INDEX, pinnedBaseStale } from '../../core/messages.js';
@@ -7,6 +8,7 @@ import { toast } from '../ui/notifier.js';
 import { refreshLists } from '../runtime/state-refresh.js';
 import { idbStore } from '../../core/idb.js';
 import { renderStorageSummary } from './storage-summary.js';
+import { ensureIndexes, indexReady, rebuildIndexes } from '../../data/index-store.js';
 
 const _busy = new Set();
 let _rows = [];
@@ -59,7 +61,7 @@ const fromStatus = (st) => ({ have: (st.have ? st.have.size : 0) + (st.haveFiles
 
 async function lowQualityRow() {
   try {
-    const idx = await collectionRepository.ensureIndexes();
+    const idx = await ensureIndexes();
     if (!idx || !idx.meta || idx.meta.altRelCount !== 0) return null;
   } catch (e) {
     return null;
@@ -119,7 +121,7 @@ const JOBS = [
     done: (r) =>
       `新規${r.got}件・既にあった分${r.skip}件` +
       (r.missing ? `・配信なし${r.missing}件` : '') +
-      (r.missList && r.missList.length ? (r.missList.length <= 20 ? `（${r.missList.join('・')}）` : '（内訳は _共有リソース/statics/_gacha_missing.json）') : '') +
+      (r.missList && r.missList.length ? (r.missList.length <= 20 ? `（${r.missList.join('・')}）` : '（内訳は _共有リソース/' + SHARED_FILE.gachaMissing + '）') : '') +
       (r.cdnDown ? '・404が続いたため中断しました（配信停止の可能性）' : '') +
       (r.failed ? `・失敗${r.failed}件` : ''),
     status: () => assetAcquirer.gachaStatus(),
@@ -205,7 +207,7 @@ function jobRow(job) {
         note.textContent = '索引を確認しています…';
         await new Promise((r) => requestAnimationFrame(r));
         try {
-          await collectionRepository.ensureIndexes((m) => {
+          await ensureIndexes((m) => {
             note.textContent = m;
           });
         } catch (e) {}
@@ -261,7 +263,7 @@ function indexRow(onBuilt, rebuild) {
       click: async () => {
         btn.disabled = true;
         try {
-          const run = rebuild ? collectionRepository.rebuildIndexes : collectionRepository.ensureIndexes;
+          const run = rebuild ? rebuildIndexes : ensureIndexes;
           await run((m) => {
             note.textContent = m;
           });
@@ -308,7 +310,7 @@ export async function refreshDownloadSection() {
   host.innerHTML = '';
   let ready = false;
   try {
-    ready = await collectionRepository.indexReady();
+    ready = await indexReady();
   } catch (e) {}
   if (!ready) {
     host.appendChild(indexRow(refreshDownloadSection));

@@ -3,20 +3,15 @@ import { collectionRepository } from '../../data/collection.js';
 import { userStateService } from '../../data/user-state.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { playerState } from './player-state.js';
-import { updateFsUi, updateStorage } from '../views/fs-ui.js';
-import { renderRoster } from '../views/roster-ui.js';
-import { refreshDownloadSection, markDownloadSectionDirty } from '../views/download-section.js';
+import { redraw } from './ui-bus.js';
+import { settings } from '../../core/settings.js';
+import { saveMasterArtifacts } from '../../data/index-store.js';
 
 let _scan = null;
 let _scanPending = false;
-let _scanAt = 0;
 
 export function pendingScan() {
   return _scan;
-}
-
-export function lastScanAt() {
-  return _scanAt;
 }
 
 export function beginScan() {
@@ -46,7 +41,6 @@ function startScan() {
     .scanFolder()
     .then((scanned) => {
       mergeScanned(scanned, startedAt);
-      _scanAt = Date.now();
     })
     .catch((e) => {
       console.error('[tp] 状態更新に失敗', e);
@@ -58,9 +52,9 @@ function startScan() {
 }
 
 async function afterScan() {
-  markDownloadSectionDirty();
-  await refreshDownloadSection();
-  if (playerState.rosterOpen) await renderRoster({ changed: ['fs'] });
+  await redraw('download-dirty');
+  await redraw('download');
+  if (playerState.rosterOpen) await redraw('roster', { changed: ['fs'] });
 }
 
 export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opts) {
@@ -71,12 +65,13 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
       playerState.fsGranted = (await fileStore.permission({ request: false })) === 'granted';
     } catch (e) {}
   }
-  updateFsUi();
+  await redraw('fs');
+  if (playerState.fsGranted) await settings.loadFilePrefs();
 
   if (parts.includes('fs')) {
     if (playerState.fsGranted) {
       try {
-        collectionRepository.saveMasterArtifacts && collectionRepository.saveMasterArtifacts();
+        saveMasterArtifacts && saveMasterArtifacts();
       } catch (e) {}
       if (deferScan) {
         let cached = null;
@@ -85,7 +80,6 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
         } catch (e) {}
         if (cached) {
           playerState.dl = cached;
-          _scanAt = 0;
           _scanPending = true;
         } else startScan().then(afterScan);
       } else {
@@ -93,7 +87,6 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
       }
     } else {
       playerState.dl = [];
-      _scanAt = 0;
     }
   }
 
@@ -115,10 +108,10 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
     }
   }
 
-  await updateStorage();
-  if (parts.includes('dl')) await refreshDownloadSection();
-  else if (parts.includes('index') || parts.includes('fs')) markDownloadSectionDirty();
-  if (playerState.rosterOpen) await renderRoster({ changed: parts });
+  await redraw('storage');
+  if (parts.includes('dl')) await redraw('download');
+  else if (parts.includes('index') || parts.includes('fs')) await redraw('download-dirty');
+  if (playerState.rosterOpen) await redraw('roster', { changed: parts });
 }
 
 export function folderHandle(folderKey) {

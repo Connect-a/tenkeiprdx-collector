@@ -1,4 +1,5 @@
 import { settings } from '../../core/settings.js';
+import { SK } from '../../core/storage-keys.js';
 import { createBgmEngine } from '../../core/bgm-engine.js';
 
 const CACHE_MAX = 6;
@@ -43,7 +44,7 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
 
   function sync() {
     if (!_sel || document.hidden) return;
-    if (settings.get('homeBgmPlaying') && audioScene.homeAudible()) {
+    if (audioScene.homeAudible()) {
       if (!engine.isPlaying()) {
         engine.play();
         startTick();
@@ -65,16 +66,21 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
     if (!path) return null;
     if (_bufs.has(path)) return _bufs.get(path);
     let buf = null;
+    let bytes = null;
     try {
-      const bytes = await readBundle(path);
-      if (bytes) {
-        let clips = [];
-        try {
-          clips = await unityDecode.extractAudioResource(bytes);
-        } catch (e) {}
-        if (clips.length) buf = await engine.decode(clips[0].data);
-      }
+      bytes = await readBundle(path);
     } catch (e) {}
+    let clips = [];
+    if (bytes) {
+      try {
+        clips = await unityDecode.extractAudioResource(bytes);
+      } catch (e) {}
+    }
+    if (clips.length) {
+      try {
+        buf = await engine.decode(clips[0].data);
+      } catch (e) {}
+    }
     _bufs.set(path, buf);
     trimCache();
     return buf;
@@ -110,7 +116,7 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
     setWant(true);
     sync();
     try {
-      await chrome.storage.local.set({ homeBgmSel: _sel });
+      await chrome.storage.local.set({ [SK.homeBgmSel]: _sel });
     } catch (e) {}
     updateWidget();
     notifyList();
@@ -348,37 +354,35 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
   }
 
   async function restore() {
-    try {
-      await settings.load();
-      settings.bind(getById('hbVolume'), 'homeBgmVolume');
-      audioScene.set({ bgmPriority: settings.get('homeBgmPriority') });
-      applyVolume();
-      const st = await chrome.storage.local.get('homeBgmSel');
-      if (!playerState.fsGranted) {
-        updateWidget();
-        return;
-      }
-      const data = await collectionRepository.homeData().catch(() => null);
-      const hs = data ? await collectionRepository.homeStatus(data).catch(() => null) : null;
-      if (hs) _downloaded = [...hs.homeBgm.values(), ...hs.otherBgm.values()].map((m) => ({ id: m.id, name: m.name, path: m.audio, intro: m.intro, icon: m.icon }));
-      if (settings.get('homeBgmMode') === 'shuffle') buildShuffle();
-      const stored = st.homeBgmSel;
-      const sel = stored ? _downloaded.find((x) => String(x.id) === String(stored.id)) || stored : null;
-      if (sel && sel.path) {
-        const gen = ++_gen;
-        const src = await load(sel);
-        if (src && gen === _gen) {
-          _sel = { id: sel.id, name: sel.name, path: sel.path, intro: sel.intro || null };
-          _hasIntro = !!src.intro;
-          engine.setTrack(src.intro, src.main);
-          applyLoop();
-          applyVolume();
-          pushWants();
-          sync();
-        }
-      }
+    await settings.load();
+    settings.bind(getById('hbVolume'), 'homeBgmVolume');
+    audioScene.set({ bgmPriority: settings.get('homeBgmPriority') });
+    applyVolume();
+    const st = await chrome.storage.local.get(SK.homeBgmSel);
+    if (!playerState.fsGranted) {
       updateWidget();
-    } catch (e) {}
+      return;
+    }
+    const data = await collectionRepository.homeData().catch(() => null);
+    const hs = data ? await collectionRepository.homeStatus(data).catch(() => null) : null;
+    if (hs) _downloaded = [...hs.homeBgm.values(), ...hs.otherBgm.values()].map((m) => ({ id: m.id, name: m.name, path: m.audio, intro: m.intro, icon: m.icon }));
+    if (settings.get('homeBgmMode') === 'shuffle') buildShuffle();
+    const stored = st.homeBgmSel;
+    const sel = stored ? _downloaded.find((x) => String(x.id) === String(stored.id)) || stored : null;
+    if (sel && sel.path) {
+      const gen = ++_gen;
+      const src = await load(sel);
+      if (src && gen === _gen) {
+        _sel = { id: sel.id, name: sel.name, path: sel.path, intro: sel.intro || null };
+        _hasIntro = !!src.intro;
+        engine.setTrack(src.intro, src.main);
+        applyLoop();
+        applyVolume();
+        pushWants();
+        sync();
+      }
+    }
+    updateWidget();
   }
 
   function bind() {

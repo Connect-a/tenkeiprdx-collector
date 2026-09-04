@@ -1,14 +1,13 @@
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
-import { assetStore } from '../../data/asset-store.js';
-import { PLACE } from '../../core/placement.js';
+import { assetStore, AREA } from '../../data/asset-store.js';
 import { loadModel3d, disposeModel3d } from '../../engine/render/lazy.js';
-import { glManager } from '../../engine/render/gl-manager.js';
+import { makeRebuildLimiter } from '../../engine/render/gl-manager.js';
 import { charAssets } from '../../data/char-assets.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { errText } from '../../core/messages.js';
 import { splitLayout, clearView, entryCard, viewHeader, downloadBar, noteRow } from '../ui/panel-shell.js';
-import { bundleName } from '../../core/paths.js';
+import { bundleName } from '../../core/assetpath/paths.js';
 import { el } from '../../core/dom.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { buildIndexes } from '../../data/build-indexes.js';
@@ -25,7 +24,7 @@ const CATEGORY = [
 export function createOtherPanel(deps) {
   const { getById, collectionRepository, fileStore, escapeHtml, navTo, spinnerHtml, toast } = deps;
   let _model3d = null;
-  const _glRebuildOk = glManager.makeRebuildLimiter(8000, 2);
+  const _glRebuildOk = makeRebuildLimiter(8000, 2);
   let _headers = {};
   let _listSig = '';
   let _ordered = [];
@@ -37,14 +36,17 @@ export function createOtherPanel(deps) {
 
   async function loadSharedFx() {
     const seen = new Map();
+    let idx = null;
     try {
-      const idx = await ensureIndexes();
-      for (const id of Object.keys(idx.master.charSkills || {})) {
-        for (const e of buildIndexes.charSkillEffects(idx.master, idx.assets, id).shared) {
-          if (e.vfxRel && !seen.has(e.effect)) seen.set(e.effect, e);
-        }
+      idx = await ensureIndexes();
+    } catch (e) {
+      console.warn('[tp] 索引を読めませんでした', e);
+    }
+    for (const id of Object.keys((idx && idx.master.charSkills) || {})) {
+      for (const e of buildIndexes.charSkillEffects(idx.master, idx.assets, id).shared) {
+        if (e.vfxRel && !seen.has(e.effect)) seen.set(e.effect, e);
       }
-    } catch (e) {}
+    }
     _fx = [...seen.values()].sort((a, b) => (a.effect > b.effect ? 1 : -1));
     _fxHave = new Set();
     if (_fx.length) {
@@ -84,7 +86,7 @@ export function createOtherPanel(deps) {
     if (h && h.scrollIntoView) setTimeout(() => h.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   }
 
-  async function renderList(grid) {
+  async function render(grid) {
     let list = [];
     try {
       list = await collectionRepository.otherList();
@@ -162,7 +164,7 @@ export function createOtherPanel(deps) {
           toast(`その他3Dを取得しました（新規${r.got}件・失敗${r.failed}件／全${r.total}件）`, r.failed ? 'err' : 'ok');
           _listSig = '';
           const grid = getById('rosterGrid');
-          if (grid) await renderList(grid);
+          if (grid) await render(grid);
         } catch (e) {
           onProgress(errText(e));
         }
@@ -242,7 +244,7 @@ export function createOtherPanel(deps) {
 
   async function grab(rel) {
     if (!rel || !fileStore) return null;
-    return assetStore.readAsset(DIRS.other, rel, PLACE.flat);
+    return assetStore.readIn(AREA.other, rel);
   }
 
   async function grabMouth(rel) {
@@ -264,5 +266,5 @@ export function createOtherPanel(deps) {
     _listSig = '';
   }
 
-  return { renderList, reset, scrollToSection };
+  return { render, reset, scrollToSection };
 }

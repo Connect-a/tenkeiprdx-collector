@@ -1,4 +1,4 @@
-import { SK } from '../core/constants.js';
+import { SK } from '../core/storage-keys.js';
 import { CFG } from '../config.js';
 
 const trim = (s) => String(s || '').replace(/\/+$/, '');

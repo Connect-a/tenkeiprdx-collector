@@ -1,42 +1,16 @@
-import { vfxParse } from './vfx-parse.js';
+import { vfxMaterials } from './vfx-materials.js';
 import { assetStore } from '../../data/asset-store.js';
-import { networkClient } from '../../data/network.js';
-import { fileStore } from '../../core/fsdir.js';
-import { CATALOG_DIR } from '../../data/index-store.js';
-import { DIRS } from '../../core/constants.js';
-import { assetUrlOn } from '../../core/paths.js';
-import * as THREE from '../../vendor/three.module.js';
+import { DIRS } from '../../core/dirs.js';
 const AURA_RE = /(vfx[a-z]*_assets_[a-z]*\/(abnorm[a-z]*aura[a-z0-9_]*)_[0-9a-f]{32}\.bundle)$/i;
 const KEY_RE = /\/(abnorm[a-z]*aura[a-z0-9_]*)_[0-9a-f]{32}\.bundle$/i;
-let _catalog = null;
 const _cache = new Map();
-const { assetRoot, fetchBytesRaw } = networkClient;
-
-async function catalog() {
-  if (_catalog) return _catalog;
-  try {
-    const dir = await fileStore.getDir(DIRS.shared, { create: false });
-    if (dir) {
-      const f = await fileStore.readUnder(dir, CATALOG_DIR + '/vfx_catalog.json');
-      if (f) {
-        _catalog = JSON.parse(await f.text());
-        return _catalog;
-      }
-    }
-  } catch (e) {}
-  const base = await assetRoot();
-  const bytes = await fetchBytesRaw(assetUrlOn(base, 'web', 'vfx_catalog.json'));
-  if (!bytes) throw new Error('vfx_catalog');
-  _catalog = JSON.parse(new TextDecoder().decode(bytes));
-  return _catalog;
-}
 
 async function list() {
   const out = [],
     seen = new Set();
   let cat;
   try {
-    cat = await catalog();
+    cat = await vfxMaterials.catalog();
   } catch (e) {
     return out;
   }
@@ -59,17 +33,9 @@ async function load(rel) {
   if (_cache.has(rel)) return _cache.get(rel);
   const bytes = await fetchBundleBytes(rel);
   let texByMatPid = null;
-  if (bytes && vfxParse && THREE) {
+  if (bytes) {
     try {
-      const key = (rel.match(KEY_RE) || [])[1];
-      const cat = await catalog();
-      const deps = vfxParse.resolveDeps(cat, new RegExp(key + '\\.prefab$', 'i')).filter((d) => d !== rel);
-      const db = [];
-      for (const d of deps) {
-        const b = await fetchBundleBytes(d);
-        if (b) db.push(b);
-      }
-      texByMatPid = vfxParse.buildMaterialMap(THREE, db);
+      texByMatPid = await vfxMaterials.forPrefab((rel.match(KEY_RE) || [])[1], rel);
     } catch (e) {}
   }
   const out = { bytes, texByMatPid };
@@ -77,4 +43,4 @@ async function load(rel) {
   return out;
 }
 
-export const auraRenderer = { catalog, list, load, AURA_RE };
+export const auraCatalog = { list, load };

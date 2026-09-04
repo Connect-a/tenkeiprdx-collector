@@ -1,10 +1,9 @@
-import { idbStore } from '../core/idb.js';
+import { SHARED_FILE } from '../core/assetpath/placement.js';
 import { unityDecode } from '../unity/decode.js';
-import { SK, DIRS } from '../core/constants.js';
+import { DIRS } from '../core/dirs.js';
 import { fileStore } from '../core/fsdir.js';
-import { utilHelpers } from '../core/util.js';
+import { num } from '../core/bytes.js';
 const { decodeUserBytes } = unityDecode;
-const { b64ToBytes, num } = utilHelpers;
 
 const errText = (e) => (e && e.message ? e.message : String(e));
 
@@ -13,31 +12,16 @@ async function parseUserState() {
   if (_userState) return _userState;
   const state = { levels: new Map(), paidUnlocked: new Set(), clearedNodes: new Set(), openEpisodes: new Set(), loaded: false, error: null };
   let bytes = null;
-  let from = '';
-  const tried = [];
+  let tried = '';
   try {
-    const b64 = await idbStore.get(SK.userRaw);
-    if (b64) {
-      bytes = b64ToBytes(b64);
-      from = 'idb';
-    }
+    const d = await fileStore.getDir(DIRS.master, { create: false });
+    const f = d && (await fileStore.readUnder(d, SHARED_FILE.user));
+    if (f) bytes = new Uint8Array(await f.arrayBuffer());
   } catch (e) {
-    tried.push('idb: ' + errText(e));
+    tried = errText(e);
   }
   if (!bytes) {
-    try {
-      const d = await fileStore.getDir(DIRS.master, { create: false });
-      const f = d && (await fileStore.readUnder(d, 'user.bin'));
-      if (f) {
-        bytes = new Uint8Array(await f.arrayBuffer());
-        from = 'file';
-      }
-    } catch (e) {
-      tried.push('file: ' + errText(e));
-    }
-  }
-  if (!bytes) {
-    state.error = { reason: 'missing', message: 'user.bin が見つかりません', detail: tried.join(' / ') };
+    state.error = { reason: 'missing', message: 'user.bin が見つかりません', detail: tried };
     return state;
   }
   try {
@@ -53,11 +37,11 @@ async function parseUserState() {
       for (const e of x) walk(e, depth + 1);
     })(decodeUserBytes(bytes), 0);
   } catch (e) {
-    state.error = { reason: 'parse', message: errText(e), detail: `from=${from} bytes=${bytes.length}` };
+    state.error = { reason: 'parse', message: errText(e), detail: `bytes=${bytes.length}` };
     return state;
   }
   if (!state.levels.size) {
-    state.error = { reason: 'empty', message: '所持キャラの情報が取り出せませんでした', detail: `from=${from} bytes=${bytes.length}` };
+    state.error = { reason: 'empty', message: '所持キャラの情報が取り出せませんでした', detail: `bytes=${bytes.length}` };
     return state;
   }
   state.loaded = true;

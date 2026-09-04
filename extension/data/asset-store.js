@@ -1,8 +1,9 @@
 import { fileStore } from '../core/fsdir.js';
-import { relKey } from '../core/paths.js';
-import { platformsFor } from '../core/asset-route.js';
-import { subFor, dirOfPrefix, fileHead } from '../core/placement.js';
-import { utilHelpers } from '../core/util.js';
+import { relKey } from '../core/assetpath/paths.js';
+import { platformsFor } from '../core/assetpath/route.js';
+import { subFor, dirOfPrefix, fileHead, PLACE } from '../core/assetpath/placement.js';
+import { DIRS } from '../core/dirs.js';
+import { pool } from '../core/async.js';
 import { networkClient } from './network.js';
 import { ensureIndexes } from './index-store.js';
 
@@ -21,7 +22,7 @@ async function altRelMap() {
 
 const diskPaths = (rel, place) => platformsFor(rel).map((platform) => ({ platform, path: subFor(place, rel, platform) }));
 
-export async function locate(dir, rel, place, opts) {
+async function locate(dir, rel, place, opts) {
   const d = await dirOf(dir, false);
   if (!d) return null;
   const checkSize = !(opts && opts.fast);
@@ -29,7 +30,7 @@ export async function locate(dir, rel, place, opts) {
   return null;
 }
 
-export async function readAsset(dir, rel, place) {
+async function readAsset(dir, rel, place) {
   const d = await dirOf(dir, false);
   if (!d) return null;
   const p = await locate(d, rel, place);
@@ -37,11 +38,11 @@ export async function readAsset(dir, rel, place) {
   return fileStore.readBytesUnder(d, p);
 }
 
-export async function hasAsset(dir, rel, place) {
+async function hasAsset(dir, rel, place) {
   return !!(await locate(dir, rel, place));
 }
 
-export function dirsFor(items) {
+function dirsFor(items) {
   const set = new Set();
   for (const it of items || []) {
     const rel = it.rel || it;
@@ -50,7 +51,7 @@ export function dirsFor(items) {
   return [...set];
 }
 
-export async function presentIds(dir, items, opts) {
+async function presentIds(dir, items, opts) {
   const nonEmpty = !!(opts && opts.nonEmpty);
   const have = new Map();
   const d = await dirOf(dir, false);
@@ -68,7 +69,7 @@ export async function presentIds(dir, items, opts) {
     }
   }
   const groups = [...byDir.entries()];
-  const listed = await utilHelpers.pool(groups, LIST_CONC, async ([sub]) => new Set(await fileStore.listUnder(d, sub, { nonEmpty })));
+  const listed = await pool(groups, LIST_CONC, async ([sub]) => new Set(await fileStore.listUnder(d, sub, { nonEmpty })));
   groups.forEach(([, list], i) => {
     for (const x of list) if (!x.row.path && listed[i].has(x.name)) x.row.path = x.path;
   });
@@ -92,7 +93,7 @@ const dirKeyOf = (d) => {
 };
 const _inflight = new Map();
 
-export async function acquireAsset(dir, rel, opts) {
+async function acquireAsset(dir, rel, opts) {
   const o = opts || {};
   const id = idOf(rel);
   if (!o.overwrite) {
@@ -121,10 +122,23 @@ export async function acquireAsset(dir, rel, opts) {
   }
 }
 
-export async function removeAsset(dir, rel, place) {
+async function removeAsset(dir, rel, place) {
   const d = await dirOf(dir, false);
   if (!d) return;
   for (const c of diskPaths(rel, place)) await fileStore.removeUnder(d, c.path);
 }
 
-export const assetStore = { dirsFor, locate, readAsset, hasAsset, presentIds, acquireAsset, removeAsset, idOf };
+export const AREA = {
+  other: { dir: DIRS.other, place: PLACE.flat },
+  monster: (item) => ({ dir: DIRS.monster, place: PLACE.owned(item) }),
+  charVisual: (handle, cat) => ({ dir: handle, place: PLACE.visual(cat) }),
+  charEpisode: (handle, episodeId, slot) => ({ dir: handle, place: PLACE.episode(episodeId, slot) }),
+};
+
+const readIn = (area, rel) => readAsset(area.dir, rel, area.place);
+const hasIn = (area, rel) => hasAsset(area.dir, rel, area.place);
+const locateIn = (area, rel, opts) => locate(area.dir, rel, area.place, opts);
+const removeIn = (area, rel) => removeAsset(area.dir, rel, area.place);
+const specIn = (area, rel) => ({ rel, place: area.place });
+
+export const assetStore = { dirsFor, locate, readAsset, hasAsset, presentIds, acquireAsset, removeAsset, idOf, readIn, hasIn, locateIn, removeIn, specIn };

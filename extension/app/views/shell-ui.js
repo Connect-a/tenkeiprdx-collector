@@ -37,13 +37,13 @@ export function applyKindTabs(rosterKind) {
   if (save) save.textContent = charOnly ? 'デコード結果を保存（画像+ボイス）…' : 'デコード結果を保存（画像）…';
 }
 
-export const defaultSection = (rosterKind) => (rosterKind === 'character' ? 'image' : 'story');
-
 export function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach((p) => p.classList.toggle('active', p.id === name));
-  if (name !== 'story') setStageMax(false);
-  audioScene.set({ storyVisible: name === 'story' });
+  if (name !== 'story') {
+    setStageMax(false);
+    audioScene.set({ storyPlaying: false });
+  }
   dispatchPanels('onTabSwitched', name);
   if (name === 'story') refreshSharedNotice();
 }

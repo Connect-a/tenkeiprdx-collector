@@ -1,4 +1,4 @@
-import { SK } from '../../core/constants.js';
+import { SK } from '../../core/storage-keys.js';
 async function cdnMissing() {
   const state = await chrome.storage.local.get(SK.cdnMissing);
   return state[SK.cdnMissing] || { updatedAt: 0, chars: {} };

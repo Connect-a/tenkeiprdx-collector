@@ -1,4 +1,4 @@
-export const PLATFORM_DIR = { web: 'Assets/WebGL', player: 'Assets/StandaloneWindows64' };
+const PLATFORM_DIR = { web: 'Assets/WebGL', player: 'Assets/StandaloneWindows64' };
 
 export const toRel = (sub) => String(sub).replace(/^Assets\/(WebGL|StandaloneWindows64)\//, '');
 export const toPath = (dir, sub) => (sub ? dir + '/' + sub : null);

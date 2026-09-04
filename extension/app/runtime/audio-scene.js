@@ -1,8 +1,5 @@
-const RELEASE_MS = 400;
-const scene = { storyVisible: false, bgmPriority: false, homeWants: false, otherBgm: false };
+const scene = { storyPlaying: false, homeWants: false, bgmPriority: false };
 const subs = new Set();
-const playing = new Set();
-const releaseTimers = new Map();
 
 function notify() {
   for (const fn of subs) {
@@ -17,6 +14,7 @@ function notify() {
 function set(patch) {
   let changed = false;
   for (const k of Object.keys(patch)) {
+    if (!(k in scene)) throw new Error('audioScene: 知らないキー ' + k);
     if (scene[k] === patch[k]) continue;
     scene[k] = patch[k];
     changed = true;
@@ -24,44 +22,16 @@ function set(patch) {
   if (changed) notify();
 }
 
-function applyPlaying() {
-  const v = playing.size > 0;
-  if (scene.otherBgm === v) return;
-  scene.otherBgm = v;
-  notify();
-}
-
-function report(source, isPlaying) {
-  const t = releaseTimers.get(source);
-  if (t) {
-    clearTimeout(t);
-    releaseTimers.delete(source);
-  }
-  if (isPlaying) {
-    if (playing.has(source)) return;
-    playing.add(source);
-    applyPlaying();
-    return;
-  }
-  if (!playing.has(source)) return;
-  releaseTimers.set(
-    source,
-    setTimeout(() => {
-      releaseTimers.delete(source);
-      playing.delete(source);
-      applyPlaying();
-    }, RELEASE_MS),
-  );
-}
+const homeWins = () => scene.bgmPriority && scene.homeWants;
 
 export const audioScene = {
   set,
-  report,
   subscribe(fn) {
     subs.add(fn);
     return () => subs.delete(fn);
   },
-  storyAudible: () => scene.storyVisible && !(scene.bgmPriority && scene.homeWants),
-  homeAudible: () => scene.bgmPriority || !scene.otherBgm,
+  state: () => ({ ...scene }),
+  homeAudible: () => scene.homeWants && (scene.bgmPriority || !scene.storyPlaying),
+  storyAudible: () => scene.storyPlaying && !homeWins(),
   bgmPriority: () => scene.bgmPriority,
 };

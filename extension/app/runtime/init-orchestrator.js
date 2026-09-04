@@ -1,4 +1,3 @@
-import { SK } from '../../core/constants.js';
 import { visualRenderer } from '../../engine/render/visual.js';
 import { fileStore } from '../../core/fsdir.js';
 import { unityDecode } from '../../unity/decode.js';
@@ -27,6 +26,11 @@ import { updateCdnReset } from '../views/shell-ui.js';
 import { renderIndexRebuild } from '../views/download-section.js';
 import { renderStorageSummary } from '../views/storage-summary.js';
 import { refreshLists } from './state-refresh.js';
+import { registerPainter } from './ui-bus.js';
+import { applyRoute } from '../views/route-view.js';
+import { openCharacter } from '../views/detail-view.js';
+import { updateFsUi, updateStorage } from '../views/fs-ui.js';
+import { refreshDownloadSection, markDownloadSectionDirty } from '../views/download-section.js';
 import { renderRoster, restoreRosterPrefs } from '../views/roster-ui.js';
 import { ensureBulkTick, renderBulkBanner } from '../views/bulk-ui.js';
 import { registerPanels } from './panel-state.js';
@@ -35,21 +39,30 @@ import { settings } from '../../core/settings.js';
 import { resolveOrigin, ensureOriginAlive } from '../../data/origin.js';
 import { CFG } from '../../config.js';
 
+registerPainter('route', applyRoute);
+registerPainter('character', openCharacter);
+registerPainter('fs', updateFsUi);
+registerPainter('storage', updateStorage);
+registerPainter('roster', (opts) => renderRoster(opts));
+registerPainter('download', refreshDownloadSection);
+registerPainter('download-dirty', markDownloadSectionDirty);
+
 export async function init() {
   showVersionAndCheckUpdate();
 
   try {
-    const o = await chrome.storage.local.get(SK.email);
     await ensureOriginAlive();
     const origin = await resolveOrigin();
     const email = getById('email');
-    if (email && o[SK.email]) email.value = o[SK.email];
+    if (email) email.value = settings.get('letterEmail') || '';
     const cdnBase = getById('cdnBase');
     if (cdnBase) {
       cdnBase.value = origin.manual || '';
       cdnBase.placeholder = (await resolveOrigin({ ignoreManual: true })).assets;
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[tp] 配信元の解決に失敗(続行)', e);
+  }
 
   updateCdnReset();
   renderIndexRebuild();
@@ -136,7 +149,9 @@ export async function init() {
       await renderBulkBanner();
       bulkDownloader.resume();
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[tp] 一括DLの再開に失敗(続行)', e);
+  }
 
   const q = new URLSearchParams(location.search).get('char');
   if (q && !location.hash) {

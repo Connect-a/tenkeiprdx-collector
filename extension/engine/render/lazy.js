@@ -14,5 +14,5 @@ export const disposeModel3d = (m) => (_m3d ? _m3d.model3dRenderer.disposeModel3d
 
 export async function loadAura() {
   if (!_aura) _aura = await (_auraP ||= import('./aura.js'));
-  return _aura.auraRenderer;
+  return _aura.auraCatalog;
 }

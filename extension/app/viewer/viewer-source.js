@@ -1,14 +1,14 @@
 import { fileStore } from '../../core/fsdir.js';
-import { assetStore } from '../../data/asset-store.js';
+import { assetStore, AREA } from '../../data/asset-store.js';
 import { collectionRepository } from '../../data/collection.js';
 import { charAssets } from '../../data/char-assets.js';
 import { unityMesh } from '../../unity/mesh.js';
-import { characterMeta } from '../../data/character-meta.js';
-import { PLACE } from '../../core/placement.js';
-import { bundleName } from '../../core/paths.js';
-import { DIRS, FOLDER_PARENTS } from '../../core/constants.js';
+import { CAST_CATS, characterMeta } from '../../data/character-meta.js';
+import { CHAR_DIR } from '../../core/assetpath/placement.js';
+import { bundleName } from '../../core/assetpath/paths.js';
+import { FOLDER_PARENTS, DIRS } from '../../core/dirs.js';
 import { ensureIndexes } from '../../data/index-store.js';
-import { utilHelpers } from '../../core/util.js';
+import { pool } from '../../core/async.js';
 
 const bundleIn = async (handle, sub) => {
   try {
@@ -85,8 +85,8 @@ async function exEntries() {
       jobs.push({ handle: d.handle, folderKey: String(d.folderKey), fm, ep });
     }
   }
-  const found = await utilHelpers.pool(jobs, 16, async (j) => {
-    const sub = `story/${j.ep.episodeId}/cg`;
+  const found = await pool(jobs, 16, async (j) => {
+    const sub = CHAR_DIR.episodeSlot(j.ep.episodeId, 'cg');
     const out = [];
     for (const name of await bundleIn(j.handle, sub)) {
       const m = name.match(/^(\d{8})_(\d+)\./);
@@ -140,7 +140,7 @@ async function charDetail(id) {
 }
 
 async function charWeapons(handle, det, read) {
-  const files = await bundleIn(handle, 'visual/weapon');
+  const files = await bundleIn(handle, CHAR_DIR.weapon);
   if (!files.length) return null;
   const list = [];
   for (const w of (det && det.weapons) || []) {
@@ -148,21 +148,31 @@ async function charWeapons(handle, det, read) {
     const model = files.find((f) => f.startsWith(wid + '_model.'));
     if (!model) continue;
     const mat = files.find((f) => f.startsWith(wid + '_mat.'));
-    const deps = files.filter((f) => f.startsWith(wid + '_dep')).map((f) => 'visual/weapon/' + f);
-    list.push({ id: wid, slot: w.slot || 'wp_2', scale: w.scale || 1, model: 'visual/weapon/' + model, materials: mat ? 'visual/weapon/' + mat : null, deps });
+    const deps = files.filter((f) => f.startsWith(wid + '_dep')).map((f) => CHAR_DIR.weapon + '/' + f);
+    list.push({ id: wid, slot: w.slot || 'wp_2', scale: w.scale || 1, model: CHAR_DIR.weapon + '/' + model, materials: mat ? CHAR_DIR.weapon + '/' + mat : null, deps });
   }
   if (!list.length) return null;
   const out = await charAssets.buildWeapons(read, list);
   return out.length ? out : null;
 }
 
+const MAIN_MODEL = '@main';
+const sharedRead = (rel) => (rel ? assetStore.readAsset(DIRS.shared, rel) : Promise.resolve(null));
+const meshDepsOf = async (id) => {
+  try {
+    return ((await ensureIndexes()).meta.modelDeps || {})[String(id)] || [];
+  } catch (e) {
+    return [];
+  }
+};
+
 export async function loadModelFor(entry, costume) {
   if (!entry) return null;
   if (entry.kind === 'other3d') {
     const e = _other3d && _other3d.get(String(entry.id));
     if (!e || !e.model) return null;
-    const read = (rel) => (rel ? assetStore.readAsset(DIRS.other, rel, PLACE.flat) : Promise.resolve(null));
-    const model = await charAssets.loadModelBundle(read, e.model, e.meshDeps);
+    const read = (rel) => (rel ? assetStore.readIn(AREA.other, rel) : Promise.resolve(null));
+    const model = await charAssets.loadModelBundle(read, e.model, e.meshDeps, { depRead: sharedRead });
     if (!model) return null;
     const mats = e.materials || [];
     const pick = (costume && mats.includes(costume) && costume) || e.material || mats[0] || null;
@@ -182,8 +192,8 @@ export async function loadModelFor(entry, costume) {
     const m = _monsters && _monsters.get(String(entry.id));
     if (!m || !m.model) return null;
     const byRel = new Map((m.assets || []).map((a) => [a.rel, a]));
-    const read = (rel) => (byRel.has(rel) ? assetStore.readAsset(DIRS.monster, rel, PLACE.owned(byRel.get(rel))) : Promise.resolve(null));
-    const model = await charAssets.loadModelBundle(read, m.model, m.meshDeps, { always: true });
+    const read = (rel) => (byRel.has(rel) ? assetStore.readIn(AREA.monster(byRel.get(rel)), rel) : Promise.resolve(null));
+    const model = await charAssets.loadModelBundle(read, m.model, m.meshDeps, { always: true, depRead: sharedRead });
     if (!model) return null;
     const matBundle = await charAssets.loadMaterialBundle(read, m.material);
     const weapons = await charAssets.buildWeapons(read, m.weapons);
@@ -191,9 +201,9 @@ export async function loadModelFor(entry, costume) {
   }
   const handle = charHandle(entry.id);
   if (!handle) return null;
-  const models = await bundleIn(handle, 'visual/model');
+  const models = await bundleIn(handle, CHAR_DIR.visual('model'));
   if (!models.length) return null;
-  const mats = await bundleIn(handle, 'visual/materials');
+  const mats = await bundleIn(handle, CHAR_DIR.visual('materials'));
   const read = async (sub) => {
     try {
       return await fileStore.readBytesUnder(handle, sub);
@@ -201,14 +211,23 @@ export async function loadModelFor(entry, costume) {
       return null;
     }
   };
-  const modelBytes = await read('visual/model/' + models[0]);
+  const modelBytes = await read(CHAR_DIR.visual('model') + '/' + models[0]);
   if (!modelBytes) return null;
   const pick = (costume && mats.includes(costume) && costume) || mats.find((n) => /default/i.test(n)) || mats[0] || null;
-  const matBytes = pick ? await read('visual/materials/' + pick) : null;
+  const matBytes = pick ? await read(CHAR_DIR.visual('materials') + '/' + pick) : null;
   const det = await charDetail(entry.id);
+  const modelRead = async (rel) => {
+    if (rel === MAIN_MODEL) return modelBytes;
+    try {
+      return await assetStore.readIn(AREA.charVisual(handle, 'modeldep'), rel);
+    } catch (e) {
+      return null;
+    }
+  };
+  const model = await charAssets.loadModelBundle(modelRead, MAIN_MODEL, await meshDepsOf(entry.id), { depRead: sharedRead });
   return {
-    model: unityMesh.parseModelBundle(modelBytes),
-    matBundle: matBytes ? unityMesh.parseMaterialBundle(matBytes) : { materials: [], textures: [] },
+    model: model || unityMesh.parseModelBundle(modelBytes),
+    matBundle: matBytes ? unityMesh.parseMaterialBundle(matBytes, { keepCompressed: unityMesh.KEEP_DXT }) : { materials: [], textures: [] },
     weapons: await charWeapons(handle, det, read),
     attachmentColors: (det && det.attachmentColors) || null,
     mouthAtlas: await mouthAtlas(),
@@ -219,37 +238,34 @@ export async function loadModelFor(entry, costume) {
   };
 }
 
+const spineInputsOf = async (read) => {
+  try {
+    return unityMesh.extractSpineInputs(await read());
+  } catch (e) {
+    return null;
+  }
+};
+
 export async function spineInputsFor(entry) {
   if (entry && entry.kind === 'ex') {
     const h = charHandle(entry.folderKey);
-    if (!h) return null;
-    try {
-      const b = await fileStore.readBytesUnder(h, entry.sub);
-      return b ? unityMesh.extractSpineInputs(b) : null;
-    } catch (e) {
-      return null;
-    }
+    return h ? await spineInputsOf(() => fileStore.readBytesUnder(h, entry.sub)) : null;
   }
   if (entry && entry.kind === 'monster') {
     const m = _monsters && _monsters.get(String(entry.id));
     for (const a of spineAssets(m)) {
-      try {
-        const b = await assetStore.readAsset(DIRS.monster, a.rel, PLACE.owned(a));
-        const inp = b ? unityMesh.extractSpineInputs(b) : null;
-        if (inp) return inp;
-      } catch (e) {}
+      const inp = await spineInputsOf(() => assetStore.readIn(AREA.monster(a), a.rel));
+      if (inp) return inp;
     }
     return null;
   }
   const handle = charHandle(entry && entry.id);
   if (!handle) return null;
-  for (const sub of ['visual/spine', 'visual/spinelight']) {
+  for (const cat of CAST_CATS) {
+    const sub = CHAR_DIR.visual(cat);
     for (const n of await bundleIn(handle, sub)) {
-      try {
-        const b = await fileStore.readBytesUnder(handle, sub + '/' + n);
-        const inp = b ? unityMesh.extractSpineInputs(b) : null;
-        if (inp) return inp;
-      } catch (e) {}
+      const inp = await spineInputsOf(() => fileStore.readBytesUnder(handle, sub + '/' + n));
+      if (inp) return inp;
     }
   }
   return null;

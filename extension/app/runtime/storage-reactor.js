@@ -1,12 +1,13 @@
 import { bulkDownloader } from '../../data/acquire/bulk.js';
 import { collectionRepository } from '../../data/collection.js';
 import { getById } from '../../core/dom.js';
-import { SK } from '../../core/constants.js';
+import { SK } from '../../core/storage-keys.js';
 import { ensureBulkTick, renderBulkBanner, renderBulkCard } from '../views/bulk-ui.js';
 import { updateCard } from '../views/roster-ui.js';
 import { refreshLists } from './state-refresh.js';
 import { playerState } from './player-state.js';
 import { updateCdnReset } from '../views/shell-ui.js';
+import { invalidateIndex } from '../../data/index-store.js';
 
 let bulkRefreshTimer = null;
 let bound = false;
@@ -83,7 +84,7 @@ function onChanged(ch, area) {
     if (ch.originManual) manualPinned = !!ch.originManual.newValue;
     if (changed) {
       try {
-        collectionRepository.invalidateIndex();
+        invalidateIndex();
       } catch (e) {}
       refreshListsSafe(['binlist', 'index', 'dl']);
     }

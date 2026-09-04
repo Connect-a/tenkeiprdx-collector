@@ -182,7 +182,7 @@ function create(deps) {
     if (path) {
       try {
         const b = await readBundle(path);
-        cv = b && MESH_MOD.decodeTextureCanvas(b);
+        cv = b && MESH_MOD.decodeLargestTextureCanvas(b);
       } catch (e) {}
     }
     if (!cv) {

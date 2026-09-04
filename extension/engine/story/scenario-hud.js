@@ -13,8 +13,6 @@ function create(host, opts) {
   const bgEl = mk('div', 'bgLayer', host);
   const canvas = mk('canvas', 'glLayer', host);
   const ui = mk('div', 'uiLayer', host);
-  const emoLayer = mk('div', 'emoLayer', ui);
-  emoLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none';
   const noiseLayer = mk('canvas', 'noiseLayer', ui);
   const lineLayer = mk('canvas', 'lineLayer', ui);
   const eyeLayer = mk('canvas', 'eyeLayer', ui);
@@ -62,7 +60,7 @@ function create(host, opts) {
     bgm = mk('audio', null, host);
   bgm.loop = true;
 
-  const els = { speaker, text, meta, prog, audio, se, bgm, emoLayer, fxLayer, noiseLayer, lineLayer, eyeLayer, ambientLayer, vfxLayer, insertEl, bandTop, bandBottom, shakeEl: host };
+  const els = { speaker, text, meta, prog, audio, se, bgm, fxLayer, noiseLayer, lineLayer, eyeLayer, ambientLayer, vfxLayer, insertEl, bandTop, bandBottom, shakeEl: host };
   const setwin = settingsWindow.create(ui);
   let unsubSettings = null;
   const applyWindowStyle = () => {
@@ -98,6 +96,7 @@ function create(host, opts) {
     titleT = null,
     autoSprites = null,
     keyTrap = null,
+    askDone = null,
     ending = false;
   const stopTimers = () => {
     if (timer) {
@@ -199,10 +198,12 @@ function create(host, opts) {
       const done = (v) => {
         if (tid) clearInterval(tid);
         keyTrap = null;
+        askDone = null;
         askYes.onclick = askNo.onclick = null;
         host.classList.remove('askOpen');
         resolve(v);
       };
+      askDone = done;
       if (secs) {
         askCount.textContent = countLabel(left);
         tid = setInterval(() => {
@@ -251,7 +252,7 @@ function create(host, opts) {
     uiHidden = false;
     host.classList.remove('uiHidden');
   };
-  const modal = () => setwin.isOpen() || ['logOpen', 'choiceOpen', 'askOpen', 'preparing'].some((c) => host.classList.contains(c));
+  const modal = () => setwin.isOpen() || !!(player && player.inIntro()) || ['logOpen', 'choiceOpen', 'askOpen', 'preparing'].some((c) => host.classList.contains(c));
   async function advance() {
     if (modal() || !player) return;
     if (skipOn) return setSkip(false);
@@ -400,6 +401,9 @@ function create(host, opts) {
     advance,
     back,
     ask,
+    cancelAsk() {
+      if (askDone) askDone(false);
+    },
     setAuto,
     setSkip,
     stopAuto() {

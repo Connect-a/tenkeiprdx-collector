@@ -22,6 +22,8 @@ function setSharedBgFromRgba(rgba, width, height) {
 
 const drawsNothing = (m) => !m.mainTexPathID && (m.graphColors || []).length > 0 && m.graphColors.every((c) => c[0] === 0 && c[1] === 0 && c[2] === 0);
 
+const hasPixels = (t) => !!(t && (t.rgba || t.blocks));
+
 function buildTextureMap(materialBundle) {
   const byName = new Map();
   const shadowByName = new Map();
@@ -31,19 +33,20 @@ function buildTextureMap(materialBundle) {
   const texByPath = new Map((materialBundle.textures || []).map((t) => [t.pathID, t]));
   for (const m of materialBundle.materials || []) {
     const t = texByPath.get(m.mainTexPathID);
-    if (t && t.rgba) byName.set(m.name, t);
+    if (hasPixels(t)) byName.set(m.name, t);
     if (drawsNothing(m)) hiddenByName.add(m.name);
     const tn = m.toon || {};
     const st = tn.shadowTexPathID && texByPath.get(tn.shadowTexPathID);
-    if (st && st.rgba) shadowByName.set(m.name, st);
+    if (hasPixels(st)) shadowByName.set(m.name, st);
     const mk = tn.maskTexPathID && texByPath.get(tn.maskTexPathID);
-    if (mk && mk.rgba) maskByName.set(m.name, mk);
+    if (hasPixels(mk)) maskByName.set(m.name, mk);
     if (m.toon) toonByName.set(m.name, m.toon);
   }
-  const withRgba = (materialBundle.textures || []).filter((t) => t.rgba);
+  const withRgba = (materialBundle.textures || []).filter(hasPixels);
   const pick = (pred) => withRgba.find((t) => pred(String(t.name || '')));
   let biggest = null;
-  for (const t of withRgba) if (!biggest || t.rgba.length > biggest.rgba.length) biggest = t;
+  const area = (t) => (t.width || 0) * (t.height || 0);
+  for (const t of withRgba) if (!biggest || area(t) > area(biggest)) biggest = t;
   const fallback = pick((n) => /head.*color|face.*color/i.test(n)) || pick((n) => /_color/i.test(n) && !/body/i.test(n)) || pick((n) => /_color/i.test(n)) || biggest;
   return { byName, shadowByName, maskByName, toonByName, hiddenByName, fallback };
 }
@@ -75,12 +78,38 @@ function remapMouthUV(baseUv, vMin, vMax, col, row) {
 
 const TP_TO_LINEAR = 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
 
-function makeDataTexture(tex, { forceOpaque } = {}) {
-  let rgba = tex.rgba;
-  if (forceOpaque) {
-    rgba = rgba.slice();
-    for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255;
+let _s3tc = null;
+function hasS3tc() {
+  if (_s3tc !== null) return _s3tc;
+  _s3tc = false;
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2') || c.getContext('webgl');
+    if (gl) {
+      _s3tc = !!gl.getExtension('WEBGL_compressed_texture_s3tc');
+      const lose = gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+    }
+  } catch (e) {}
+  return _s3tc;
+}
+
+const DXT_FORMAT = (fmt) => (fmt === 10 ? THREE_NS.RGB_S3TC_DXT1_Format : THREE_NS.RGBA_S3TC_DXT5_Format);
+
+function makeDataTexture(tex) {
+  if (tex.blocks && hasS3tc()) {
+    const ct = new THREE_NS.CompressedTexture(tex.blocks, tex.width, tex.height, DXT_FORMAT(tex.format), THREE_NS.UnsignedByteType);
+    ct.flipY = false;
+    ct.needsUpdate = true;
+    ct.wrapS = THREE_NS.RepeatWrapping;
+    ct.wrapT = THREE_NS.RepeatWrapping;
+    ct.magFilter = THREE_NS.LinearFilter;
+    ct.minFilter = tex.blocks.length > 1 ? THREE_NS.LinearMipmapLinearFilter : THREE_NS.LinearFilter;
+    ct.generateMipmaps = false;
+    ct.colorSpace = THREE_NS.LinearSRGBColorSpace || THREE_NS.NoColorSpace || 'srgb-linear';
+    return ct;
   }
+  const rgba = tex.rgba || (tex.decode && tex.decode());
   const dt = new THREE_NS.DataTexture(rgba, tex.width, tex.height, THREE_NS.RGBAFormat);
   dt.flipY = false;
   dt.needsUpdate = true;
@@ -101,8 +130,15 @@ const GAME_GRADE = {
   vignetteRounded: false,
   bloomThreshold: 0.9,
   bloomIntensity: 1.0,
-  bloomScatter: 0.7,
+  bloomScatter: 0.05 + 0.9 * 0.7,
   bloomDefaultOn: false,
+};
+
+const gammaToLinear = (v) => (v <= 0.04045 ? v / 12.92 : v < 1 ? Math.pow((v + 0.055) / 1.055, 2.4) : Math.pow(v, 2.2));
+const bloomTint = (t) => {
+  const l = (t && t.length === 3 ? t : [1, 1, 1]).map((x) => gammaToLinear(Number(x) || 0));
+  const luma = 0.2126729 * l[0] + 0.7151522 * l[1] + 0.072175 * l[2];
+  return luma > 0 ? l.map((x) => x / luma) : [1, 1, 1];
 };
 
 function buildPostPass(renderer, bgTexture, bgAspect) {
@@ -160,12 +196,14 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
   fxQuad.frustumCulled = false;
   fxScene.add(fxQuad);
   const prefiltMat = new THREE_NS.ShaderMaterial({
-    uniforms: { t: { value: null }, threshold: { value: G.bloomThreshold != null ? G.bloomThreshold : 0.9 } },
+    uniforms: { t: { value: null }, threshold: { value: gammaToLinear(G.bloomThreshold != null ? G.bloomThreshold : 0.9) } },
     depthTest: false,
     depthWrite: false,
     vertexShader: FS_V,
     fragmentShader:
-      'precision highp float; varying vec2 vUv; uniform sampler2D t; uniform float threshold; void main(){ vec3 c=texture2D(t,vUv).rgb; float br=max(c.r,max(c.g,c.b)); float k=threshold*0.5; float soft=clamp(br-threshold+k,0.0,2.0*k); soft=soft*soft/(4.0*k+1e-4); float w=max(soft,br-threshold)/max(br,1e-4); gl_FragColor=vec4(c*w,1.0); }',
+      'precision highp float; varying vec2 vUv; uniform sampler2D t; uniform float threshold;\n' +
+      'vec3 tpToGamma(vec3 c){ vec3 hi=1.055*pow(max(c,vec3(0.0)),vec3(0.4166667))-0.055; vec3 lo=c*12.92; return mix(hi,lo,step(c,vec3(0.0031308))); }\n' +
+      'void main(){ vec3 c=tpToGamma(texture2D(t,vUv).rgb); float br=max(c.r,max(c.g,c.b)); float k=threshold*0.5; float soft=clamp(br-threshold+k,0.0,2.0*k); soft=soft*soft/(4.0*k+1e-4); float w=max(soft,br-threshold)/max(br,1e-4); gl_FragColor=vec4(max(c*w,0.0),1.0); }',
   });
   const downMat = new THREE_NS.ShaderMaterial({
     uniforms: { t: { value: null }, texel: { value: new THREE_NS.Vector2() } },
@@ -232,6 +270,7 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
     uScreenScale: { value: new THREE_NS.Vector2(1, 1) },
     uBloom: { value: upMips[0] ? upMips[0].texture : null },
     uBloomIntensity: { value: G.bloomDefaultOn ? (G.bloomIntensity != null ? G.bloomIntensity : 1.0) : 0 },
+    uBloomTint: { value: new THREE_NS.Vector3(1, 1, 1) },
   };
   const mat = new THREE_NS.ShaderMaterial({
     uniforms,
@@ -241,14 +280,14 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
     vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }',
     fragmentShader: [
       'precision highp float; varying vec2 vUv; uniform sampler2D tDiffuse, uBloom;',
-      'uniform vec3 uVigColor; uniform vec2 uVigParams, uScreenScale; uniform float uVigRoundness, uContrast, uBloomIntensity;',
+      'uniform vec3 uVigColor, uBloomTint; uniform vec2 uVigParams, uScreenScale; uniform float uVigRoundness, uContrast, uBloomIntensity;',
       'vec3 l2s(vec3 c){ c=clamp(c,0.0,1.0); return mix(1.055*pow(c,vec3(1.0/2.4))-0.055, c*12.92, step(c,vec3(0.0031308))); }',
       'vec3 lin2logc(vec3 x){ return log2(max(x*5.55555582+0.0479959995, vec3(0.0)))*0.0734997839 - 0.0275523961; }',
       'vec3 logc2lin(vec3 x){ return (exp2(x*13.6054821)-0.0479959995)*0.179999992; }',
       'void main(){',
       '  vec4 src=texture2D(tDiffuse,vUv);',
       '  vec3 bc = uBloomIntensity > 0.0 ? clamp(texture2D(uBloom,vUv).rgb, 0.0, 64.0) : vec3(0.0);',
-      '  vec3 c=src.rgb + bc * uBloomIntensity;',
+      '  vec3 c=src.rgb + bc * uBloomIntensity * uBloomTint;',
       '  vec2 guv = vec2(0.5) + (vUv - vec2(0.5)) * uScreenScale;',
       '  vec2 d = abs(guv - vec2(0.5)) * uVigParams.x;',
       '  d.x *= uVigRoundness;',
@@ -283,6 +322,12 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
     setBloom(on) {
       uniforms.uBloomIntensity.value = on ? bloomOnValue : 0;
     },
+    setBloomOverride(v) {
+      prefiltMat.uniforms.threshold.value = gammaToLinear(v && v.threshold != null ? v.threshold : G.bloomThreshold);
+      const t = bloomTint((v && v.tint) || [1, 1, 1]);
+      uniforms.uBloomTint.value.set(t[0], t[1], t[2]);
+      uniforms.uBloomIntensity.value = v && v.intensity != null ? v.intensity : G.bloomDefaultOn ? bloomOnValue : 0;
+    },
     setFloorY(y) {
       if (y == null || !isFinite(y)) {
         floorEnabled = false;
@@ -313,7 +358,7 @@ function buildPostPass(renderer, bgTexture, bgAspect) {
           renderer.autoClear = false;
           renderer.render(floorScene, camera);
           renderer.autoClear = pa;
-        } // 床の深度を追記(色/深度はクリアしない)
+        }
         if (depthExclude) depthExclude.visible = true;
         onDepth(depthRT.depthTexture);
       }

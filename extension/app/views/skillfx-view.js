@@ -1,30 +1,17 @@
 import { el } from '../../core/dom.js';
 import { assetStore } from '../../data/asset-store.js';
-import { CATALOG_DIR } from '../../data/index-store.js';
 import { unityDecode } from '../../unity/decode.js';
-import { fileStore } from '../../core/fsdir.js';
-import { DIRS } from '../../core/constants.js';
-
-const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+import { firstClipUrl } from '../../core/audio-url.js';
+import { DIRS } from '../../core/dirs.js';
 
 let _mods = null;
 const loadMods = async () => {
   if (!_mods) {
-    const [sv, vp, three] = await Promise.all([import('../../engine/render/scene-vfx.js'), import('../../engine/render/vfx-parse.js'), import('../../vendor/three.module.js')]);
-    _mods = { sceneVfx: sv.sceneVfx, vfxParse: vp.vfxParse, THREE: three };
+    const [sv, vm] = await Promise.all([import('../../engine/render/scene-vfx.js'), import('../../engine/render/vfx-materials.js')]);
+    _mods = { sceneVfx: sv.sceneVfx, vfxMaterials: vm.vfxMaterials };
   }
   return _mods;
 };
-
-let _catalog = null;
-async function vfxCatalog() {
-  if (_catalog) return _catalog;
-  const dir = await fileStore.getDir(DIRS.shared, { create: false });
-  const f = dir ? await fileStore.readUnder(dir, CATALOG_DIR + '/vfx_catalog.json') : null;
-  if (!f) throw new Error('vfx_catalog');
-  _catalog = JSON.parse(await f.text());
-  return _catalog;
-}
 
 const readFrom = (dir, rel, place) => (rel ? assetStore.readAsset(dir, rel, place) : Promise.resolve(null));
 
@@ -33,15 +20,8 @@ async function loadEffect(src, effect, vfxRel) {
   if (!bytes) return null;
   let texByMatPid = null;
   try {
-    const { vfxParse, THREE } = await loadMods();
-    const cat = await vfxCatalog();
-    const deps = vfxParse.resolveDeps(cat, new RegExp(escapeRe(effect) + '\\.prefab$', 'i')).filter((d) => d !== vfxRel);
-    const db = [];
-    for (const d of deps) {
-      const b = await assetStore.readAsset(DIRS.shared, d);
-      if (b) db.push(b);
-    }
-    texByMatPid = vfxParse.buildMaterialMap(THREE, db);
+    const { vfxMaterials } = await loadMods();
+    texByMatPid = await vfxMaterials.forPrefab(effect, vfxRel);
   } catch (e) {}
   return { bytes, texByMatPid };
 }
@@ -50,9 +30,7 @@ async function loadSeUrl(src, seRel) {
   const bytes = await readFrom(src.dir, seRel, src.sePlace || src.place);
   if (!bytes) return null;
   try {
-    const clips = (unityDecode.extractAudioResource ? await unityDecode.extractAudioResource(bytes) : []) || [];
-    const clip = clips.find((c) => c && c.data && c.data.length);
-    if (clip) return URL.createObjectURL(new Blob([clip.data], { type: clip.mime || 'audio/mp4' }));
+    return firstClipUrl(unityDecode.extractAudioResource ? await unityDecode.extractAudioResource(bytes) : []);
   } catch (e) {}
   return null;
 }

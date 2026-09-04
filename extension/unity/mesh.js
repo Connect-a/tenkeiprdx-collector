@@ -1,9 +1,10 @@
 import { unityDecode } from './decode.js';
 import { unitySf } from './unity-sf.js';
-import { fileNameOf } from '../core/paths.js';
+import { fileNameOf } from '../core/assetpath/paths.js';
 import { unityAnim as ANIM_MOD } from './anim.js';
 import { unityCrunch as CRUNCH_MOD } from './crunch.js';
 import { texCodec } from './texcodec.js';
+import { spineAtlas } from './spine-atlas.js';
 
 const FMT_SIZE = { 0: 4, 1: 2, 2: 1, 3: 1, 4: 2, 5: 2, 6: 1, 7: 1, 8: 2, 9: 2, 10: 4, 11: 4 };
 const halfToFloat = (h) => {
@@ -589,12 +590,25 @@ function resolveBlend(mat, shaderInfoByPid) {
 }
 
 function openCab(bytes, parsed) {
-  parsed = parsed || unityDecode.parseUnityFS(bytes);
-  const cab = parsed.nodes.find((n) => !n.path.endsWith('.resource') && !n.path.endsWith('.resS'));
-  if (!cab) return null;
-  const sf = parsed.data.subarray(cab.off, cab.off + cab.sz);
-  return { parsed, sf, sfp: unitySf.parseSerializedFile(sf) };
+  try {
+    parsed = parsed || unityDecode.parseUnityFS(bytes);
+    const cab = parsed.nodes.find((n) => !n.path.endsWith('.resource') && !n.path.endsWith('.resS'));
+    if (!cab) return null;
+    const sf = parsed.data.subarray(cab.off, cab.off + cab.sz);
+    return { parsed, sf, sfp: unitySf.parseSerializedFile(sf) };
+  } catch (e) {
+    return null;
+  }
 }
+
+function attempt(fn) {
+  try {
+    return fn();
+  } catch (e) {
+    return null;
+  }
+}
+const readOne = (sf, LE, o) => attempt(() => unitySf.readObject(sf, LE, o));
 
 function baseMotionMap(list) {
   const m = {};
@@ -644,6 +658,7 @@ function parseModelBundle(bytes) {
   const materials = [];
   const transforms = [];
   const gameObjects = {};
+  const goActive = {};
   const meshFilterByGO = {};
   const meshRenderers = [];
   let avatar = null;
@@ -654,108 +669,93 @@ function parseModelBundle(bytes) {
   let fbx = null;
   for (const o of sfp.objects) {
     if (o.classID === 114) {
-      try {
-        const mb = unitySf.readObject(sf, sfp.LE, o);
-        const looksFbx = mb && (Array.isArray(mb.actionPoints) || Array.isArray(mb.blinkRelatedBlendShapes) || Array.isArray(mb.attachments) || mb.faceRenderer);
-        if (looksFbx && !fbx) {
-          if (Array.isArray(mb.actionPoints) && mb.actionPoints.length) fbxActionPointRefs = mb.actionPoints;
-          const pid = (pp) => (pp && pp.m_PathID != null ? String(pp.m_PathID) : null);
-          fbx = {
-            attachmentSmrPathIDs: (mb.attachments || []).map(pid).filter(Boolean),
-            rotationOverrideY: Number((mb.rotationOverride || {}).y) || 0,
-            blinkBlendShapes: (mb.blinkRelatedBlendShapes || []).map(Number),
-            faceSmrPathID: pid(mb.faceRenderer),
-            mouthSmrPathID: pid(mb.mouthRenderer),
-            eyebrowsSmrPathID: pid(mb.eyebrowsRenderer),
-            defaultMouthId: Number(mb.defaultMouthId) || 0,
-            mouthMaterialOverride: Number(mb.mouthMaterialOverride) || 0,
-            faceBaseValues: baseMotionMap(mb.faceRendererBaseValues),
-            browBaseValues: baseMotionMap(mb.eyebrowsRendererBaseValues),
-          };
-        }
-      } catch (e) {}
+      const mb = readOne(sf, sfp.LE, o);
+      const looksFbx = mb && (Array.isArray(mb.actionPoints) || Array.isArray(mb.blinkRelatedBlendShapes) || Array.isArray(mb.attachments) || mb.faceRenderer);
+      if (looksFbx && !fbx) {
+        if (Array.isArray(mb.actionPoints) && mb.actionPoints.length) fbxActionPointRefs = mb.actionPoints;
+        const pid = (pp) => (pp && pp.m_PathID != null ? String(pp.m_PathID) : null);
+        fbx = {
+          attachmentSmrPathIDs: (mb.attachments || []).map(pid).filter(Boolean),
+          rotationOverrideY: Number((mb.rotationOverride || {}).y) || 0,
+          blinkBlendShapes: (mb.blinkRelatedBlendShapes || []).map(Number),
+          faceSmrPathID: pid(mb.faceRenderer),
+          mouthSmrPathID: pid(mb.mouthRenderer),
+          eyebrowsSmrPathID: pid(mb.eyebrowsRenderer),
+          defaultMouthId: Number(mb.defaultMouthId) || 0,
+          mouthMaterialOverride: Number(mb.mouthMaterialOverride) || 0,
+          faceBaseValues: baseMotionMap(mb.faceRendererBaseValues),
+          browBaseValues: baseMotionMap(mb.eyebrowsRendererBaseValues),
+        };
+      }
       continue;
     }
     if (o.classID === 90) {
-      try {
-        const av = unitySf.readObject(sf, sfp.LE, o);
-        avatar = ANIM_MOD ? ANIM_MOD.parseAvatar(av) : null;
+      const av = readOne(sf, sfp.LE, o);
+      if (av) {
+        avatar = ANIM_MOD ? attempt(() => ANIM_MOD.parseAvatar(av)) : null;
         if (avatar) avatarByPid.set(String(o.pathID), avatar);
-      } catch (e) {}
+      }
       continue;
     } else if (o.classID === 74) {
-      try {
-        const clipObj = unitySf.readObject(sf, sfp.LE, o);
-        const dec = ANIM_MOD ? ANIM_MOD.decodeClipObj(clipObj) : null;
-        if (dec) clips.push(dec);
-      } catch (e) {}
+      const clipObj = readOne(sf, sfp.LE, o);
+      const dec = clipObj && ANIM_MOD ? attempt(() => ANIM_MOD.decodeClipObj(clipObj)) : null;
+      if (dec) clips.push(dec);
       continue;
     }
     if (o.classID === 43) {
-      try {
-        const m = unitySf.readObject(sf, sfp.LE, o);
-        const geo = extractMeshGeometry(m, sfp.LE);
-        if (geo) {
-          geo.pathID = o.pathID;
-          meshes.push(geo);
-        }
-      } catch (e) {}
+      const m = readOne(sf, sfp.LE, o);
+      const geo = m ? attempt(() => extractMeshGeometry(m, sfp.LE)) : null;
+      if (geo) {
+        geo.pathID = o.pathID;
+        meshes.push(geo);
+      }
     } else if (o.classID === 137) {
-      try {
-        const r = unitySf.readObject(sf, sfp.LE, o);
-        const mats = (r.m_Materials || []).map((pp) => String(pp.m_PathID));
-        const bones = (r.m_Bones || []).map((pp) => String(pp.m_PathID));
-        renderers.push({
-          smrPathID: String(o.pathID),
-          meshPathID: r.m_Mesh ? String(r.m_Mesh.m_PathID) : null,
-          materialPathIDs: mats,
-          bones,
-          rootBonePathID: r.m_RootBone ? String(r.m_RootBone.m_PathID) : null,
-          goPathID: r.m_GameObject ? String(r.m_GameObject.m_PathID) : null,
-        });
-      } catch (e) {}
+      const r = readOne(sf, sfp.LE, o);
+      if (!r) continue;
+      renderers.push({
+        smrPathID: String(o.pathID),
+        meshPathID: r.m_Mesh ? String(r.m_Mesh.m_PathID) : null,
+        materialPathIDs: (r.m_Materials || []).map((pp) => String(pp.m_PathID)),
+        bones: (r.m_Bones || []).map((pp) => String(pp.m_PathID)),
+        rootBonePathID: r.m_RootBone ? String(r.m_RootBone.m_PathID) : null,
+        goPathID: r.m_GameObject ? String(r.m_GameObject.m_PathID) : null,
+        enabled: r.m_Enabled === undefined ? 1 : Number(r.m_Enabled),
+      });
     } else if (o.classID === 95) {
-      try {
-        const an = unitySf.readObject(sf, sfp.LE, o);
-        const apid = an.m_Avatar && an.m_Avatar.m_PathID;
-        if (apid) animators.push({ go: an.m_GameObject ? String(an.m_GameObject.m_PathID) : null, avatar: String(apid) });
-      } catch (e) {}
+      const an = readOne(sf, sfp.LE, o);
+      const apid = an && an.m_Avatar && an.m_Avatar.m_PathID;
+      if (apid) animators.push({ go: an.m_GameObject ? String(an.m_GameObject.m_PathID) : null, avatar: String(apid) });
     } else if (o.classID === 33) {
-      try {
-        const mf = unitySf.readObject(sf, sfp.LE, o);
-        const go = mf.m_GameObject && String(mf.m_GameObject.m_PathID);
-        const mp = mf.m_Mesh && String(mf.m_Mesh.m_PathID);
-        if (go && mp) meshFilterByGO[go] = mp;
-      } catch (e) {}
+      const mf = readOne(sf, sfp.LE, o);
+      const go = mf && mf.m_GameObject && String(mf.m_GameObject.m_PathID);
+      const mp = mf && mf.m_Mesh && String(mf.m_Mesh.m_PathID);
+      if (go && mp) meshFilterByGO[go] = mp;
     } else if (o.classID === 23) {
-      try {
-        const mr = unitySf.readObject(sf, sfp.LE, o);
-        meshRenderers.push({ pathID: String(o.pathID), go: mr.m_GameObject ? String(mr.m_GameObject.m_PathID) : null, materialPathIDs: (mr.m_Materials || []).map((pp) => String(pp.m_PathID)) });
-      } catch (e) {}
+      const mr = readOne(sf, sfp.LE, o);
+      if (!mr) continue;
+      meshRenderers.push({ pathID: String(o.pathID), go: mr.m_GameObject ? String(mr.m_GameObject.m_PathID) : null, materialPathIDs: (mr.m_Materials || []).map((pp) => String(pp.m_PathID)) });
     } else if (o.classID === 21) {
-      try {
-        materials.push(readMaterialObj(sf, sfp.LE, o));
-      } catch (e) {}
+      const mat = attempt(() => readMaterialObj(sf, sfp.LE, o));
+      if (mat) materials.push(mat);
     } else if (o.classID === 4) {
-      try {
-        const t = unitySf.readObject(sf, sfp.LE, o);
-        const p = t.m_LocalPosition || {},
-          q = t.m_LocalRotation || {},
-          s = t.m_LocalScale || {};
-        transforms.push({
-          pathID: o.pathID,
-          pos: [p.x || 0, p.y || 0, p.z || 0],
-          rot: [q.x || 0, q.y || 0, q.z || 0, q.w != null ? q.w : 1],
-          scale: [s.x != null ? s.x : 1, s.y != null ? s.y : 1, s.z != null ? s.z : 1],
-          fatherPathID: t.m_Father ? String(t.m_Father.m_PathID) : '0',
-          gameObjectPathID: t.m_GameObject ? String(t.m_GameObject.m_PathID) : null,
-        });
-      } catch (e) {}
+      const t = readOne(sf, sfp.LE, o);
+      if (!t) continue;
+      const p = t.m_LocalPosition || {},
+        q = t.m_LocalRotation || {},
+        s = t.m_LocalScale || {};
+      transforms.push({
+        pathID: o.pathID,
+        pos: [p.x || 0, p.y || 0, p.z || 0],
+        rot: [q.x || 0, q.y || 0, q.z || 0, q.w != null ? q.w : 1],
+        scale: [s.x != null ? s.x : 1, s.y != null ? s.y : 1, s.z != null ? s.z : 1],
+        fatherPathID: t.m_Father ? String(t.m_Father.m_PathID) : '0',
+        gameObjectPathID: t.m_GameObject ? String(t.m_GameObject.m_PathID) : null,
+      });
     } else if (o.classID === 1) {
-      try {
-        const g = unitySf.readObject(sf, sfp.LE, o);
-        gameObjects[o.pathID] = g.m_Name;
-      } catch (e) {}
+      const g = readOne(sf, sfp.LE, o);
+      if (!g) continue;
+      gameObjects[o.pathID] = g.m_Name;
+      goActive[o.pathID] = g.m_IsActive === undefined ? true : !!g.m_IsActive;
     }
   }
   for (const mr of meshRenderers) {
@@ -780,7 +780,7 @@ function parseModelBundle(bytes) {
       actionPoints[nm] = { pos: t.pos, rot: t.rot, scale: t.scale };
     }
   }
-  return { meshes, renderers, materials, transforms, gameObjects, avatar, clips, actionPoints, fbx };
+  return { meshes, renderers, materials, transforms, gameObjects, goActive, avatar, clips, actionPoints, fbx };
 }
 
 function textureBytes(tex, parsed) {
@@ -796,12 +796,18 @@ function textureBytes(tex, parsed) {
   return bytes && bytes.length ? bytes : null;
 }
 
-function decodeTexture(tex, parsed) {
+function decodeTexture(tex, parsed, keep) {
   const fmt = Number(tex.m_TextureFormat);
   const w = Number(tex.m_Width),
     h = Number(tex.m_Height);
+  if (!w || !h) return { width: 0, height: 0, format: fmt, empty: true };
   const bytes = textureBytes(tex, parsed);
   if (!bytes) return { width: w, height: h, format: fmt, error: 'no-image-bytes' };
+  if (keep && keep[fmt]) {
+    const st = textureSettings(tex);
+    const blocks = mipBlocks(bytes, fmt, w, h, st.mipCount);
+    if (blocks) return { width: w, height: h, format: fmt, blocks, decode: () => texCodec.decodeByFormat(fmt, bytes, w, h), ...st };
+  }
   let rgba = null;
   try {
     if (fmt === 29) {
@@ -810,7 +816,7 @@ function decodeTexture(tex, parsed) {
         return { width: d.width, height: d.height, format: fmt, rgba: d.rgbaBytes };
       }
       return { width: w, height: h, format: fmt, error: 'unityCrunch-unavailable' };
-    } else if (fmt === 12 || fmt === 2 || fmt === 13 || fmt === 4) rgba = texCodec.decodeByFormat(fmt, bytes, w, h);
+    } else if (texCodec.canDecodeFormat(fmt)) rgba = texCodec.decodeByFormat(fmt, bytes, w, h);
     else if (fmt === 17 || fmt === 24 || fmt === 25)
       return { width: w, height: h, format: fmt, raw: bytes.subarray(0, fmt === 17 ? w * h * 8 : Math.ceil(w / 4) * Math.ceil(h / 4) * 16), ...textureSettings(tex) };
     else return { width: w, height: h, format: fmt, error: 'unsupported-format-' + fmt };
@@ -836,6 +842,20 @@ function textureSettings(tex) {
 const blockBytes = (fmt) => (fmt === 12 || fmt === 13 ? 16 : 8);
 const levelBytes = (fmt, w, h) => Math.max(1, Math.ceil(w / 4)) * Math.max(1, Math.ceil(h / 4)) * blockBytes(fmt);
 
+function mipBlocks(bytes, fmt, w, h, mipCount) {
+  const out = [];
+  let off = 0;
+  for (let i = 0; i < Math.max(1, Number(mipCount) || 1); i++) {
+    const lw = Math.max(1, w >> i),
+      lh = Math.max(1, h >> i);
+    const n = levelBytes(fmt, lw, lh);
+    if (off + n > bytes.length) break;
+    out.push({ data: bytes.subarray(off, off + n), width: lw, height: lh });
+    off += n;
+  }
+  return out.length ? out : null;
+}
+
 function decodeCubemap(tex, parsed) {
   const fmt = Number(tex.m_TextureFormat);
   const w = Number(tex.m_Width);
@@ -855,7 +875,10 @@ function decodeCubemap(tex, parsed) {
   return { width: w, height: h, format: fmt, faces: out };
 }
 
-function parseMaterialBundle(bytes) {
+const KEEP_DXT = { 10: true, 12: true };
+
+function parseMaterialBundle(bytes, opt) {
+  const keep = (opt && opt.keepCompressed) || null;
   const co = openCab(bytes);
   if (!co) return { materials: [], textures: [] };
   const { parsed, sf, sfp } = co;
@@ -886,7 +909,7 @@ function parseMaterialBundle(bytes) {
     } else if (o.classID === 28 || o.classID === 89) {
       try {
         const tx = unitySf.readObject(sf, sfp.LE, o);
-        const dec = o.classID === 89 ? decodeCubemap(tx, parsed) : decodeTexture(tx, parsed);
+        const dec = o.classID === 89 ? decodeCubemap(tx, parsed) : decodeTexture(tx, parsed, keep);
         textures.push({
           pathID: o.pathID,
           name: tx.m_Name,
@@ -895,6 +918,8 @@ function parseMaterialBundle(bytes) {
           format: dec.format,
           rgba: dec.rgba || null,
           raw: dec.raw || null,
+          blocks: dec.blocks || null,
+          decode: dec.decode || null,
           faces: dec.faces || null,
           wrapU: dec.wrapU || 0,
           wrapV: dec.wrapV || 0,
@@ -912,7 +937,7 @@ function parseMaterialBundle(bytes) {
   return { materials, textures, shaders, shaderInfo: shaderInfoByPid };
 }
 
-function decodePrimaryTexture(bytes, parsed) {
+function decodeLargestTexture(bytes, parsed) {
   const co = openCab(bytes, parsed);
   if (!co) return null;
   const { sf, sfp } = co;
@@ -921,25 +946,35 @@ function decodePrimaryTexture(bytes, parsed) {
     bestArea = -1;
   for (const o of sfp.objects) {
     if (o.classID !== 28) continue;
-    try {
-      const tx = unitySf.readObject(sf, sfp.LE, o);
-      const area = Number(tx.m_Width) * Number(tx.m_Height);
-      if (area > bestArea) {
-        bestArea = area;
-        best = tx;
-      }
-    } catch (e) {}
+    const tx = readOne(sf, sfp.LE, o);
+    if (!tx) continue;
+    const area = Number(tx.m_Width) * Number(tx.m_Height);
+    if (area > bestArea) {
+      bestArea = area;
+      best = tx;
+    }
   }
   if (!best) return null;
   const dec = decodeTexture(best, parsed);
   return { name: best.m_Name, width: dec.width, height: dec.height, format: dec.format, rgba: dec.rgba || null, error: dec.error || null };
 }
 
-function decodeTextureRgba(bytes, parsed) {
+function newDecodeStats() {
+  return { failed: 0, reasons: {} };
+}
+const noteDecodeFail = (stats, dec) => {
+  if (!stats || !dec || dec.empty || !dec.error) return;
+  stats.failed++;
+  const k = 'fmt' + dec.format + ' ' + dec.error;
+  stats.reasons[k] = (stats.reasons[k] || 0) + 1;
+};
+
+function decodeLargestTextureRgba(bytes, parsed, stats) {
   parsed = parsed || unityDecode.parseUnityFS(bytes);
   try {
-    const t = decodePrimaryTexture(bytes, parsed);
+    const t = decodeLargestTexture(bytes, parsed);
     if (t && t.rgba) return { rgba: t.rgba, width: t.width, height: t.height };
+    noteDecodeFail(stats, t);
   } catch (e) {}
   if (CRUNCH_MOD && CRUNCH_MOD.findInBuffer && CRUNCH_MOD.decodeLevel0RGBA) {
     const cands = CRUNCH_MOD.findInBuffer(parsed.data, 2);
@@ -960,136 +995,116 @@ function decodeTextureRgba(bytes, parsed) {
   return null;
 }
 
-function decodeTextureCanvas(bytes, parsed) {
-  const dec = decodeTextureRgba(bytes, parsed);
+function decodeLargestTextureCanvas(bytes, parsed, stats) {
+  const dec = decodeLargestTextureRgba(bytes, parsed, stats);
   if (!dec || !dec.rgba || !dec.width || !dec.height) return null;
   const rgba = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
   return texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(rgba, dec.width, dec.height) : null;
 }
 
-function decodeAllTextureCanvases(bytes, parsed) {
-  const out = [];
-  try {
-    const co = openCab(bytes, parsed);
-    if (co) {
-      const { sf, sfp } = co;
-      const p = co.parsed;
-      for (const o of sfp.objects) {
-        if (o.classID !== 28) continue;
-        try {
-          const tx = unitySf.readObject(sf, sfp.LE, o);
-          const dec = decodeTexture(tx, p);
-          if (!dec || !dec.rgba || !dec.width || !dec.height) continue;
-          const rgba = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
-          const cv = texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(rgba, dec.width, dec.height) : null;
-          if (cv) out.push(cv);
-        } catch (e) {}
-      }
+function eachTexture(bytes, parsed, stats, fn) {
+  const co = openCab(bytes, parsed);
+  if (!co) return;
+  const { sf, sfp } = co;
+  for (const o of sfp.objects) {
+    if (o.classID !== 28) continue;
+    const tx = readOne(sf, sfp.LE, o);
+    const dec = tx ? attempt(() => decodeTexture(tx, co.parsed)) : null;
+    if (!dec || !dec.rgba || !dec.width || !dec.height) {
+      noteDecodeFail(stats, dec);
+      continue;
     }
-  } catch (e) {}
+    fn(tx, dec);
+  }
+}
+
+const toCanvas = (dec) => {
+  const rgba = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
+  return texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(rgba, dec.width, dec.height) : null;
+};
+
+function decodeAllTextureCanvases(bytes, parsed, stats) {
+  const out = [];
+  eachTexture(bytes, parsed, stats, (tx, dec) => {
+    const cv = toCanvas(dec);
+    if (cv) out.push(cv);
+  });
   if (out.length) return out;
-  const single = decodeTextureCanvas(bytes, parsed);
+  const single = decodeLargestTextureCanvas(bytes, parsed);
   return single ? [single] : [];
 }
 
-function decodeNamedTextureCanvases(bytes, parsed) {
+function decodeNamedTextureCanvases(bytes, parsed, stats) {
   const out = [];
-  try {
-    const co = openCab(bytes, parsed);
-    if (!co) return out;
-    const { sf, sfp } = co;
-    const p = co.parsed;
-    for (const o of sfp.objects) {
-      if (o.classID !== 28) continue;
-      try {
-        const tx = unitySf.readObject(sf, sfp.LE, o);
-        const dec = decodeTexture(tx, p);
-        if (!dec || !dec.rgba || !dec.width || !dec.height) continue;
-        const rgba = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
-        const cv = texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(rgba, dec.width, dec.height) : null;
-        if (cv) out.push({ name: tx.m_Name || '', canvas: cv, width: dec.width, height: dec.height });
-      } catch (e) {}
-    }
-  } catch (e) {}
-  return out;
+  eachTexture(bytes, parsed, stats, (tx, dec) => {
+    const cv = toCanvas(dec);
+    if (cv) out.push({ name: tx.m_Name || '', canvas: cv, width: dec.width, height: dec.height });
+  });
+  if (out.length) return out;
+  return decodeAllTextureCanvases(bytes, parsed, stats).map((canvas) => ({ name: '', canvas, width: canvas.width, height: canvas.height }));
 }
 
 function decodeAtlasSprite(bytes, spriteName, parsed) {
-  try {
-    const co = openCab(bytes, parsed);
-    if (!co) return null;
-    const { sf, sfp } = co;
-    const p = co.parsed;
-    let sprite = null;
-    for (const o of sfp.objects) {
-      if (o.classID !== 213) continue;
-      let s;
-      try {
-        s = unitySf.readObject(sf, sfp.LE, o);
-      } catch (e) {
-        continue;
-      }
-      if (s && s.m_Name === spriteName) {
-        sprite = s;
-        break;
-      }
+  const co = openCab(bytes, parsed);
+  if (!co) return null;
+  const { sf, sfp } = co;
+  const p = co.parsed;
+  let sprite = null;
+  for (const o of sfp.objects) {
+    if (o.classID !== 213) continue;
+    const s = readOne(sf, sfp.LE, o);
+    if (s && s.m_Name === spriteName) {
+      sprite = s;
+      break;
     }
-    if (!sprite) return null;
-    let rect = sprite.m_RD && sprite.m_RD.textureRect;
-    let texPathID = sprite.m_RD && sprite.m_RD.texture ? String(sprite.m_RD.texture.m_PathID || '0') : '0';
-    if (sprite.m_RenderDataKey) {
-      const sa = sfp.objects.find((o) => o.classID === 687078895);
-      if (sa) {
-        let atlas = null;
-        try {
-          atlas = unitySf.readObject(sf, sfp.LE, sa);
-        } catch (e) {}
-        const rdm = atlas && atlas.m_RenderDataMap;
-        const kk = sprite.m_RenderDataKey;
-        const keyEq = (a) =>
-          a && a.first && kk.first && ['data[0]', 'data[1]', 'data[2]', 'data[3]'].every((d) => String(a.first[d]) === String(kk.first[d])) && String(a.second) === String(kk.second);
-        if (Array.isArray(rdm)) {
-          for (const entry of rdm) {
-            const k = entry && entry[0];
-            const v = entry && entry[1];
-            if (v && keyEq(k)) {
-              if (v.textureRect) rect = v.textureRect;
-              if (v.texture) texPathID = String(v.texture.m_PathID || '0');
-              break;
-            }
+  }
+  if (!sprite) return null;
+  let rect = sprite.m_RD && sprite.m_RD.textureRect;
+  let texPathID = sprite.m_RD && sprite.m_RD.texture ? String(sprite.m_RD.texture.m_PathID || '0') : '0';
+  if (sprite.m_RenderDataKey) {
+    const sa = sfp.objects.find((o) => o.classID === 687078895);
+    if (sa) {
+      const atlas = readOne(sf, sfp.LE, sa);
+      const rdm = atlas && atlas.m_RenderDataMap;
+      const kk = sprite.m_RenderDataKey;
+      const keyEq = (a) => a && a.first && kk.first && ['data[0]', 'data[1]', 'data[2]', 'data[3]'].every((d) => String(a.first[d]) === String(kk.first[d])) && String(a.second) === String(kk.second);
+      if (Array.isArray(rdm)) {
+        for (const entry of rdm) {
+          const k = entry && entry[0];
+          const v = entry && entry[1];
+          if (v && keyEq(k)) {
+            if (v.textureRect) rect = v.textureRect;
+            if (v.texture) texPathID = String(v.texture.m_PathID || '0');
+            break;
           }
         }
       }
     }
-    if (!rect) return null;
-    let dec = null;
-    const texObjs = sfp.objects.filter((o) => o.classID === 28);
-    const targetTex = texPathID !== '0' ? texObjs.find((o) => String(o.pathID) === texPathID) : null;
-    for (const o of targetTex ? [targetTex] : texObjs) {
-      try {
-        const tx = unitySf.readObject(sf, sfp.LE, o);
-        const d = decodeTexture(tx, p);
-        if (d && d.rgba && d.width && d.height) {
-          dec = d;
-          break;
-        }
-      } catch (e) {}
-    }
-    if (!dec) return null;
-    const top = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
-    const rw = Math.max(1, Math.round(rect.width));
-    const rh = Math.max(1, Math.round(rect.height));
-    const rx = Math.min(Math.max(0, Math.round(rect.x)), dec.width - rw);
-    const ry = Math.min(Math.max(0, Math.round(dec.height - rect.y - rect.height)), dec.height - rh);
-    const sub = new Uint8ClampedArray(rw * rh * 4);
-    for (let row = 0; row < rh; row++) {
-      const srcOff = ((ry + row) * dec.width + rx) * 4;
-      sub.set(top.subarray(srcOff, srcOff + rw * 4), row * rw * 4);
-    }
-    return texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(sub, rw, rh) : null;
-  } catch (e) {
-    return null;
   }
+  if (!rect) return null;
+  let dec = null;
+  const texObjs = sfp.objects.filter((o) => o.classID === 28);
+  const targetTex = texPathID !== '0' ? texObjs.find((o) => String(o.pathID) === texPathID) : null;
+  for (const o of targetTex ? [targetTex] : texObjs) {
+    const tx = readOne(sf, sfp.LE, o);
+    const d = tx ? attempt(() => decodeTexture(tx, p)) : null;
+    if (d && d.rgba && d.width && d.height) {
+      dec = d;
+      break;
+    }
+  }
+  if (!dec) return null;
+  const top = texCodec && texCodec.flipRgbaY ? texCodec.flipRgbaY(dec.rgba, dec.width, dec.height) : dec.rgba;
+  const rw = Math.max(1, Math.round(rect.width));
+  const rh = Math.max(1, Math.round(rect.height));
+  const rx = Math.min(Math.max(0, Math.round(rect.x)), dec.width - rw);
+  const ry = Math.min(Math.max(0, Math.round(dec.height - rect.y - rect.height)), dec.height - rh);
+  const sub = new Uint8ClampedArray(rw * rh * 4);
+  for (let row = 0; row < rh; row++) {
+    const srcOff = ((ry + row) * dec.width + rx) * 4;
+    sub.set(top.subarray(srcOff, srcOff + rw * 4), row * rw * 4);
+  }
+  return texCodec && texCodec.renderRgbaToCanvas ? texCodec.renderRgbaToCanvas(sub, rw, rh) : null;
 }
 
 function parseMouthAtlas(bytes) {
@@ -1110,6 +1125,14 @@ function parseMouthAtlas(bytes) {
   return { rgba: def.rgba, width: def.width, height: def.height, variants };
 }
 
+function decodeNamedTextureRgba(bytes, parsed) {
+  const out = [];
+  eachTexture(bytes, parsed, null, (tx, dec) => {
+    out.push({ name: tx.m_Name || '', rgba: dec.rgba, width: dec.width, height: dec.height });
+  });
+  return out;
+}
+
 function extractSpineInputs(bytes) {
   if (!bytes) return null;
   const parsed = unityDecode.parseUnityFS(bytes);
@@ -1117,19 +1140,30 @@ function extractSpineInputs(bytes) {
   const a = tas.find((t) => /\.atlas$/i.test(t.name));
   const s = tas.find((t) => /\.skel(?:\.bytes)?$/i.test(t.name));
   if (!a || !a.bytes || !a.bytes.length || !s || !s.bytes || !s.bytes.length) return null;
-  const texture = decodeTextureRgba(bytes, parsed);
+  const names = spineAtlas.atlasPageNames(a.bytes);
+  const found = decodeNamedTextureRgba(bytes, parsed);
+  const textures = [];
+  for (let i = 0; i < names.length; i++) {
+    const t = spineAtlas.textureForPage(found, names[i], i);
+    if (t && !textures.includes(t)) textures.push(t);
+  }
+  for (const t of found) if (!textures.includes(t)) textures.push(t);
+  const texture = textures[0] || decodeLargestTextureRgba(bytes, parsed);
   if (!texture || !texture.rgba) return null;
-  return { atlasBytes: a.bytes, skeletonBytes: s.bytes, skeletonPath: s.name, texture };
+  return { atlasBytes: a.bytes, skeletonBytes: s.bytes, skeletonPath: s.name, texture, textures: textures.length ? textures : [texture] };
 }
 
 export const unityMesh = {
+  KEEP_DXT,
+  newDecodeStats,
   parseModelBundle,
   parseMaterialBundle,
   resolveBlend,
-  decodeTextureRgba,
-  decodeTextureCanvas,
+  decodeLargestTextureRgba,
+  decodeLargestTextureCanvas,
   decodeAllTextureCanvases,
   decodeNamedTextureCanvases,
+  decodeNamedTextureRgba,
   decodeAtlasSprite,
   parseMouthAtlas,
   extractSpineInputs,

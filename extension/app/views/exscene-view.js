@@ -1,23 +1,24 @@
 import { collectionRepository } from '../../data/collection.js';
 import { saveData } from '../../core/savedata.js';
-import { assetStore } from '../../data/asset-store.js';
+import { assetStore, AREA } from '../../data/asset-store.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { unityMesh } from '../../unity/mesh.js';
-import { PLACE } from '../../core/placement.js';
-import { SK, DIRS, xposNames } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
+import { SK } from '../../core/storage-keys.js';
+import { xposNames } from '../../data/master-labels.js';
 import { fileStore } from '../../core/fsdir.js';
+import { createRevealer } from '../../core/visibility.js';
 import { getById, el, append } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
 import { folderHandle } from '../runtime/state-refresh.js';
 import { nameFix, kanaKey, spinnerHtml } from '../ui/ui-format.js';
 import { navTo } from '../runtime/router-controller.js';
-import { characterComparer } from './roster-ui.js';
+import { characterComparer, rosterQuery } from '../runtime/roster-prefs.js';
 
 const THUMB_CONC = 12;
 const EX_RE = /^EX/i;
 
 let favorites = null;
-let observer = null;
 const thumbQueue = [];
 let draining = false;
 
@@ -50,7 +51,7 @@ async function toggleFavorite(epId) {
   return set.has(key);
 }
 
-export async function exSceneItems() {
+async function exSceneItems() {
   const { folderMeta } = await collectionRepository.folderModel();
   const fav = await loadFavorites();
   const ownedBy = new Map();
@@ -168,22 +169,23 @@ async function paintThumb(box, it) {
   if (!rel) return markEmpty(box, '取り先不明');
   let bytes = null;
   try {
-    bytes = await assetStore.readAsset(handle, rel, PLACE.episode(`story/${it.episodeId}`, 'bg'));
+    bytes = await assetStore.readIn(AREA.charEpisode(handle, it.episodeId, 'bg'), rel);
   } catch (e) {}
   if (!bytes) return markEmpty(box, '未取得');
+  let cvs = null;
   try {
-    const cvs = unityMesh.decodeAllTextureCanvases(bytes);
-    if (cvs && cvs[0]) {
-      if (useCache) {
-        const blob = await writeCached(it.episodeId, cvs[0]);
-        if (blob) return showBlob(box, blob);
-      }
-      box.innerHTML = '';
-      cvs[0].className = 'exthumb-img';
-      box.appendChild(cvs[0]);
-      return;
-    }
+    cvs = unityMesh.decodeAllTextureCanvases(bytes);
   } catch (e) {}
+  if (cvs && cvs[0]) {
+    if (useCache) {
+      const blob = await writeCached(it.episodeId, cvs[0]);
+      if (blob) return showBlob(box, blob);
+    }
+    box.innerHTML = '';
+    cvs[0].className = 'exthumb-img';
+    box.appendChild(cvs[0]);
+    return;
+  }
   markEmpty(box, '表示できません');
 }
 
@@ -200,23 +202,22 @@ async function drainThumbs() {
   }
 }
 
+let thumbById = new Map();
+const thumbReveal = createRevealer({
+  onReveal: (node) => {
+    const it = thumbById.get(node.dataset.epid);
+    if (it) thumbQueue.push([node, it]);
+  },
+  onBatch: () => {
+    if (thumbQueue.length) drainThumbs();
+  },
+});
+
 function watchThumbs(grid, byId) {
-  if (observer) observer.disconnect();
+  thumbReveal.reset();
   thumbQueue.length = 0;
-  if (typeof IntersectionObserver !== 'function') return;
-  observer = new IntersectionObserver(
-    (entries) => {
-      for (const en of entries) {
-        if (!en.isIntersecting) continue;
-        observer.unobserve(en.target);
-        const it = byId.get(en.target.dataset.epid);
-        if (it) thumbQueue.push([en.target, it]);
-      }
-      if (thumbQueue.length) drainThumbs();
-    },
-    { rootMargin: '300px' },
-  );
-  for (const box of grid.querySelectorAll('.exthumb')) observer.observe(box);
+  thumbById = byId;
+  thumbReveal.watchAll(grid.querySelectorAll('.exthumb'));
 }
 
 function card(it) {
@@ -258,7 +259,7 @@ function revokeUrls() {
 
 export async function renderExScenes(grid) {
   const items = await exSceneItems();
-  const q = (getById('rosterSearch').value || '').trim();
+  const q = rosterQuery();
   const qk = kanaKey(q);
   const shown = items.filter((it) => matches(it, q, qk));
   const byName = (a, b) => (a.displayName > b.displayName ? 1 : a.displayName < b.displayName ? -1 : 0);
@@ -276,8 +277,7 @@ export async function renderExScenes(grid) {
 }
 
 export function resetExScenes() {
-  if (observer) observer.disconnect();
-  observer = null;
+  thumbReveal.reset();
   thumbQueue.length = 0;
   revokeUrls();
 }

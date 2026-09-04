@@ -1,7 +1,7 @@
 import { getById } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
 import { ROUTE_KINDS as routeKinds } from '../runtime/router.js';
-import { getStoryPanel, getHomePanel, getOtherPanel, getMonsterPanel } from '../runtime/panel-state.js';
+import { getPanel, focusPanelTarget } from '../runtime/panel-state.js';
 import { renderRoster } from './roster-ui.js';
 import { showEmptyIdle } from './shell-ui.js';
 import { audioScene } from '../runtime/audio-scene.js';
@@ -13,13 +13,7 @@ function syncRosterTypeButtons() {
   if (own) own.style.display = playerState.rosterKind === 'character' ? '' : 'none';
 }
 
-const targetPanel = () => (playerState.rosterKind === 'home' ? getHomePanel() : playerState.rosterKind === 'other' ? getOtherPanel() : playerState.rosterKind === 'monster' ? getMonsterPanel() : null);
-
-export function focusTarget(panel, target) {
-  if (!panel || !target) return;
-  if (panel.openTarget) panel.openTarget(target);
-  else if (panel.scrollToSection) panel.scrollToSection(target);
-}
+const targetPanel = () => getPanel(playerState.rosterKind);
 
 export function openRoster(rosterKind, target) {
   const sameView = playerState.rosterOpen && !playerState.cur && playerState.rosterKind === (rosterKind || playerState.rosterKind);
@@ -27,14 +21,14 @@ export function openRoster(rosterKind, target) {
   syncRosterTypeButtons();
   playerState.rosterOpen = true;
   playerState.cur = null;
-  audioScene.set({ storyVisible: false });
-  const storyPanel = getStoryPanel();
+  audioScene.set({ storyPlaying: false });
+  const storyPanel = getPanel('story');
   if (storyPanel) storyPanel.reset();
   getById('roster').style.display = '';
   getById('empty').style.display = 'none';
   getById('detail').style.display = 'none';
   if (sameView) {
-    focusTarget(targetPanel(), target);
+    focusPanelTarget(targetPanel(), target);
     return;
   }
   renderRoster({ target: target || null });

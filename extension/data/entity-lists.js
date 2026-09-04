@@ -1,7 +1,7 @@
-import { DIRS } from '../core/constants.js';
-import { assetStore } from './asset-store.js';
-import { PLACE, subFor } from '../core/placement.js';
-import { bundleName } from '../core/paths.js';
+import { DIRS } from '../core/dirs.js';
+import { assetStore, AREA } from './asset-store.js';
+import { subFor } from '../core/assetpath/placement.js';
+import { bundleName } from '../core/assetpath/paths.js';
 import { staticsList } from './statics.js';
 import { TITLE_AA_CACHE, LOGO_AA_CACHE, TITLE_SPRITE_NAMES, LOGO_SPRITE_NAMES } from './credits-assets.js';
 import { gachaFileList } from './gacha.js';
@@ -595,8 +595,8 @@ export async function other3dStatus(listIn) {
   const refs = new Map();
   for (const e of list) for (const rel of other3dRefs(e)) refs.set(assetStore.idOf(rel), rel);
   const have = await assetStore.presentIds(
-    DIRS.other,
-    [...refs.values()].map((rel) => ({ rel, place: PLACE.flat })),
+    AREA.other.dir,
+    [...refs.values()].map((rel) => assetStore.specIn(AREA.other, rel)),
   );
   return {
     list,
@@ -620,19 +620,19 @@ export async function monsterStatus(listIn) {
     }
   const have = await assetStore.presentIds(
     DIRS.monster,
-    rels.map((a) => ({ rel: a.rel, place: PLACE.owned(a) })),
+    rels.map((a) => assetStore.specIn(AREA.monster(a), a.rel)),
   );
   const missing = new Map();
   for (const e of list) for (const a of e.assets) if (!have.has(a.id)) missing.set(a.id, a);
   const byPath = new Map();
   for (const a of rels) {
-    const p = subFor(PLACE.owned(a), a.rel, 'web');
+    const p = subFor(AREA.monster(a).place, a.rel, 'web');
     if (!byPath.has(p)) byPath.set(p, a);
   }
   return { list, have, monsters: list.length, ready: list.filter((e) => monsterReady(e, have)).length, total: ids.size, refs: [...byPath.values()], missing: [...missing.values()] };
 }
 
-export const isGachaEntry = (e) => e.source === 'gacha';
+const isGachaEntry = (e) => e.source === 'gacha';
 
 export async function other2dStatus(listIn) {
   const list = listIn || (await other2dList());

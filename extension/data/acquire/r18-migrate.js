@@ -1,5 +1,6 @@
 import { fileStore } from '../../core/fsdir.js';
-import { R18_ALT_EPISODES, R18_ALT_OWNER } from '../../core/constants.js';
+import { R18_ALT_EPISODES, R18_ALT_OWNER } from '../r18-alt.js';
+import { CHAR_DIR } from '../../core/assetpath/placement.js';
 import { folderModel } from '../folder-model.js';
 import { characterMeta } from '../character-meta.js';
 
@@ -24,7 +25,7 @@ async function folderDir(folderKey, folderMeta, create) {
 }
 
 async function moveEpisode(srcDir, destDir, episodeId) {
-  const sub = `story/${episodeId}`;
+  const sub = CHAR_DIR.episodeRoot(episodeId);
   const files = await walk(srcDir, sub);
   if (!files.length) return 'none';
 
@@ -73,7 +74,7 @@ export async function migrateR18Episodes(folderKey, episodes) {
   const result = { moved: [], failed: [] };
   const destCache = new Map();
   for (const alt of R18_ALT_EPISODES) {
-    if (!(await walk(srcDir, `story/${alt.id}`)).length) continue;
+    if (!(await walk(srcDir, CHAR_DIR.episodeRoot(alt.id))).length) continue;
     const ownerKey = ownerOf(alt.after);
     if (!ownerKey) continue;
     if (!destCache.has(ownerKey)) destCache.set(ownerKey, await folderDir(ownerKey, folderMeta, true));

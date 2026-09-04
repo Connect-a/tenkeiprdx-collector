@@ -4,7 +4,7 @@ import { characterMeta } from '../../data/character-meta.js';
 import { getById, el } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
 import { nameFix } from '../ui/ui-format.js';
-import { utilHelpers } from '../../core/util.js';
+import { cachedAudioUrl } from '../../core/audio-url.js';
 import { voiceOut } from '../panels/voice-out.js';
 
 const VOICE_SITUATION = {
@@ -84,7 +84,7 @@ export async function renderVoiceGallery() {
     card.addEventListener('click', async () => {
       cards.forEach((x) => x.classList.remove('playing'));
       card.classList.add('playing');
-      voiceOut.play(await utilHelpers.cachedAudioUrl(playerState.cur.voiceUrls, c.name, async () => c));
+      voiceOut.play(await cachedAudioUrl(playerState.cur.voiceUrls, c.name, async () => c));
     });
     grid.appendChild(card);
   }

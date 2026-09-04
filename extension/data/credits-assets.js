@@ -1,5 +1,7 @@
-export const TITLE_AA_CACHE = 'statics/titlesprites_aa.bundle';
-export const LOGO_AA_CACHE = 'statics/logosprites_aa.bundle';
+import { SHARED_FILE } from '../core/assetpath/placement.js';
+
+export const TITLE_AA_CACHE = SHARED_FILE.statics('titlesprites_aa.bundle');
+export const LOGO_AA_CACHE = SHARED_FILE.statics('logosprites_aa.bundle');
 
 export const AA_BUNDLES = [
   {

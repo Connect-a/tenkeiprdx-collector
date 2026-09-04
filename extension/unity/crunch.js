@@ -22,11 +22,13 @@ function initUnityModule() {
     if (p && typeof p.then === 'function') {
       p.then((m) => {
         unityModule = m || null;
-      }).catch(() => {});
+      }).catch((e) => console.warn('[tp] Crunchデコーダを初期化できませんでした', e));
     } else {
       unityModule = p || null;
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[tp] Crunchデコーダを初期化できませんでした', e);
+  }
 }
 
 initUnityModule();

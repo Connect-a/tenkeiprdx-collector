@@ -8,7 +8,8 @@ import { toast } from '../ui/notifier.js';
 import { errText } from '../../core/messages.js';
 import { failureReport, failureText, hasFailures } from '../../core/failure-report.js';
 import { refreshLists, folderHandle } from '../runtime/state-refresh.js';
-import { openCharacter, appendDetailInfo } from './detail-view.js';
+import { appendDetailInfo } from './detail-info.js';
+import { redraw } from '../runtime/ui-bus.js';
 import { switchTab } from './shell-ui.js';
 import { closeRoster } from './roster-view.js';
 import { audioScene } from '../runtime/audio-scene.js';
@@ -46,15 +47,18 @@ export async function runDownload(folderKey, triggerBtn) {
   getById('dlbar').style.display = '';
   getById('dlbar').classList.remove('err');
   resetProgress();
+  let bst = null;
   try {
-    const bst = await bulkDownloader.getState();
-    if (bulkDownloader.isStarting() || (bst && bulkDownloader.isActive(bst.phase))) {
-      const m = '一括DLの実行中です。完了または停止してから個別DLしてください。';
-      setProgress(m, 0);
-      toast(m, 'err');
-      return;
-    }
-  } catch (e) {}
+    bst = await bulkDownloader.getState();
+  } catch (e) {
+    console.warn('[tp] 一括DLの状態を取得できませんでした', e);
+  }
+  if (bulkDownloader.isStarting() || (bst && bulkDownloader.isActive(bst.phase))) {
+    const m = '一括DLの実行中です。完了または停止してから個別DLしてください。';
+    setProgress(m, 0);
+    toast(m, 'err');
+    return;
+  }
   _singleDLActive = true;
   setPhaseProgress('assets', '開始…', 0);
   const btn = triggerBtn || getById('doDl');
@@ -77,7 +81,7 @@ export async function runDownload(folderKey, triggerBtn) {
     await downloadRunner.run([target], { report });
     await refreshLists(['fs', 'owned']);
     if (folderHandle(String(folderKey))) {
-      await openCharacter(String(folderKey));
+      await redraw('character', String(folderKey));
       const activeTab = document.querySelector('.tab.active');
       if (activeTab && activeTab.dataset.tab) switchTab(activeTab.dataset.tab);
     } else setProgress('ダウンロードは終わりましたが、保存できたデータがありませんでした。', 1);
@@ -107,7 +111,7 @@ export async function showDownloadPrompt(item) {
   getById('detail').style.display = '';
   getById('dlbar').style.display = 'none';
   getById('playwrap').style.display = 'none';
-  audioScene.set({ storyVisible: false });
+  audioScene.set({ storyPlaying: false });
   getById('eplist').innerHTML = '';
   getById('stage').style.display = 'none';
   getById('voicegrid').innerHTML = '';

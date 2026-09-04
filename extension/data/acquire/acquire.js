@@ -1,31 +1,33 @@
 import { unityDecode } from '../../unity/decode.js';
 import { fileStore } from '../../core/fsdir.js';
-import { DIRS, SK, DL_CONC, FOLDER_PARENTS } from '../../core/constants.js';
+import { DIRS, FOLDER_PARENTS } from '../../core/dirs.js';
+import { SK } from '../../core/storage-keys.js';
+import { DL_CONC } from './limits.js';
 import { networkClient } from '../network.js';
+import { settings } from '../../core/settings.js';
 import { dlSession } from '../dl-session.js';
 import { ensureIndexes } from '../index-store.js';
 import { folderModel, characterDetail } from '../folder-model.js';
 import { userStateService } from '../user-state.js';
-import { utilHelpers } from '../../core/util.js';
-import { characterMeta } from '../character-meta.js';
+import { pool, safeProgress } from '../../core/async.js';
+import { characterMeta, CAST_CATS } from '../character-meta.js';
 import { assetRefs } from '../asset-refs.js';
 import { buildIndexes } from '../build-indexes.js';
-import { ensureSharedSingletons } from './acquire-shared-res.js';
-import { fileNameOf } from '../../core/paths.js';
-import { PLACE } from '../../core/placement.js';
-import { assetStore } from '../asset-store.js';
+import { acquireShared } from './acquire-shared-res.js';
+import { fileNameOf } from '../../core/assetpath/paths.js';
+import { PLACE, CHAR_DIR, EPISODE_FILE, sceneHave } from '../../core/assetpath/placement.js';
+import { assetStore, AREA } from '../asset-store.js';
 import { manualChoiceGroups } from '../manual-choice-groups.js';
 const { assetRoot } = networkClient;
 const { ownedLevels, unlockedPaidSet, clearedNodeSet, openEpisodeSet, userLoaded } = userStateService;
-const pool = utilHelpers.pool;
 
 async function distConfig() {
   let binUrl = '',
     email = '';
   try {
-    const st = await chrome.storage.local.get([SK.binlistUrl, SK.email]);
+    const st = await chrome.storage.local.get(SK.binlistUrl);
     binUrl = (st[SK.binlistUrl] || '').trim();
-    email = (st[SK.email] || '').trim();
+    email = (settings.get('letterEmail') || '').trim();
   } catch (e) {}
   return { binUrl, email, valid: /^https?:\/\/\S+/.test(binUrl) && !!email };
 }
@@ -54,7 +56,7 @@ async function readSavedScenes(dir, episodes, { contents = true } = {}) {
     choiceGroupsByEp = {};
   if (!contents) return { sceneBytes, servedByEp, choiceGroupsByEp };
   await pool(episodes, DL_CONC.decode, async (ep) => {
-    const bytes = await fileStore.readBytesUnder(dir, `story/${ep.episodeId}/getDetails.bin`);
+    const bytes = await fileStore.readBytesUnder(dir, EPISODE_FILE.details(ep.episodeId));
     if (bytes && bytes.length) {
       const served = {};
       try {
@@ -66,10 +68,10 @@ async function readSavedScenes(dir, episodes, { contents = true } = {}) {
         if (cg && Object.keys(cg).length) choiceGroupsByEp[ep.episodeId] = cg;
       } catch (e) {}
     } else servedByEp[ep.episodeId] = null;
-    for (const fn of await fileStore.listUnder(dir, `story/${ep.episodeId}`)) {
+    for (const fn of await fileStore.listUnder(dir, CHAR_DIR.episodeRoot(ep.episodeId))) {
       const m = fn.match(/^scene_(\d+)\.bin$/);
       if (m) {
-        const b = await fileStore.readBytesUnder(dir, `story/${ep.episodeId}/${fn}`);
+        const b = await fileStore.readBytesUnder(dir, `${CHAR_DIR.episodeRoot(ep.episodeId)}/${fn}`);
         if (b && b.length && b[0] !== 0x7b) sceneBytes[m[1]] = b;
       }
     }
@@ -102,7 +104,9 @@ async function binlistSceneSet({ force } = {}) {
         if (Array.isArray(d.scenes)) for (const s of d.scenes) set.add(String(s));
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[tp] 一覧を取得できませんでした', e);
+  }
   _binlistScenes = set;
   try {
     await chrome.storage.local.set({ [SK.binlistScenes]: [...set] });
@@ -228,7 +232,7 @@ async function decodeEpisodeScenes(ctx, ep, epMeta, sceneBytes, voice) {
       if (got) {
         bin = got;
         try {
-          await fileStore.writeUnder(ctx.dir, `story/${ep.episodeId}/scene_${sid}.bin`, bin);
+          await fileStore.writeUnder(ctx.dir, EPISODE_FILE.scene(ep.episodeId, sid), bin);
         } catch (e) {}
       } else if (own.has(sid)) ctx.fails.push(`ストーリー本文 ${sid}`);
     }
@@ -265,11 +269,11 @@ async function decodeEpisodeScenes(ctx, ep, epMeta, sceneBytes, voice) {
     for (const id of timeline.castIds || []) ctx.castIds.add(id);
     if (ctx.download) {
       try {
-        await fileStore.writeUnder(ctx.dir, `story/${ep.episodeId}/scene_${sid}.json`, JSON.stringify(timeline));
+        await fileStore.writeUnder(ctx.dir, EPISODE_FILE.timeline(ep.episodeId, sid), JSON.stringify(timeline));
       } catch (e) {}
     }
 
-    const sc = { sceneId: String(sid), timeline: `story/${ep.episodeId}/scene_${sid}.json`, scene: `story/${ep.episodeId}/scene_${sid}.bin`, voice: null };
+    const sc = { sceneId: String(sid), timeline: EPISODE_FILE.timeline(ep.episodeId, sid), scene: EPISODE_FILE.scene(ep.episodeId, sid), voice: null };
     epMeta.scenes.push(sc);
     queueSceneVoice(ctx, ep, epMeta, sc, timeline, voice.adventure[sid]);
   }
@@ -301,7 +305,7 @@ function queueSceneVoice(ctx, ep, epMeta, sc, timeline, advHash) {
   ctx.jobs.push(async () => {
     if (ctx.sess.aborted) return;
     const vrel = advHash ? `adventurevoice_assets_adventurevoice/${sid}_${advHash}.bundle` : null;
-    const vplace = PLACE.episode(`story/${ep.episodeId}`, 'voice');
+    const vplace = PLACE.episode(ep.episodeId, 'voice');
     const vpath = vrel ? await ctx.grabOwn(vrel, vplace, `voice ${sid}`) : null;
     const ok = !!vpath;
     if (ok) {
@@ -322,7 +326,7 @@ function queueAssetGrab(ctx, { rel, label, sharedFirst, episodeDir, sharedPlace,
 }
 
 function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
-  const epDir = `story/${ep.episodeId}`;
+  const epId = ep.episodeId;
 
   for (const id of used.insert) {
     const rel = ctx.itemIdx[id];
@@ -334,7 +338,7 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
       rel,
       label: `insert ${id}`,
       sharedFirst: true,
-      episodeDir: PLACE.episode(epDir, 'cg'),
+      episodeDir: PLACE.episode(epId, 'cg'),
       onGot: (path) => ((epMeta.cg || (epMeta.cg = {}))[id] = path),
     });
   }
@@ -353,7 +357,7 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
       rel,
       label: `bg ${name}`,
       sharedFirst: /^bg_(adventure|eventstill)_/i.test(name),
-      episodeDir: PLACE.episode(epDir, 'bg'),
+      episodeDir: PLACE.episode(epId, 'bg'),
       onGot: (path) => (epMeta.bg[name] = path),
       onFail: () => routing.dlFailed.push(name),
     });
@@ -361,7 +365,7 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
     if (trel) {
       ctx.jobs.push(async () => {
         if (ctx.sess.aborted) return;
-        await ctx.grabOwn(trel, PLACE.episode(epDir, 'cgthumb'), `cgthumb ${name}`);
+        await ctx.grabOwn(trel, PLACE.episode(epId, 'cgthumb'), `cgthumb ${name}`);
       });
     }
   }
@@ -376,7 +380,7 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
       rel,
       label: `still ${name}`,
       sharedFirst: /^bg_(adventure|eventstill)_/i.test(name),
-      episodeDir: PLACE.episode(epDir, 'cg'),
+      episodeDir: PLACE.episode(epId, 'cg'),
       onGot: (path) => ((epMeta.cg || (epMeta.cg = {}))[name] = path),
       onFail: () => routing.dlFailed.push('still:' + name),
     });
@@ -396,7 +400,7 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
         const sp2 = await ctx.grabAsset(ctx.sharedDir, rel, null, label);
         return sp2 ? `${DIRS.shared}/${sp2}` : null;
       }
-      return await ctx.grabOwn(rel, PLACE.episode(epDir, 'bgm'), label);
+      return await ctx.grabOwn(rel, PLACE.episode(epId, 'bgm'), label);
     };
     ctx.jobs.push(async () => {
       if (ctx.sess.aborted) return;
@@ -422,7 +426,7 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
       rel,
       label: `se ${name}`,
       sharedFirst: true,
-      episodeDir: PLACE.episode(epDir, 'se'),
+      episodeDir: PLACE.episode(epId, 'se'),
       onGot: (path) => (epMeta.se[name] = path),
       onFail: () => routing.dlFailed.push('se:' + name),
     });
@@ -444,6 +448,18 @@ function queueCardVisuals(ctx, meta, orderedEpMetas) {
     });
   }
 
+  for (const dep of (idx.meta.modelDeps || {})[String(folderKey)] || []) {
+    ctx.jobs.push(async () => {
+      if (ctx.sess.aborted) return;
+      const p = await ctx.grabOwn(dep, PLACE.visual('modeldep'), `model dep ${folderKey}`);
+      if (!p) return;
+      (assetsManifest.modeldep || (assetsManifest.modeldep = {}))[refNameOf(fileNameOf(dep))] = p;
+      try {
+        if (await assetStore.hasAsset(DIRS.shared, dep)) await assetStore.removeAsset(DIRS.shared, dep);
+      } catch (e) {}
+    });
+  }
+
   const a = idx.assets.assetIndex[folderKey] || {};
   for (const cat of ['still', 'illustx']) {
     for (const rel of a[cat] || []) {
@@ -455,7 +471,7 @@ function queueCardVisuals(ctx, meta, orderedEpMetas) {
         const epId = m ? ctx.cgSetToEp[m[1]] : null;
         const em = epId ? epMetaById[String(epId)] : null;
         if (cat === 'still' && !em) return;
-        const sub = await ctx.grabOwn(rel, em ? PLACE.episode(`story/${epId}`, 'cg') : PLACE.visual(cat), `${cat} ${fn}`);
+        const sub = await ctx.grabOwn(rel, em ? PLACE.episode(epId, 'cg') : PLACE.visual(cat), `${cat} ${fn}`);
         if (!sub) return;
         if (em) (em.cg || (em.cg = {}))[rn] = sub;
         else (assetsManifest[cat] || (assetsManifest[cat] = {}))[rn] = sub;
@@ -475,14 +491,14 @@ function queueCardVisuals(ctx, meta, orderedEpMetas) {
     const wrec = { slot: w.slot || 'wp_2', scale: w.scale || 1 };
     ctx.jobs.push(async () => {
       if (ctx.sess.aborted) return;
-      const mp = modelRel ? await ctx.grabOwn(modelRel, PLACE.fixed('visual/weapon/', `${w.weaponId}_model`), `weapon model ${w.weaponId}`) : null;
+      const mp = modelRel ? await ctx.grabOwn(modelRel, PLACE.weapon(`${w.weaponId}_model`), `weapon model ${w.weaponId}`) : null;
       if (mp) wrec.model = mp;
-      const tp = matRel ? await ctx.grabOwn(matRel, PLACE.fixed('visual/weapon/', `${w.weaponId}_mat`), `weapon mat ${w.weaponId}`) : null;
+      const tp = matRel ? await ctx.grabOwn(matRel, PLACE.weapon(`${w.weaponId}_mat`), `weapon mat ${w.weaponId}`) : null;
       if (tp) wrec.materials = tp;
       const deps = [];
       for (const [i, dep] of ((idx.meta.modelDeps || {})[String(w.weaponId)] || []).entries()) {
         if (dep === matRel || dep === modelRel) continue;
-        const dp = await ctx.grabOwn(dep, PLACE.fixed('visual/weapon/', `${w.weaponId}_dep${i}`), `weapon dep ${w.weaponId}`);
+        const dp = await ctx.grabOwn(dep, PLACE.weapon(`${w.weaponId}_dep${i}`), `weapon dep ${w.weaponId}`);
         if (dp) deps.push(dp);
       }
       if (deps.length) wrec.deps = deps;
@@ -524,10 +540,10 @@ function queueCastSpines(ctx, routing) {
       const c = ctx.idx.master.characters[id];
       const rec = { name: (c && c.name) || '', title: (c && c.title) || '' };
       const own = (await ctx.castDirs()).get(id);
-      for (const cat of ['spine', 'spinelight']) {
+      for (const cat of CAST_CATS) {
         const rel = (a2[cat] || [])[0];
         if (!rel) continue;
-        const mine = own ? await assetStore.locate(own.handle, rel, PLACE.visual(cat)) : null;
+        const mine = own ? await assetStore.locateIn(AREA.charVisual(own.handle, cat), rel) : null;
         if (mine) {
           rec[cat] = `${own.parent}/${own.dirName}/${mine}`;
           continue;
@@ -580,7 +596,9 @@ async function saveFailureReport(storageKey, folderKey, meta, rows) {
     }
     store.updatedAt = Date.now();
     await chrome.storage.local.set({ [storageKey]: store });
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[tp] 失敗レポートを保存できませんでした', e);
+  }
 }
 
 function sortManifest(manifest) {
@@ -602,8 +620,7 @@ async function findMissingScenes(ctx, work, servedByEp) {
   const out = [];
   for (const { ep } of work) {
     for (const sid of servedByEp[ep.episodeId] || []) {
-      if (!(await fileStore.exists(ctx.dir, `story/${ep.episodeId}/scene_${sid}.bin`)))
-        out.push({ sceneId: String(sid), epId: String(ep.episodeId), epLabel: ep.label || '', epTitle: ep.title || '' });
+      if (!(await fileStore.exists(ctx.dir, EPISODE_FILE.scene(ep.episodeId, sid)))) out.push({ sceneId: String(sid), epId: String(ep.episodeId), epLabel: ep.label || '', epTitle: ep.title || '' });
     }
   }
   return out;
@@ -613,7 +630,7 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
   const { voice, folderMeta } = await folderModel();
   const meta0 = folderMeta[String(folderKey)];
   if (!meta0) throw new Error('index に無いキー: ' + folderKey);
-  const prog = utilHelpers.safeProgress(progress);
+  const prog = safeProgress(progress);
   const ctx = await createAcquireContext(folderKey, meta0, opts);
   if (ctx.download) prog('壊れた分を確認しています…', 0);
   ctx.purged = ctx.download ? await fileStore.purgeEmpty(ctx.dir) : 0;
@@ -668,8 +685,8 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
       const epMeta = byId.get(String(ep.episodeId));
       if (!epMeta) continue;
       const ids = (ep.sceneBinIds || []).map(String);
-      const names = new Set(await fileStore.listUnder(ctx.dir, `story/${ep.episodeId}`));
-      epMeta.have = !ids[0] || !names.has(`scene_${ids[0]}.bin`) ? 'none' : ids.every((sid) => names.has(`scene_${sid}.bin`)) ? 'full' : 'partial';
+      const names = new Set(await fileStore.listUnder(ctx.dir, CHAR_DIR.episodeRoot(ep.episodeId)));
+      epMeta.have = sceneHave(ids, names);
     }
   }
 
@@ -678,7 +695,7 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
     ctx.jobs.push(async () => {
       if (ctx.sess.aborted) return;
       const cvrel = charHash ? `charactervoices_assets_charactervoices/${folderKey}_${charHash}.bundle` : null;
-      const cvp = cvrel ? await ctx.grabOwn(cvrel, PLACE.fixed('', 'voice_gallery'), 'charvoice') : null;
+      const cvp = cvrel ? await ctx.grabOwn(cvrel, PLACE.voiceGallery(), 'charvoice') : null;
       const ok = !!cvp;
       if (ok) meta.voiceGallery = { bundle: cvp };
     });
@@ -689,7 +706,7 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
   if (ctx.download) {
     ctx.jobs.push(async () => {
       if (ctx.sess.aborted) return;
-      await ensureSharedSingletons(ctx.sharedDir, ctx.base, ctx.idx, (rel) => ctx.grabAsset(ctx.sharedDir, rel, null), { includeStage: true });
+      await acquireShared.ensureSharedSingletons(ctx.sharedDir, ctx.base, ctx.idx, (rel) => ctx.grabAsset(ctx.sharedDir, rel, null), { includeStage: true });
     });
   }
   queueCastSpines(ctx, routing);
@@ -712,11 +729,11 @@ async function downloadCharacterAssets(folderKey, progress, opts) {
   meta.assets = sortManifest(meta.assets);
 
   const selfRec = {};
-  for (const cat of ['spine', 'spinelight']) if (meta.assets[cat] && meta.assets[cat][ctx.folderKey]) selfRec[cat] = meta.assets[cat][ctx.folderKey];
+  for (const cat of CAST_CATS) if (meta.assets[cat] && meta.assets[cat][ctx.folderKey]) selfRec[cat] = meta.assets[cat][ctx.folderKey];
   if (Object.keys(selfRec).length) routing.cast[ctx.folderKey] = selfRec;
   if (ctx.download && ctx.sharedDir && Object.keys(selfRec).length) {
     const own = ctx.idx.assets.assetIndex[ctx.folderKey] || {};
-    await Promise.all(['spine', 'spinelight'].flatMap((cat) => (own[cat] || []).map((rel) => assetStore.removeAsset(ctx.sharedDir, rel))));
+    await Promise.all(CAST_CATS.flatMap((cat) => (own[cat] || []).map((rel) => assetStore.removeAsset(ctx.sharedDir, rel))));
   }
 
   if (meta0.apiType === 'Character') {

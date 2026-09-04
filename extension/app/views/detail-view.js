@@ -3,13 +3,14 @@ import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { episodeIdOf } from '../../data/character-meta.js';
 import { characterMeta } from '../../data/character-meta.js';
 import { getById, el } from '../../core/dom.js';
-import { xposNames } from '../../core/constants.js';
+import { appendDetailInfo } from './detail-info.js';
+import { xposNames } from '../../data/master-labels.js';
 import { playerState } from '../runtime/player-state.js';
 import { nameFix, chip, html, raw, spinnerHtml } from '../ui/ui-format.js';
 import { closeRoster } from './roster-view.js';
 import { folderHandle } from '../runtime/state-refresh.js';
-import { getStoryPanel, getImagePanel } from '../runtime/panel-state.js';
-import { utilHelpers } from '../../core/util.js';
+import { getPanel } from '../runtime/panel-state.js';
+import { revokeUrlMap } from '../../core/audio-url.js';
 import { voiceOut } from '../panels/voice-out.js';
 import { runDownload } from './download-ui.js';
 import { resetLineSearch } from './line-search.js';
@@ -17,49 +18,6 @@ import { renderVoiceGallery } from './voice-gallery.js';
 import { applyKindTabs, resetVisualPanel, switchTab } from './shell-ui.js';
 import { navTo } from '../runtime/router-controller.js';
 import { migrateR18Episodes } from '../../data/acquire/r18-migrate.js';
-
-const labelSpan = (text) => el('span', 'dinfo-label', text);
-const valueSpan = (val) => el('span', 'dinfo-value', nameFix(val));
-
-const inlineRow = (pairs) => {
-  const items = pairs.filter(([, v]) => v);
-  return items.length
-    ? el(
-        'div',
-        'dinforow inline',
-        items.map(([label, val]) => el('span', 'dinfoitem', [labelSpan(label), valueSpan(val)])),
-      )
-    : null;
-};
-const labeledRow = (label, val) => (val ? el('div', 'dinforow', [labelSpan(label), valueSpan(val)]) : null);
-
-export async function appendDetailInfo(charId, rosterKind) {
-  if (rosterKind !== 'character') return;
-  let d = null;
-  try {
-    d = await collectionRepository.characterDetail(charId);
-  } catch (e) {}
-  const rows = d
-    ? [
-        inlineRow([
-          ['グループ', d.group],
-          ['ランク', d.rank],
-          ['種族', d.race],
-          ['CV', d.cv],
-        ]),
-        inlineRow([
-          ['すき', d.likes],
-          ['きらい', d.dislikes],
-          ['特技', d.specialty],
-          ['スリーサイズ', Array.isArray(d.bwh) ? `B${d.bwh[0]} W${d.bwh[1]} H${d.bwh[2]}` : ''],
-        ]),
-        labeledRow('自己紹介', d.intro),
-        labeledRow('秘密1', d.profile1),
-        labeledRow('秘密2', d.profile2),
-      ]
-    : [];
-  getById('charHead').appendChild(el('div', 'dinfo', rows));
-}
 
 function renderEpisodes(m) {
   const box = getById('eplist');
@@ -90,7 +48,11 @@ function renderEpisodes(m) {
     row.querySelector('.ti').textContent = ep.title || '';
     for (const n of xposNames(ep.xpos)) row.querySelector('.cats').appendChild(el('span', 'epcat', n));
     if (playable) {
-      row.addEventListener('click', () => navTo(playerState.rosterKind || 'character', String(m.id || playerState.viewKey()), { section: 'story', epId: String(episodeIdOf(ep)), replace: true }));
+      row.addEventListener('click', () => {
+        const sp = getPanel('story');
+        if (sp && sp.cancelAutoNext) sp.cancelAutoNext();
+        navTo(playerState.rosterKind || 'character', String(m.id || playerState.viewKey()), { section: 'story', epId: String(episodeIdOf(ep)), replace: true });
+      });
     }
     box.appendChild(row);
   }
@@ -100,13 +62,13 @@ function renderEpisodes(m) {
 
 export async function openCharacter(folderKey) {
   closeRoster();
-  const storyPanel = getStoryPanel();
+  const storyPanel = getPanel('story');
   if (storyPanel) storyPanel.reset();
   resetVisualPanel();
   voiceOut.stop();
-  if (playerState.cur && playerState.cur.voiceUrls) utilHelpers.revokeUrlMap(playerState.cur.voiceUrls);
+  if (playerState.cur && playerState.cur.voiceUrls) revokeUrlMap(playerState.cur.voiceUrls);
 
-  const imagePanel = getImagePanel();
+  const imagePanel = getPanel('image');
   if (imagePanel && imagePanel.resetForCharacter) imagePanel.resetForCharacter();
   const handle = folderHandle(folderKey);
   if (!handle) return;
@@ -147,7 +109,7 @@ export async function openCharacter(folderKey) {
   return true;
 }
 
-export function ensureEpisodes(folderKey) {
+function ensureEpisodes(folderKey) {
   const cur = playerState.cur;
   if (!cur) return null;
   const key = String(folderKey || cur.folderKey || '');
@@ -156,7 +118,7 @@ export function ensureEpisodes(folderKey) {
   return cur.epLoad;
 }
 
-export function reloadEpisodes() {
+function reloadEpisodes() {
   if (!playerState.cur) return null;
   playerState.cur.epLoad = null;
   return ensureEpisodes();
@@ -167,7 +129,7 @@ export async function showSection(folderKey, section, epId) {
   if (playerState.viewKey() !== key) return;
   switchTab(section);
   if (section !== 'story') {
-    const imagePanel = getImagePanel();
+    const imagePanel = getPanel('image');
     if (imagePanel && imagePanel.visualsReady) await imagePanel.visualsReady();
     if (playerState.viewKey() === key) ensureEpisodes(key);
     return;
@@ -179,7 +141,7 @@ export async function showSection(folderKey, section, epId) {
   if (!ep || (ep.have === 'none' && !ep.linkTo)) return;
   const row = getById('eplist').querySelector(`.eprow[data-epid="${CSS.escape(String(epId))}"]`);
   if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  const storyPanel = getStoryPanel();
+  const storyPanel = getPanel('story');
   if (storyPanel) storyPanel.playEpisode(ep);
 }
 

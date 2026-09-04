@@ -11,7 +11,7 @@ async function loadSetupTable() {
   return _table;
 }
 
-export async function setupFor(crc32) {
+async function setupFor(crc32) {
   const t = await loadSetupTable();
   if (!t) return null;
   const i = t.map['0x' + (Number(crc32) >>> 0).toString(16).padStart(8, '0')];

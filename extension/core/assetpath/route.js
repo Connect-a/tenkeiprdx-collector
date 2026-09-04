@@ -1,4 +1,4 @@
-import { PLATFORM_DIR, assetUrlOn, APP_REL } from './paths.js';
+import { assetUrlOn, APP_REL } from './paths.js';
 import { catOf } from './placement.js';
 
 const KIND_ORDER = {
@@ -9,7 +9,7 @@ const KIND_ORDER = {
 
 const AUDIO_CAT = /^(adventurevoice|charactervoices|illustrationvoice|bgm|se|vfxse|battlese(\(uncompressed\))?|builtinaudio(\(uncompressed\))?)_assets_|^minigames_assets_bgm$/i;
 const MESH_CAT = /^3dmodels_assets_3dmodels$/i;
-export function kindOf(rel) {
+function kindOf(rel) {
   const cat = catOf(rel);
   if (AUDIO_CAT.test(cat)) return 'audio';
   if (MESH_CAT.test(cat)) return 'mesh';
@@ -32,4 +32,3 @@ export function routeFor(rel, altRel) {
 }
 
 export const routeUrl = (base, cand) => assetUrlOn(base, cand.platform, cand.rel);
-export { PLATFORM_DIR };

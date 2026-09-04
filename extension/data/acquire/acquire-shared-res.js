@@ -1,6 +1,6 @@
 import { fileStore } from '../../core/fsdir.js';
 import { assetStore } from '../asset-store.js';
-import { DIRS } from '../../core/constants.js';
+import { DIRS } from '../../core/dirs.js';
 import { ensureIndexes } from '../index-store.js';
 import { runBulkDownload } from './acquire-bulk.js';
 import { resolveOrigin } from '../origin.js';
@@ -23,7 +23,9 @@ async function grabCreditsAaBundles(dir, c, prog) {
       } else if (prog) {
         prog(a.label + '（クレジット用）取得失敗: ' + (r && r.status));
       }
-    } catch (e) {}
+    } catch (e) {
+      if (prog) prog(a.label + '（クレジット用）取得失敗: ' + (e && e.message ? e.message : e));
+    }
   }
 }
 const sharedIndex = async () => (await ensureIndexes()).assets.sharedIndex;
@@ -47,7 +49,7 @@ async function collectOrphanEventstillRels() {
     .map((k) => named[k]);
 }
 
-export async function ensureSharedSingletons(dir, base, idx, grab, { includeStage } = {}) {
+async function ensureSharedSingletons(dir, base, idx, grab, { includeStage } = {}) {
   if (!dir) return;
   const g = (idx && idx.assets && idx.assets.globalAssets) || {};
   if (g.mouthAtlas && !(await assetStore.hasAsset(DIRS.shared, g.mouthAtlas))) await grab(g.mouthAtlas);
@@ -86,7 +88,9 @@ async function buildSharedResources(progress, opts) {
           },
           { includeStage: false },
         );
-      } catch (e) {}
+      } catch (e) {
+        if (prog) prog('共有アセットの補完に失敗: ' + (e && e.message ? e.message : e));
+      }
       await grabCreditsAaBundles(dir, c, prog);
     },
     done: (c) => `完了 新規${c.got}件・既にあった分${c.skip}件・失敗${c.fail}件 / 全${c.total}件`,
@@ -138,4 +142,4 @@ async function runSharedResourceDownload(progress, opts) {
   return buildSharedResources(progress, opts);
 }
 
-export const acquireShared = { sharedResourcesPresent, sharedStatus, runSharedResourceDownload };
+export const acquireShared = { sharedResourcesPresent, sharedStatus, runSharedResourceDownload, ensureSharedSingletons };

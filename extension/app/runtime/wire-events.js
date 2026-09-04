@@ -1,27 +1,29 @@
 import { bulkDownloader } from '../../data/acquire/bulk.js';
 import { fileStore } from '../../core/fsdir.js';
-import { collectionRepository } from '../../data/collection.js';
 import { setManualOrigin } from '../../data/origin.js';
 import { playerState } from './player-state.js';
+import { rememberRosterPref, setRosterQuery } from './roster-prefs.js';
 import { getById } from '../../core/dom.js';
-import { getStoryPanel } from './panel-state.js';
+import { getPanel } from './panel-state.js';
 import { parseRoute, isTargetRoute } from './router.js';
 import { setStageMax, updateCdnReset } from '../views/shell-ui.js';
-import { navTo, navChar } from './router-controller.js';
+import { navTo } from './router-controller.js';
+import { navChar } from '../views/route-view.js';
 import { renderRoster } from '../views/roster-ui.js';
 import { runLineSearch } from '../views/line-search.js';
 import { openBulk, closeBulk, startBulk, stopBulk, renderBulkCard, renderBulkBanner, refreshBulkTarget } from '../views/bulk-ui.js';
 import { pickFolder } from '../views/fs-ui.js';
 import { refreshLists } from './state-refresh.js';
-import { toast } from '../ui/notifier.js';
+import { toast, flashText } from '../ui/notifier.js';
 import { runSharedDownload, sharedDlToast } from '../views/shared-notice.js';
 import { networkClient } from '../../data/network.js';
 import { settings } from '../../core/settings.js';
-import { assetUrlOn } from '../../core/paths.js';
+import { assetUrlOn } from '../../core/assetpath/paths.js';
+import { ensureIndexes } from '../../data/index-store.js';
 
 const probeRel = async () => {
   try {
-    const idx = await collectionRepository.ensureIndexes();
+    const idx = await ensureIndexes();
     const rel = Object.values(idx.assets.chibiIndex || {})[0] || (Object.values(idx.assets.assetIndex || {})[0] || {}).icon;
     if (rel) return rel;
   } catch (e) {}
@@ -46,7 +48,7 @@ function bindNavigation() {
     }),
   );
   const step = (d) => () => {
-    const p = getStoryPanel();
+    const p = getPanel('story');
     if (p) p.go(d);
   };
   onClick('next', step(1));
@@ -74,8 +76,9 @@ function bindNavigation() {
 
 function bindRosterFilters() {
   on('rosterSearch', 'input', () => {
+    setRosterQuery(getById('rosterSearch').value);
     clearTimeout(rosterSearchSaveTimer);
-    rosterSearchSaveTimer = setTimeout(() => settings.set('rosterSearch', getById('rosterSearch').value || ''), 400);
+    rosterSearchSaveTimer = setTimeout(() => settings.set('rosterSearch', playerState.rosterSearch), 400);
     renderRoster();
   });
   on('lineSearch', 'input', () => {
@@ -94,8 +97,7 @@ function bindRosterFilters() {
     b.addEventListener('click', () => {
       eachIn('rosterOwn', '.rf', (x) => x.classList.remove('active'));
       b.classList.add('active');
-      playerState.rosterOwn = b.dataset.rosterOwn;
-      settings.set('rosterOwn', playerState.rosterOwn);
+      rememberRosterPref('rosterOwn', b.dataset.rosterOwn);
       renderRoster();
     }),
   );
@@ -121,29 +123,29 @@ function bindStage() {
   onClick('stageMax', () => setStageMax(!getById('stage').classList.contains('max')));
   onClick('storyProgBar', (e) => {
     const bar = getById('storyProgBar');
-    const p = getStoryPanel();
+    const p = getPanel('story');
     if (!bar || !p || !p.jumpFrac) return;
     const rect = bar.getBoundingClientRect();
     if (rect.width <= 0) return;
     p.jumpFrac((e.clientX - rect.left) / rect.width);
   });
   onClick('stageZoomReset', () => {
-    const p = getStoryPanel();
+    const p = getPanel('story');
     if (p && p.resetView) p.resetView();
   });
   onClick('stageMove', () => {
     const btn = getById('stageMove');
     const on = !btn.classList.contains('active');
     btn.classList.toggle('active', on);
-    const p = getStoryPanel();
+    const p = getPanel('story');
     if (p && p.setMoveMode) p.setMoveMode(on);
   });
   onClick('storyReplay', () => {
-    const p = getStoryPanel();
+    const p = getPanel('story');
     if (p && p.replayVoice) p.replayVoice();
   });
   onClick('stillToggle', () => {
-    const p = getStoryPanel();
+    const p = getPanel('story');
     if (p && p.toggleStill) p.toggleStill();
   });
   document.addEventListener('keydown', (e) => {
@@ -179,8 +181,7 @@ function bindCdnSettings() {
     if (!v) {
       await setManualOrigin(null);
       out.textContent = '';
-      getById('cdnSaved').textContent = '自動に戻しました';
-      setTimeout(() => (getById('cdnSaved').textContent = ''), 2500);
+      flashText('cdnSaved', '自動に戻しました', 2500);
       updateCdnReset();
       return;
     }
@@ -194,8 +195,7 @@ function bindCdnSettings() {
       return;
     }
     await setManualOrigin(v);
-    getById('cdnSaved').textContent = '更新';
-    setTimeout(() => (getById('cdnSaved').textContent = ''), 1500);
+    flashText('cdnSaved', '更新');
     updateCdnReset();
   });
   onClick('cdnReset', async () => {

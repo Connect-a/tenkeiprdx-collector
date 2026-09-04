@@ -2,12 +2,11 @@ import { audioOut } from '../../core/audio-gain.js';
 import { unityDecode } from '../../unity/decode.js';
 import { assetStore } from '../../data/asset-store.js';
 import { ensureIndexes } from '../../data/index-store.js';
-import { DIRS } from '../../core/constants.js';
-import { utilHelpers } from '../../core/util.js';
+import { DIRS } from '../../core/dirs.js';
+import { audioBlobUrl, cachedAudioUrl, revokeUrlMap } from '../../core/audio-url.js';
 import { scenarioSettings } from './scenario-settings.js';
-import { createBgmEngine } from '../../core/bgm-engine.js';
-const { audioBlobUrl, cachedAudioUrl, sleep, revokeUrlMap } = utilHelpers;
-const TTS_MIN_REAL_MS = 350;
+import { createTts } from './tts.js';
+import { createStoryBgm } from './story-bgm.js';
 
 function create(deps) {
   const els = deps.els || {};
@@ -21,23 +20,14 @@ function create(deps) {
   const getCurrentText = deps.getCurrentText || (() => '');
 
   const chVol = (ch) => masterVol() * scenarioSettings.volumeOf(ch);
-  const onBgmPlaying = deps.onBgmPlaying || (() => {});
-  const bgm = createBgmEngine({ onPlayingChange: onBgmPlaying });
+  const bgm = createStoryBgm({ readBundle, enabled: bgmEnabled, volume: () => chVol('bgm'), getEp });
   const st = {
-    curBgm: null,
-    bgmSrc: null,
-    pendingBgm: null,
-    bgmGen: 0,
-    bgmBufs: new Map(),
     seUrls: new Map(),
     voiceUrls: new Map(),
     seMap: null,
     extractedSids: new Set(),
-    ttsUtter: null,
-    ttsState: 'idle',
-    ttsGen: -1,
-    jaVoice: null,
   };
+  const tts = createTts({ getCurrentText, masterVol });
 
   const applyLiveVolume = () => {
     if (els.bgm && !els.bgm.isConnected) {
@@ -119,68 +109,11 @@ function create(deps) {
     audioOut.setVolume(a, chVol('voice'));
     a.play().catch(() => {});
   }
-  const synthObj = () => window.speechSynthesis || null;
-  function pickJaVoice(s) {
-    try {
-      return (s.getVoices() || []).find((v) => /ja(-|_)?JP/i.test(v.lang) || /japanese/i.test(v.name)) || null;
-    } catch (e) {
-      return null;
-    }
-  }
-  function cancelTts() {
-    const s = synthObj();
-    if (s) {
-      try {
-        s.cancel();
-      } catch (e) {}
-    }
-    st.ttsUtter = null;
-    st.ttsState = 'idle';
-    st.ttsGen = -1;
-  }
   function stopAllAudio() {
     bgm.pause();
     if (els.se) els.se.pause();
     if (els.audio) els.audio.pause();
-    cancelTts();
-  }
-  function speakCurrent(gen, audible) {
-    const s = synthObj();
-    if (!s) {
-      st.ttsGen = gen;
-      st.ttsState = 'unavailable';
-      return;
-    }
-    if (st.ttsGen === gen && st.ttsUtter) return;
-    const text = getCurrentText() || '';
-    st.ttsGen = gen;
-    try {
-      s.cancel();
-    } catch (e) {}
-    if (!text) {
-      st.ttsUtter = null;
-      st.ttsState = 'done';
-      return;
-    }
-    if (!st.jaVoice) st.jaVoice = pickJaVoice(s);
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ja-JP';
-    if (st.jaVoice) u.voice = st.jaVoice;
-    u.volume = audible ? Math.min(1, masterVol() * 1.8) : 0;
-    st.ttsUtter = u;
-    st.ttsState = 'speaking';
-    const startedAt = Date.now();
-    u.onend = () => {
-      if (st.ttsUtter === u) st.ttsState = Date.now() - startedAt < TTS_MIN_REAL_MS ? 'unavailable' : 'done';
-    };
-    u.onerror = () => {
-      if (st.ttsUtter === u) st.ttsState = 'unavailable';
-    };
-    try {
-      s.speak(u);
-    } catch (e) {
-      st.ttsState = 'unavailable';
-    }
+    tts.cancel();
   }
   async function resolveSe(name) {
     const ep = getEp();
@@ -208,113 +141,13 @@ function create(deps) {
     audioOut.setVolume(a, chVol('se'));
     a.play().catch(() => {});
   }
-  async function bgmBufOf(key, path) {
-    if (!path) return null;
-    if (st.bgmBufs.has(key)) return st.bgmBufs.get(key);
-    let buf = null;
-    try {
-      const b = await readBundle(path);
-      if (b) {
-        let clips = [];
-        try {
-          clips = await unityDecode.extractAudioResource(b);
-        } catch (e) {}
-        if (clips.length) buf = await bgm.decode(clips[0].data);
-      }
-    } catch (e) {}
-    st.bgmBufs.set(key, buf);
-    return buf;
-  }
-  function stopBgm() {
-    bgm.stop();
-    st.curBgm = null;
-    st.bgmSrc = null;
-    st.pendingBgm = null;
-    st.bgmGen++;
-  }
-  function fadeOutBgm(sec) {
-    if (!bgm.isPlaying() || !(sec > 0)) return stopBgm();
-    const gen = st.bgmGen;
-    bgm.fade(0, sec);
-    setTimeout(
-      () => {
-        if (gen === st.bgmGen) stopBgm();
-      },
-      sec * 1000 + 150,
-    );
-  }
-  async function playBgm(fr) {
-    if (!bgmEnabled()) {
-      if (fr.bgm != null) st.pendingBgm = fr.bgm;
-      if (st.curBgm) bgm.pause();
-      return;
-    }
-    st.pendingBgm = null;
-    const cue = unityDecode.bgmCue(fr.bgm);
-    const name = cue.name;
-    if (cue.stop) {
-      if (!st.curBgm) return;
-      st.curBgm = null;
-      const gen = ++st.bgmGen;
-      if (cue.delay > 0) await sleep(cue.delay * 1000);
-      if (gen === st.bgmGen) fadeOutBgm(cue.fade);
-      return;
-    }
-    if (st.curBgm === name) {
-      bgm.setVolume(chVol('bgm'));
-      if (!bgm.isPlaying() && st.bgmSrc === name) bgm.play();
-      return;
-    }
-    const gen = ++st.bgmGen;
-    st.curBgm = name;
-    if (cue.delay > 0) {
-      await sleep(cue.delay * 1000);
-      if (gen !== st.bgmGen) return;
-    }
-    st.bgmSrc = null;
-    const ep = getEp() || {};
-    const loopPath = (ep.bgm && ep.bgm[name]) || null;
-    if (!loopPath) {
-      bgm.stop();
-      return;
-    }
-    const introPath = (ep.bgmIntro && ep.bgmIntro[name]) || null;
-    const loopBuf = await bgmBufOf(name, loopPath);
-    const introBuf = introPath ? await bgmBufOf(name + '_intro', introPath) : null;
-    if (gen !== st.bgmGen) return;
-    if (!loopBuf) {
-      bgm.stop();
-      st.curBgm = null;
-      return;
-    }
-    st.bgmSrc = name;
-    bgm.setTrack(introBuf, loopBuf);
-    bgm.setLoop(true);
-    bgm.setVolume(chVol('bgm'));
-    bgm.play();
-  }
-  function refreshBgm() {
-    if (!bgmEnabled()) {
-      bgm.pause();
-      return;
-    }
-    if (st.pendingBgm != null) {
-      const cue = st.pendingBgm;
-      st.pendingBgm = null;
-      playBgm({ bgm: cue });
-      return;
-    }
-    if (!st.curBgm || !st.bgmSrc) return;
-    bgm.setVolume(chVol('bgm'));
-    if (!bgm.isPlaying()) bgm.play();
-  }
   function resetUrls() {
     revokeUrlMap(st.voiceUrls);
     voiceJobs.clear();
     st.extractedSids.clear();
     revokeUrlMap(st.seUrls);
     st.seMap = null;
-    st.bgmBufs.clear();
+    bgm.clearCache();
   }
   function dispose() {
     detachVolume();
@@ -327,18 +160,18 @@ function create(deps) {
     applyLiveVolume,
     playVoice,
     playSe,
-    playBgm,
-    stopBgm,
-    fadeOutBgm,
-    refreshBgm,
-    speakCurrent,
-    cancelTts,
+    playBgm: (fr) => bgm.play(fr),
+    stopBgm: () => bgm.stop(),
+    fadeOutBgm: (sec) => bgm.fadeOut(sec),
+    refreshBgm: () => bgm.refresh(),
+    speakCurrent: (gen, audible) => tts.speak(gen, audible),
+    cancelTts: () => tts.cancel(),
     stopAllAudio,
     resetUrls,
     dispose,
-    hasTts: () => !!synthObj(),
+    hasTts: () => tts.available(),
     get ttsState() {
-      return st.ttsState;
+      return tts.state;
     },
   };
 }
