@@ -4,13 +4,13 @@ import { DIRS } from '../../core/dirs.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { texCodec } from '../../unity/texcodec.js';
-import { spineWeb } from '../../engine/story/spine-web.js';
 import { errText } from '../../core/messages.js';
-import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, groupHeading, downloadBar, errorRow, decodeFailNote } from '../ui/panel-shell.js';
+import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, groupHeading, acquireBar, mountSpinePlayer, errorRow, decodeFailNote } from '../ui/panel-shell.js';
 import { createZoomOverlay } from '../ui/zoom-overlay.js';
 import { bundleName } from '../../core/assetpath/paths.js';
 import { el } from '../../core/dom.js';
 import { TITLE_SPRITE_NAMES } from '../../data/credits-assets.js';
+import { noteFailure } from '../../core/failures.js';
 
 const STORY_EXCLUDE = new Set(['ui', 'mission', 'uipanel', 'worldmap', 'gacha', 'titlelogo', 'minigame']);
 const isGacha = (e) => e.source === 'gacha';
@@ -54,16 +54,12 @@ export function createOther2dPanel(deps) {
   const readBundle = (rel) => assetStore.readAsset(DIRS.shared, rel);
 
   function dlBar(missing, count) {
-    return downloadBar({
+    return acquireBar({
       label: `その他2D DL（${count}）`,
-      run: async (onProgress) => {
-        try {
-          const r = await assetAcquirer.runOther2dDownload(missing, onProgress);
-          toast(`その他2Dを取得しました（新規${r.got}件・既にあった分${r.skip}件${r.failed ? `・失敗${r.failed}件` : ''}）`, r.failed ? 'err' : 'ok');
-          await render();
-        } catch (er) {
-          onProgress(errText(er));
-        }
+      acquire: (onProgress) => assetAcquirer.runOther2dDownload(missing, onProgress),
+      done: async (r) => {
+        toast(`その他2Dを取得しました（新規${r.got}件・既にあった分${r.skip}件${r.failed ? `・失敗${r.failed}件` : ''}）`, r.failed ? 'err' : 'ok');
+        await render();
       },
     });
   }
@@ -92,6 +88,7 @@ export function createOther2dPanel(deps) {
       if (canvas) canvas.className = 'statimage';
       return canvas;
     } catch (er) {
+      noteFailure('その他2D', 'ガチャ部品画像', er);
       return null;
     }
   }
@@ -109,6 +106,7 @@ export function createOther2dPanel(deps) {
       if (canvas) canvas.className = 'statimage';
       return canvas;
     } catch (er) {
+      noteFailure('その他2D', '静的画像の展開', er);
       return null;
     }
   }
@@ -121,21 +119,12 @@ export function createOther2dPanel(deps) {
     let inputs = null;
     try {
       inputs = MESH_MOD.extractSpineInputs(await readBundle(id));
-    } catch (er) {}
-    if (!inputs) return fail('立ち絵を取り出せませんでした');
-    const box = el('div', 'spine-player-box');
-    cell.appendChild(box);
-    try {
-      const { player } = spineWeb.buildPlayable(box, inputs, {
-        showControls: true,
-        backgroundColor: '#00000000',
-        onError: (msg) => fail('Spine失敗: ' + msg),
-        onReady: (pl) => spineWeb.startDefaultIdle(pl),
-      });
-      if (player) _players.push(player);
     } catch (er) {
-      fail('Spine失敗: ' + errText(er));
+      noteFailure('その他2D', 'Spine入力の1件', er);
     }
+    if (!inputs) return fail('立ち絵を取り出せませんでした');
+    const player = mountSpinePlayer(cell, inputs, fail);
+    if (player) _players.push(player);
   }
 
   const copyCanvas = (src) => {
@@ -162,13 +151,16 @@ export function createOther2dPanel(deps) {
     host.appendChild(row);
     const stats = MESH_MOD.newDecodeStats();
     const shots = [];
+    let drawn = 0;
     for (const id of ids) {
       if (!_have.has(id)) continue;
       let texs = [];
       try {
         const bytes = await readBundle(id);
         if (bytes) texs = MESH_MOD.decodeNamedTextureCanvases(bytes, null, stats) || [];
-      } catch (er) {}
+      } catch (er) {
+        noteFailure('その他2D', 'アイコン画像の1件', er);
+      }
       const bundle = bundleName(id);
       for (const t of texs) {
         if (!t.canvas) continue;
@@ -178,10 +170,12 @@ export function createOther2dPanel(deps) {
         shots.push({ name: t.name, bundle, w: t.width, h: t.height, canvas: t.canvas });
         t.canvas.addEventListener('click', () => _zoom.open(shots, at));
         row.appendChild(t.canvas);
+        drawn++;
       }
     }
-    if (!row.childNodes.length) row.remove();
+    if (!drawn) row.remove();
     decodeFailNote(host, stats);
+    return drawn;
   }
 
   async function paintVideo(host, e) {
@@ -212,7 +206,9 @@ export function createOther2dPanel(deps) {
       let cv = null;
       try {
         cv = MESH_MOD.decodeAtlasSprite(bytes, nm);
-      } catch (er) {}
+      } catch (er) {
+        noteFailure('その他2D', 'タイトルロゴ候補の1件', er);
+      }
       if (!cv) continue;
       cv.className = 'statimage';
       grid.appendChild(el('div', 'spine-cell', [el('div', 'spine-cell-cap', nm), cv]));
@@ -248,11 +244,14 @@ export function createOther2dPanel(deps) {
     if (e.source === 'titlelogo') return paintTitleLogo(host, e);
     if (e.file) return paintVideo(host, e);
     if (e.parts) return paintGacha(host, e);
-    await paintIcons(host, e.iconIds || []);
+    const drawnIcons = await paintIcons(host, e.iconIds || []);
     if (e.source === 'minigame') return;
     const grid = el('div', 'spine-grid stand one');
     host.appendChild(grid);
-    if (!(e.spineIds || []).length) grid.appendChild(el('div', 'note', 'この項目に立ち絵はありません（アイコンのみ）。'));
+    if (!(e.spineIds || []).length)
+      grid.appendChild(
+        el('div', 'note', drawnIcons ? 'この項目に立ち絵はありません（アイコンのみ）。' : 'この項目のアイコンはまだダウンロードされていません。「その他2Dをダウンロード」から取得してください。'),
+      );
     for (const id of e.spineIds || []) await paintSpine(grid, id);
   }
 

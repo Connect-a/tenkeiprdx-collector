@@ -11,6 +11,7 @@ import { hideRosterControls } from '../ui/panel-shell.js';
 import { inDir, stripDir } from '../../core/assetpath/paths.js';
 import { el, append } from '../../core/dom.js';
 import { ensureIndexes } from '../../data/index-store.js';
+import { noteFailure } from '../../core/failures.js';
 
 const HOME_SECTIONS = {
   homeBgm: { label: 'ホームBGM', bgm: true, primary: (m) => m.audio },
@@ -57,6 +58,7 @@ export function createHomePanel(deps) {
     try {
       return MESH_MOD.decodeLargestTextureCanvas(bytes);
     } catch (e) {
+      noteFailure('ホーム素材', 'サムネイルの展開', e);
       return null;
     }
   }
@@ -77,11 +79,11 @@ export function createHomePanel(deps) {
     }
     grid.innerHTML = spinnerHtml();
 
-    let data = { sceneIllust: [], comic: [], homeBgm: [] };
-    try {
-      data = await collectionRepository.homeData();
-    } catch (e) {}
-    const st = await collectionRepository.homeStatus(data).catch(() => null);
+    let data = await collectionRepository.homeData();
+    const st = await collectionRepository.homeStatus(data).catch((e) => {
+      noteFailure('ホーム素材', '取得状態の構築', e);
+      return null;
+    });
     const dl = {
       sceneIllust: (st && st.sceneIllust) || new Map(),
       comic: (st && st.comic) || new Map(),
@@ -143,14 +145,18 @@ export function createHomePanel(deps) {
     let rel = null;
     try {
       rel = (await ensureIndexes()).assets.systemVoiceRel || null;
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ホーム素材', 'システムボイス索引', e);
+    }
     let clips = [];
     let bytes = null;
     if (rel) {
       try {
         bytes = await assetStore.readAsset(DIRS.shared, rel);
         if (bytes) clips = await unityDecode.extractVoiceClips(bytes);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ホーム素材', 'システムボイスの展開', e);
+      }
     }
     if (!clips.length) {
       const why = !rel
@@ -308,8 +314,10 @@ export function createHomePanel(deps) {
     try {
       const bytes = await readHomeBundle(sub);
       if (bytes) cv = illustBundleToCanvas(bytes);
-    } catch (e) {}
-    _iconCache.set(sub, cv);
+    } catch (e) {
+      noteFailure('ホーム素材', 'BGMアイコンの展開', e);
+    }
+    if (cv) _iconCache.set(sub, cv);
     return cv;
   }
   async function paintIcon(host, sub, cls) {
@@ -437,7 +445,9 @@ export function createHomePanel(deps) {
       let clips = [];
       try {
         clips = await unityDecode.extractVoiceClips(bytes);
-      } catch (e2) {}
+      } catch (e2) {
+        noteFailure('ホーム素材', '台詞音声の展開', e2);
+      }
       if (!clips.length) {
         toast('音声を展開できませんでした', 'err');
         return null;

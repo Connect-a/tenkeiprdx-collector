@@ -1,3 +1,4 @@
+import { makeQuadProgram, makeQuadTexture, makeFramebuffer } from './gl-quad.js';
 const VERT = 'attribute vec2 aPos;attribute vec2 aUV;varying vec2 vUV;void main(){vUV=aUV;gl_Position=vec4(aPos,0.0,1.0);}';
 const FRAG = 'precision mediump float;varying vec2 vUV;uniform sampler2D uTex;uniform float uAlpha;void main(){gl_FragColor=texture2D(uTex,vUV)*uAlpha;}';
 
@@ -16,60 +17,20 @@ export function createStillCompositor(gl) {
     uAlpha = null,
     broken = false;
 
-  function compile(type, src) {
-    const sh = gl.createShader(type);
-    gl.shaderSource(sh, src);
-    gl.compileShader(sh);
-    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-      gl.deleteShader(sh);
-      return null;
-    }
-    return sh;
-  }
   function makeProgram() {
     if (prog || broken) return !!prog;
-    const vs = compile(gl.VERTEX_SHADER, VERT),
-      fs = compile(gl.FRAGMENT_SHADER, FRAG);
-    if (!vs || !fs) {
+    const built = makeQuadProgram(gl, VERT, FRAG, ['uTex', 'uAlpha']);
+    if (!built) {
       broken = true;
       return false;
     }
-    const p = gl.createProgram();
-    gl.attachShader(p, vs);
-    gl.attachShader(p, fs);
-    gl.linkProgram(p);
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      gl.deleteProgram(p);
-      broken = true;
-      return false;
-    }
-    prog = p;
-    aPos = gl.getAttribLocation(p, 'aPos');
-    aUV = gl.getAttribLocation(p, 'aUV');
-    uTex = gl.getUniformLocation(p, 'uTex');
-    uAlpha = gl.getUniformLocation(p, 'uAlpha');
-    quad = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, -1, 1, 0, 1, 1, -1, 1, 0, 1, 1, 1, 1]), gl.STATIC_DRAW);
+    prog = built.prog;
+    quad = built.quad;
+    aPos = built.aPos;
+    aUV = built.aUV;
+    uTex = built.uniforms.uTex;
+    uAlpha = built.uniforms.uAlpha;
     return true;
-  }
-  function mkTex(w, h) {
-    const t = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return t;
-  }
-  function mkFB(tex) {
-    const fb = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    return fb;
   }
   function ensure(w, h) {
     if (broken) return false;
@@ -78,10 +39,10 @@ export function createStillCompositor(gl) {
     free(true);
     W = w;
     H = h;
-    accumTex = mkTex(w, h);
-    accumFB = mkFB(accumTex);
-    tempTex = mkTex(w, h);
-    tempFB = mkFB(tempTex);
+    accumTex = makeQuadTexture(gl, w, h);
+    accumFB = makeFramebuffer(gl, accumTex);
+    tempTex = makeQuadTexture(gl, w, h);
+    tempFB = makeFramebuffer(gl, tempTex);
     const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     if (!ok) broken = true;

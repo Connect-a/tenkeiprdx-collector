@@ -5,6 +5,7 @@ import { unityMesh } from '../../unity/mesh.js';
 import { sleep } from '../../core/async.js';
 import { readSharedBgmUrl, fadeAudio } from './story-audio.js';
 import { TITLE_AA_CACHE, TITLE_SPRITE_NAMES } from '../../data/credits-assets.js';
+import { noteFailure } from '../../core/failures.js';
 
 export const END_CREDIT_EPISODE_ID = 2510010;
 
@@ -20,14 +21,18 @@ async function resolveTitleLogoCanvas() {
   try {
     const dir = await fileStore.getDir(DIRS.shared, { create: false });
     bytes = dir && (await fileStore.readBytesUnder(dir, TITLE_AA_CACHE));
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('エンドクレジット', 'タイトルロゴ取得', e);
+  }
   if (!bytes) return null;
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   for (const nm of TITLE_SPRITE_NAMES) {
     try {
       const cv = unityMesh.decodeAtlasSprite(b, nm);
       if (cv) return cv;
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('エンドクレジット', 'タイトルロゴ候補の1件', e);
+    }
   }
   return null;
 }

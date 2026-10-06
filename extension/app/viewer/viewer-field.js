@@ -3,6 +3,7 @@ import { assetStore } from '../../data/asset-store.js';
 import { localInventory } from '../../data/inventory.js';
 import { DIRS } from '../../core/dirs.js';
 import { bundleName } from '../../core/assetpath/paths.js';
+import { noteFailure } from '../../core/failures.js';
 
 const NONE = { key: '', kind: 'none', rel: '', label: '（なし）' };
 const GRID = { key: 'grid', kind: 'grid', rel: '', label: 'グリッド' };
@@ -18,6 +19,7 @@ async function presentSet(dir, rels) {
     const have = await assetStore.presentIds(dir, rels);
     return new Set(have.keys());
   } catch (e) {
+    noteFailure('フィールド一覧', '存在確認', e);
     return new Set();
   }
 }
@@ -92,6 +94,7 @@ async function comics(idx) {
       list.map((e) => comicPath(e.id)),
     );
   } catch (e) {
+    noteFailure('フィールド一覧', '1コマ漫画', e);
     return [];
   }
   return list
@@ -108,6 +111,7 @@ export async function createFieldList(mode) {
     const [bg, cm] = await Promise.all([backgrounds(), comics(idx)]);
     return [...head, ...bg, ...cm];
   } catch (e) {
+    noteFailure('フィールド一覧', '構築', e);
     return head;
   }
 }

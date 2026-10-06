@@ -101,4 +101,4 @@ async function savePrefs(patch) {
   return writeJson(PREFS_PATH, { ...cur, ...patch });
 }
 
-export const saveData = { loadPrefs, savePrefs, readJson, writeJson, removeJson, listScenes, loadScene, saveScene, deleteScene, saveImage, loadFavorites, saveFavorites, nameOk };
+export const saveData = { loadPrefs, savePrefs, listScenes, loadScene, saveScene, deleteScene, saveImage, loadFavorites, saveFavorites, nameOk };

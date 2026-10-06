@@ -1,3 +1,4 @@
+import { noteFailure } from '../../core/failures.js';
 import { SK } from '../../core/storage-keys.js';
 
 const VOL_MAX = 10;
@@ -22,7 +23,9 @@ const notify = () => {
   for (const fn of [...subs]) {
     try {
       fn(state);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('シナリオ設定', '設定通知の1件', e);
+    }
   }
 };
 
@@ -57,10 +60,7 @@ async function save() {
 }
 
 export const scenarioSettings = {
-  DEFAULTS,
   VOL_MAX,
-  WINDOW_ALPHA,
-  TEXT_MS,
   load,
   apply,
   save,
@@ -70,8 +70,6 @@ export const scenarioSettings = {
     subs.add(fn);
     return () => subs.delete(fn);
   },
-  percentGain,
-  channelGain: (level) => percentGain(clampInt(level, VOL_MAX) * 10),
   volumeOf: (ch) => percentGain(clampInt(state[ch], VOL_MAX) * 10),
   textMs: () => TEXT_MS[state.speed] || 0,
   windowAlpha: () => WINDOW_ALPHA[state.alpha],

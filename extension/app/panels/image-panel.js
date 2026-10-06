@@ -4,13 +4,14 @@ import { makeRebuildLimiter } from '../../engine/render/gl-manager.js';
 import { charAssets } from '../../data/char-assets.js';
 import { errText } from '../../core/messages.js';
 import { DIRS } from '../../core/dirs.js';
-import { MOTION_VOICE } from '../../engine/render/motion-names.js';
+import { motionVoiceNo } from '../../engine/render/motion/motion-voice.js';
 import { characterMeta } from '../../data/character-meta.js';
 import { voiceOut } from './voice-out.js';
 import { cachedAudioUrl } from '../../core/audio-url.js';
 import { settings } from '../../core/settings.js';
 import { el } from '../../core/dom.js';
-import { downloadBar } from '../ui/panel-shell.js';
+import { noteFailure } from '../../core/failures.js';
+import { acquireBar } from '../ui/panel-shell.js';
 import { createSkillFxView } from '../views/skillfx-view.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { buildIndexes } from '../../data/build-indexes.js';
@@ -50,8 +51,33 @@ export function createImagePanel(deps) {
     return m ? parseInt(m[1], 10) : 0;
   };
 
+  async function loadCharForFx() {
+    if (!playerState.cur) return null;
+    const charKey = playerState.contentKey();
+    if (_load3d.key !== charKey) _load3d = { key: charKey, byCostume: new Map() };
+    const costumeKey = String(playerState._costume || '');
+    let d = _load3d.byCostume.get(costumeKey);
+    if (!d) {
+      d = await charAssets.load3d(playerState.cur, { costume: playerState._costume });
+      if (d) _load3d.byCostume.set(costumeKey, d);
+    }
+    if (!d || !d.model) return null;
+    const renderer = await loadModel3d();
+    const opts = charAssets.build3dOptions(d, playerState.cur.meta, { mainLight: charAssets.BATTLE_MAIN_LIGHT });
+    const built = renderer.buildInstance(d.model, d.matBundle, opts);
+    if (!built || !built.ok) return null;
+    const names = built.clipNames || [];
+    if (built.update)
+      try {
+        built.update(0);
+      } catch (e) {
+        noteFailure('スキル演出', 'キャラ3Dの初期姿勢', e);
+      }
+    return { root: built.root, update: built.update || null, dispose: built.dispose, setClip: (nm) => built.setClip(nm, true), clipNames: names, motionClips: built.motionClips, motionTransition: built.motionTransition };
+  }
+
   async function playMotionVoice(motionName) {
-    const no = MOTION_VOICE[String(motionName).toLowerCase()];
+    const no = motionVoiceNo(motionName);
     if (!no || !playerState.cur) return;
     const bundle = characterMeta.voiceGalleryBundle((playerState.cur.meta || {}).voiceGallery);
     if (!bundle) return;
@@ -60,7 +86,9 @@ export function createImagePanel(deps) {
       const clip = clips.find((c) => voiceNoOf(c.name) === no);
       if (!clip) return;
       voiceOut.play(await cachedAudioUrl(playerState.cur.voiceUrls, clip.name, async () => clip));
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('イメージ', 'モーションボイス', e);
+    }
   }
 
   function syncSplitLayout() {
@@ -86,6 +114,7 @@ export function createImagePanel(deps) {
   }
 
   async function runImageGallery() {
+    const gen = playerState.selGen;
     const imageHost = getById('imageHost');
     if (!imageHost || !playerState.cur || !visualRenderer || !visualRenderer.renderImageGallery) return;
     const flipY = settings.get('imageFlipY');
@@ -99,8 +128,9 @@ export function createImagePanel(deps) {
         includeStoryAssets: true,
       });
     } catch (e) {
-      showError(imageHost, '画像を表示できませんでした。' + errText(e));
+      if (!playerState.isStale(gen)) showError(imageHost, '画像を表示できませんでした。' + errText(e));
     }
+    if (playerState.isStale(gen)) return;
     await runSpine();
   }
 
@@ -113,6 +143,7 @@ export function createImagePanel(deps) {
   }
 
   async function runSpineInner() {
+    const gen = playerState.selGen;
     const spineHost = getById('spineHost');
     if (!spineHost || !playerState.cur || !visualRenderer) return;
     if (!showSpine()) {
@@ -125,7 +156,7 @@ export function createImagePanel(deps) {
     try {
       await visualRenderer.renderSpinePreview(playerState.cur, spineHost);
     } catch (e) {
-      showError(spineHost, '立ち絵を表示できませんでした。' + errText(e));
+      if (!playerState.isStale(gen)) showError(spineHost, '立ち絵を表示できませんでした。' + errText(e));
     }
   }
 
@@ -135,17 +166,13 @@ export function createImagePanel(deps) {
     host.style.display = '';
     host.innerHTML = '';
     host.appendChild(
-      downloadBar({
+      acquireBar({
         text: '3D表示には共有リソース（背景・口など）が必要です。先に共有リソースをダウンロードしてください。',
         label: '共有リソースをダウンロード',
-        run: async (onProgress) => {
-          try {
-            const r = await assetAcquirer.runSharedResourceDownload(onProgress);
-            notify(`共有リソースを取得しました（新規${r.got}件・既にあった分${r.skip}件／全${r.total}件）`, 'ok');
-            await render3dModel();
-          } catch (e) {
-            onProgress(errText(e));
-          }
+        acquire: (onProgress) => assetAcquirer.runSharedResourceDownload(onProgress),
+        done: async (r) => {
+          notify(`共有リソースを取得しました（新規${r.got}件・既にあった分${r.skip}件／全${r.total}件）`, 'ok');
+          await render3dModel();
         },
       }),
     );
@@ -160,6 +187,7 @@ export function createImagePanel(deps) {
   }
 
   async function render3dModelInner() {
+    const gen = playerState.selGen;
     const host = getById('model3dHost');
     if (!host || !playerState.cur) return;
     if (!show3d()) {
@@ -196,6 +224,7 @@ export function createImagePanel(deps) {
         d = await charAssets.load3d(playerState.cur, { costume: playerState._costume });
         if (d) _load3d.byCostume.set(costumeKey, d);
       }
+      if (playerState.isStale(gen)) return;
       if (!d) {
         showError(host, 'modelバンドルを読めませんでした');
         return;
@@ -252,11 +281,13 @@ export function createImagePanel(deps) {
         _syncSpeed = v;
         for (const r of _weapon3d) if (r && r.setSpeed) r.setSpeed(v);
       };
-      playerState._model3d = (await loadModel3d()).render(host, d.model, d.matBundle, opts);
+      const renderer = await loadModel3d();
+      if (playerState.isStale(gen)) return;
+      playerState._model3d = renderer.render(host, d.model, d.matBundle, opts);
       _weaponsData = d.weapons;
       syncM3dSections();
     } catch (e) {
-      showError(host, '3Dモデルを表示できませんでした。' + errText(e));
+      if (!playerState.isStale(gen)) showError(host, '3Dモデルを表示できませんでした。' + errText(e));
     }
   }
 
@@ -310,6 +341,8 @@ export function createImagePanel(deps) {
         dir: cur.handle,
         place: PLACE.visual('skillfx'),
         sePlace: PLACE.visual('skillfx/se'),
+        loadChar: loadCharForFx,
+        onMotion: playMotionVoice,
         emptyText: 'このキャラ固有のスキルエフェクトはありません。共通のものは「その他3D」で再生できます。',
       });
     } catch (e) {
@@ -365,7 +398,7 @@ export function createImagePanel(deps) {
     const key = playerState.contentKey();
     if (playerState.imageAutoKey !== key) {
       playerState.imageAutoKey = key;
-      _visuals = Promise.all([runImageGallery(), render3dModel()]).catch(() => {});
+      _visuals = Promise.all([runImageGallery(), render3dModel()]);
     }
   }
 
@@ -376,7 +409,7 @@ export function createImagePanel(deps) {
     playerState._model3d = disposeModel3d(playerState._model3d);
     playerState._costume = null;
     disposeWeapons3d();
-    _skillFx.dispose();
+    _skillFx.reset();
     _weaponsData = null;
     _builtWeapons = false;
     _builtSkillFx = false;

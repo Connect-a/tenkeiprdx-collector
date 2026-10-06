@@ -2,6 +2,8 @@ import { parseRoute, routeHash, routeKey, defaultSection } from './router.js';
 import { redraw } from './ui-bus.js';
 
 let appliedRoute = null;
+let routeSeq = 0;
+let routeBusy = false;
 
 export function navTo(rosterKind, id, opts) {
   const o = opts || {};
@@ -22,9 +24,19 @@ export function navTo(rosterKind, id, opts) {
 }
 
 export async function route(force) {
-  const r = parseRoute();
-  const key = routeKey(r);
+  const key = routeKey(parseRoute());
   if (!force && key === appliedRoute) return;
   appliedRoute = key;
-  await redraw('route', r);
+  routeSeq++;
+  if (routeBusy) return;
+  routeBusy = true;
+  try {
+    let applied = -1;
+    while (applied !== routeSeq) {
+      applied = routeSeq;
+      await redraw('route', parseRoute());
+    }
+  } finally {
+    routeBusy = false;
+  }
 }

@@ -14,9 +14,10 @@ import { getPanel, focusPanelTarget } from '../runtime/panel-state.js';
 import { hideRosterControls, groupHeading } from '../ui/panel-shell.js';
 import { renderExScenes, resetExScenes, setThumbCache } from './exscene-view.js';
 import { indexReady } from '../../data/index-store.js';
+import { noteFailure } from '../../core/failures.js';
 
-const GROUP_ORDER = ['リーニャ', 'テーセツ', 'ジャハラ', 'クォンツィ', 'ジェネラス', 'ペイシェ', 'ヒューム', 'アンノウン'];
-const RANK_ORDER = ['UR', 'S', 'A', 'B'];
+const AFFILIATION_ORDER = ['リーニャ', 'テーセツ', 'ジャハラ', 'クォンツィ', 'ジェネラス', 'ペイシェ', 'ヒューム', 'アンノウン'];
+const RARITY_ORDER = ['UR', 'S', 'A', 'B'];
 let filterMeta = {};
 let renderSeq = 0;
 
@@ -32,7 +33,9 @@ async function verifyOne(folderKey) {
   let fresh = null;
   try {
     fresh = await collectionRepository.scanFolderHandle(arr[i].handle, folderKey);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('ロスター', 'カード再スキャンの1件', e);
+  }
   if (!fresh) return;
   const old = arr[i].counts || {};
   arr[i] = { ...fresh, at: Date.now() };
@@ -162,8 +165,8 @@ function buildXposFilter() {
 
 function populateFilterSelects(folderMeta) {
   filterMeta = folderMeta || {};
-  fillSelect({ selId: 'rosterGroup', field: 'group', order: GROUP_ORDER, allLabel: 'グループすべて', current: playerState.rosterGroup, onChange: (v) => remember('rosterGroup', v) });
-  fillSelect({ selId: 'rosterRank', field: 'rank', order: RANK_ORDER, allLabel: 'ランクすべて', current: playerState.rosterRank, onChange: (v) => remember('rosterRank', v) });
+  fillSelect({ selId: 'rosterAffiliation', field: 'affiliation', order: AFFILIATION_ORDER, allLabel: '所属すべて', current: playerState.rosterAffiliation, onChange: (v) => remember('rosterAffiliation', v) });
+  fillSelect({ selId: 'rosterRarity', field: 'rarity', order: RARITY_ORDER, allLabel: 'レアリティすべて', current: playerState.rosterRarity, onChange: (v) => remember('rosterRarity', v) });
 }
 
 const KIND_DEPS = {
@@ -244,7 +247,12 @@ export async function renderRoster(opts) {
   let folderMeta = {};
   try {
     ({ folderMeta } = await collectionRepository.folderModel());
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('ロスター', '描画', e);
+    grid.innerHTML = '<div class="emptyrow">ロスターの描画に失敗しました</div>';
+    getById('rostercount').textContent = '';
+    return;
+  }
   if (stale()) return;
   grid.innerHTML = '';
   populateFilterSelects(folderMeta);
@@ -255,7 +263,12 @@ export async function renderRoster(opts) {
   let hasIndex = false;
   try {
     hasIndex = await indexReady();
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('ロスター', '描画', e);
+    grid.innerHTML = '<div class="emptyrow">ロスターの描画に失敗しました</div>';
+    getById('rostercount').textContent = '';
+    return;
+  }
   if (stale()) return;
 
   const showControls = playerState.fsGranted && hasIndex;
@@ -269,8 +282,8 @@ export async function renderRoster(opts) {
       'rosterSearch',
       'rosterType',
       'rosterOwn',
-      'rosterGroup',
-      'rosterRank',
+      'rosterAffiliation',
+      'rosterRarity',
       'bulkOpen',
       'sharedDl',
       'rostercount',
@@ -337,8 +350,8 @@ export async function rosterModel() {
     const partial = [];
     const unowned = [];
     for (const it of items) {
-      if (playerState.rosterGroup && (it.group || '') !== playerState.rosterGroup) continue;
-      if (playerState.rosterRank && (it.rank || '') !== playerState.rosterRank) continue;
+      if (playerState.rosterAffiliation && (it.affiliation || '') !== playerState.rosterAffiliation) continue;
+      if (playerState.rosterRarity && (it.rarity || '') !== playerState.rosterRarity) continue;
       if (playerState.rosterOwn === 'owned' && !it.owned) continue;
       if (playerState.rosterOwn === 'unowned' && it.owned) continue;
       if (!matchSearch(it)) continue;

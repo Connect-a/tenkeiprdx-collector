@@ -9,6 +9,7 @@ import { refreshLists } from '../runtime/state-refresh.js';
 import { idbStore } from '../../core/idb.js';
 import { renderStorageSummary } from './storage-summary.js';
 import { ensureIndexes, indexReady, rebuildIndexes } from '../../data/index-store.js';
+import { noteFailure } from '../../core/failures.js';
 
 const _busy = new Set();
 let _rows = [];
@@ -31,7 +32,7 @@ function bindOpen(sec) {
   if (_bound || !sec) return;
   _bound = true;
   sec.addEventListener('toggle', () => {
-    if (sec.open && _dirty) refreshDownloadSection().catch(() => {});
+    if (sec.open && _dirty) refreshDownloadSection();
   });
 }
 
@@ -64,6 +65,7 @@ async function lowQualityRow() {
     const idx = await ensureIndexes();
     if (!idx || !idx.meta || idx.meta.altRelCount !== 0) return null;
   } catch (e) {
+    noteFailure('ダウンロード欄', '低品質索引の警告', e);
     return null;
   }
   return el('div', 'dlrow', el('div', 'note warn', LOW_QUALITY_INDEX));
@@ -76,6 +78,7 @@ async function pinnedBaseRow() {
     if (!cur.manual || !auto || cur.manual === auto) return null;
     return el('div', 'dlrow', el('div', 'note warn', pinnedBaseStale(cur.manual, auto)));
   } catch (e) {
+    noteFailure('ダウンロード欄', '手動配信元の警告', e);
     return null;
   }
 }
@@ -206,11 +209,9 @@ function jobRow(job) {
         markChecking(badge, spin);
         note.textContent = '索引を確認しています…';
         await new Promise((r) => requestAnimationFrame(r));
-        try {
-          await ensureIndexes((m) => {
-            note.textContent = m;
-          });
-        } catch (e) {}
+        await ensureIndexes((m) => {
+          note.textContent = m;
+        });
         note.textContent = '保存済みを確認しています…';
         try {
           const r = await job.run(
@@ -311,7 +312,11 @@ export async function refreshDownloadSection() {
   let ready = false;
   try {
     ready = await indexReady();
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('ダウンロード欄', '描画', e);
+    host.innerHTML = '<div class="emptyrow">ダウンロード欄の描画に失敗しました</div>';
+    return;
+  }
   if (!ready) {
     host.appendChild(indexRow(refreshDownloadSection));
     return;

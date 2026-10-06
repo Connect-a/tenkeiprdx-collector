@@ -9,6 +9,7 @@ import { bundleName } from '../../core/assetpath/paths.js';
 import { FOLDER_PARENTS, DIRS } from '../../core/dirs.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { pool } from '../../core/async.js';
+import { noteFailure } from '../../core/failures.js';
 
 const bundleIn = async (handle, sub) => {
   try {
@@ -117,7 +118,9 @@ export async function ensureKinds(kinds, mode) {
     if (_loaded.has(kind + ':' + mode)) continue;
     try {
       await listEntries(kind, mode);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ビューワー資産', '種別読み込みの1件', e);
+    }
   }
 }
 
@@ -125,9 +128,9 @@ export const entryOf = (id) => _byId.get(String(id)) || null;
 
 const charHandle = (id) => (_charDirs ? _charDirs.get(String(id)) || null : null);
 
-let _mouth;
+let _mouth = null;
 async function mouthAtlas() {
-  if (_mouth === undefined) _mouth = await charAssets.loadMouthAtlas(null);
+  if (!_mouth) _mouth = await charAssets.loadMouthAtlas(null);
   return _mouth;
 }
 
@@ -162,6 +165,7 @@ const meshDepsOf = async (id) => {
   try {
     return ((await ensureIndexes()).meta.modelDeps || {})[String(id)] || [];
   } catch (e) {
+    noteFailure('ビューワー資産', 'モデル依存リスト', e);
     return [];
   }
 };
@@ -178,7 +182,7 @@ export async function loadModelFor(entry, costume) {
     const pick = (costume && mats.includes(costume) && costume) || e.material || mats[0] || null;
     return {
       model,
-      matBundle: await charAssets.loadMaterialBundle(read, pick),
+      matBundle: await charAssets.loadMaterialBundle(read, pick, mats),
       weapons: await charAssets.buildWeapons(read, e.weapons),
       attachments: e.attachments || undefined,
       attachmentColors: e.attachmentColors || null,
@@ -195,7 +199,7 @@ export async function loadModelFor(entry, costume) {
     const read = (rel) => (byRel.has(rel) ? assetStore.readIn(AREA.monster(byRel.get(rel)), rel) : Promise.resolve(null));
     const model = await charAssets.loadModelBundle(read, m.model, m.meshDeps, { always: true, depRead: sharedRead });
     if (!model) return null;
-    const matBundle = await charAssets.loadMaterialBundle(read, m.material);
+    const matBundle = await charAssets.loadMaterialBundle(read, m.material, m.materials);
     const weapons = await charAssets.buildWeapons(read, m.weapons);
     return { model, matBundle, weapons, variations: [], attachments: m.attachments || null, read, mouthAtlas: await mouthAtlas() };
   }

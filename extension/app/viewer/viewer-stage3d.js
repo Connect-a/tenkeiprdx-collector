@@ -11,10 +11,11 @@ import { createFieldPass, LAYER_FIELD } from './viewer-stage-pass.js';
 import { createSky } from './viewer-stage-sky.js';
 import { createDriver } from './viewer-stage-drive.js';
 import { createPicker } from './viewer-stage-pick.js';
-import { createCameraRig } from './viewer-stage-camera.js';
+import { createStageCameraRig } from './viewer-stage-camera.js';
 import { buildGroundIndex } from './viewer-ground.js';
 import { el } from '../../core/dom.js';
-import { MOTION_ORDER, idleClip } from '../../engine/render/motion-names.js';
+import { MOTION_ORDER, idleClip } from '../../engine/render/motion/motion-names.js';
+import { noteFailure } from '../../core/failures.js';
 
 const SLIDERS = [];
 const MOTION_LC = MOTION_ORDER.map((n) => n.toLowerCase());
@@ -52,7 +53,7 @@ export function createStage(hostEl, deps) {
   camera.updateProjectionMatrix();
   const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, logarithmicDepthBuffer: false, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, globalThis.devicePixelRatio || 1));
-  renderer.outputColorSpace = THREE.SRGBColorSpace || 'srgb';
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace || THREE.NoColorSpace || 'srgb-linear';
   wrap.appendChild(renderer.domElement);
 
   const sky = createSky(scene, renderer);
@@ -92,10 +93,9 @@ export function createStage(hostEl, deps) {
     }
   }
 
-  const rig = createCameraRig(camera, renderer, wrap, { anchor, state, core, fieldGroup: () => fieldGroup, grid: () => grid, fog: pass.fog });
+  const rig = createStageCameraRig(camera, renderer, wrap, { anchor, state, core, fieldGroup: () => fieldGroup, grid: () => grid, fog: pass.fog });
   const applyCam = rig.apply;
   const frame = rig.frame;
-  const focus = rig.focus;
 
   const GROUND_FOOT = 0.25;
   const GROUND_TAPS = [
@@ -130,7 +130,7 @@ export function createStage(hostEl, deps) {
 
   function place(c, inst) {
     inst.root.position.set(anchor.x - (c.x || 0), anchor.y + (c.y || 0), anchor.z + (c.z || 0));
-    inst.root.rotation.set(c.rotX || 0, (inst.defaultRotY || 0) + (c.rotY || 0), c.rotZ || 0);
+    inst.root.rotation.set(c.rotX || 0, c.rotY || 0, c.rotZ || 0);
     if (inst.center) {
       const s0 = c.scale || 1;
       pivot.copy(inst.center).multiplyScalar(s0);
@@ -186,7 +186,7 @@ export function createStage(hostEl, deps) {
         const name = noteShaderError(gl, program, vs);
         if (!name) return;
         core.note(`${name} のシェーダを実行できないため、フィールドを通常表示に戻します。`);
-        this.syncField().catch(() => {});
+        this.syncField().catch((e) => noteFailure('ステージ表示', 'フィールド復旧', e));
       };
       guard = guardRenderer(renderer, { deadMs: 2600, onDead: () => core.note('描画コンテキストを復帰できませんでした。ページを再読み込みしてください。') });
       picker.bind();
@@ -217,7 +217,9 @@ export function createStage(hostEl, deps) {
       let d = null;
       try {
         d = await loadModelFor(entry, want && want.costume);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ステージ表示', '3Dモデル読み込みの1件', e);
+      }
       if (!d || !d.model) {
         core.note(`#${key} の3Dモデルが見つかりません。ダウンロードを確認してください。`);
         return null;
@@ -231,7 +233,9 @@ export function createStage(hostEl, deps) {
           attachmentColors: d.attachmentColors || undefined,
           mainLight,
         });
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ステージ表示', '3Dインスタンス構築の1件', e);
+      }
       if (!inst || !inst.ok) {
         core.note(`#${key} は表示できる形状データを持っていません。`);
         return null;
@@ -260,7 +264,6 @@ export function createStage(hostEl, deps) {
     needsRebuild: (c, inst) => !!(c.costume && inst.costume && inst.costume !== c.costume),
     apply(c, inst) {
       if (c.motion) {
-        const key = String(c.id);
         driver.noteMotion(c.id, c.motion);
         inst.setClip(c.motion);
       }

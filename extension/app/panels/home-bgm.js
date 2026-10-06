@@ -1,6 +1,7 @@
 import { settings } from '../../core/settings.js';
 import { SK } from '../../core/storage-keys.js';
 import { createBgmEngine } from '../../core/bgm-engine.js';
+import { noteFailure } from '../../core/failures.js';
 
 const CACHE_MAX = 6;
 
@@ -74,12 +75,16 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
     if (bytes) {
       try {
         clips = await unityDecode.extractAudioResource(bytes);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ホームBGM', '音声クリップの抽出', e);
+      }
     }
     if (clips.length) {
       try {
         buf = await engine.decode(clips[0].data);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ホームBGM', '音声デコード', e);
+      }
     }
     _bufs.set(path, buf);
     trimCache();
@@ -363,8 +368,16 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
       updateWidget();
       return;
     }
-    const data = await collectionRepository.homeData().catch(() => null);
-    const hs = data ? await collectionRepository.homeStatus(data).catch(() => null) : null;
+    const data = await collectionRepository.homeData().catch((e) => {
+      noteFailure('ホームBGM', '復元データの取得', e);
+      return null;
+    });
+    const hs = data
+      ? await collectionRepository.homeStatus(data).catch((e) => {
+          noteFailure('ホームBGM', '復元状態の構築', e);
+          return null;
+        })
+      : null;
     if (hs) _downloaded = [...hs.homeBgm.values(), ...hs.otherBgm.values()].map((m) => ({ id: m.id, name: m.name, path: m.audio, intro: m.intro, icon: m.icon }));
     if (settings.get('homeBgmMode') === 'shuffle') buildShuffle();
     const stored = st.homeBgmSel;
@@ -439,6 +452,5 @@ export function createHomeBgm({ getById, unityDecode, playerState, collectionRep
     glyph,
     applyVolume,
     isCurrent: (id) => !!(_sel && String(_sel.id) === String(id)),
-    revoke: () => _bufs.clear(),
   };
 }

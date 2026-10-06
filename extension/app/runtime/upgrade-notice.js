@@ -1,10 +1,9 @@
 import { showNotice } from '../ui/notice-modal.js';
 import { SK, LEGACY_KEYS, LEGACY_IDB_KEYS, LEGACY_LOCAL_STORAGE_KEYS } from '../../core/storage-keys.js';
 import { idbStore } from '../../core/idb.js';
+import { noteFailure } from '../../core/failures.js';
 
 const KEY = SK.noticedRelease;
-const RELEASE = '2.6';
-const MAJOR = RELEASE.split('.')[0];
 const TITLE = '更新のお知らせ';
 const LINES = [
   { h: 'ver2.6.0' },
@@ -36,26 +35,28 @@ const LINES = [
   '1.x で取得したデータは 2.0 からは読めません。そのまま見たい場合は 1.x の拡張機能をお使いください。',
 ];
 
+const hasNotice = (version) => LINES.some((t) => t && t.h === 'ver' + version);
+
 export function openUpgradeNotice() {
   return showNotice(LINES, { title: TITLE });
 }
 
 export async function showUpgradeNotice() {
-  let major = '';
+  let version = '';
   try {
-    major = String((chrome.runtime.getManifest().version || '').split('.')[0]);
+    version = String(chrome.runtime.getManifest().version || '');
   } catch (e) {
+    noteFailure('更新告知', 'manifest', e);
     return;
   }
-  if (major !== MAJOR) return;
   let seen = '';
   try {
     seen = (await chrome.storage.local.get(KEY))[KEY] || '';
   } catch (e) {}
-  if (seen === RELEASE) return;
-  await showNotice(LINES, { blocking: true, title: TITLE });
+  if (seen === version) return;
+  if (hasNotice(version)) await showNotice(LINES, { blocking: true, title: TITLE });
   try {
-    await chrome.storage.local.set({ [KEY]: RELEASE });
+    await chrome.storage.local.set({ [KEY]: version });
     await chrome.storage.local.remove(LEGACY_KEYS);
     for (const k of LEGACY_LOCAL_STORAGE_KEYS) localStorage.removeItem(k);
     for (const k of LEGACY_IDB_KEYS) await idbStore.del(k);

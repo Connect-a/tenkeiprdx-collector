@@ -1,3 +1,5 @@
+import { noteFailure } from './failures.js';
+
 export async function pool(items, limit, worker) {
   const out = new Array(items.length);
   let next = 0;
@@ -19,5 +21,7 @@ export const safeProgress =
   (...a) => {
     try {
       progress && progress(...a);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('非同期処理', '進捗コールバック', e);
+    }
   };

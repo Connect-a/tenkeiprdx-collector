@@ -1,7 +1,7 @@
 import { folderModel, characterDetail } from './folder-model.js';
 import { rosterItems, buildRosterItemFor } from './roster.js';
-import { otherList, other3dStatus, other3dReady, monsterList, monsterStatus, monsterReady, other2dList, other2dStatus, itemList, itemGroups } from './entity-lists.js';
-import { homeData, homeStatus, homeAssetStatus, otherBgmList } from './home-data.js';
+import { otherList, fbxSlotAssets, other3dStatus, other3dReady, monsterList, monsterStatus, monsterReady, other2dList, other2dStatus, itemList, itemGroups } from './entity-lists.js';
+import { homeData, homeStatus, homeAssetStatus } from './home-data.js';
 import { scanFolder, scanOneFolder, scanFolderHandle, cachedFolderEntries } from './folder-scan.js';
 
 export const collectionRepository = {
@@ -12,6 +12,7 @@ export const collectionRepository = {
   buildRosterItemFor,
 
   otherList,
+  fbxSlotAssets,
   other3dStatus,
   other3dReady,
   monsterList,
@@ -25,7 +26,6 @@ export const collectionRepository = {
   homeData,
   homeStatus,
   homeAssetStatus,
-  otherBgmList,
 
   scanFolder,
   scanOneFolder,

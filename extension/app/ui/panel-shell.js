@@ -1,6 +1,8 @@
 import { el, getById } from '../../core/dom.js';
+import { errText } from '../../core/messages.js';
+import { spineWeb } from '../../engine/story/spine-web.js';
 
-const ROSTER_CONTROLS = ['rosterSearch', 'rosterOwn', 'rosterGroup', 'rosterRank', 'bulkOpen', 'sharedDl', 'rosterSortLbl', 'rosterSort', 'rosterSortDescLabel', 'exModeLabel', 'exFilterRow'];
+const ROSTER_CONTROLS = ['rosterSearch', 'rosterOwn', 'rosterAffiliation', 'rosterRarity', 'bulkOpen', 'sharedDl', 'rosterSortLbl', 'rosterSort', 'rosterSortDescLabel', 'exModeLabel', 'exFilterRow'];
 
 export function hideRosterControls({ keepSearch } = {}) {
   for (const id of ROSTER_CONTROLS) {
@@ -16,7 +18,7 @@ export function splitLayout(grid, viewId, placeholder) {
   const listCol = el('div', 'othercol-list');
   const viewCol = el('div', { class: 'othercol-view', id: viewId, html: `<div class="otherview-empty">${placeholder}</div>` });
   grid.appendChild(el('div', 'otherlayout', [listCol, viewCol]));
-  return { listCol, viewCol };
+  return { listCol };
 }
 
 export function clearView(viewId, placeholder) {
@@ -51,7 +53,7 @@ export function groupHeading(parent, text) {
   return h;
 }
 
-export function downloadBar({ text, label, small, run }) {
+function downloadBar({ text, label, small, run }) {
   const note = el('span', 'note dim');
   const btn = el('button', {
     class: small ? 'btn xs' : 'btn sm primary',
@@ -70,6 +72,38 @@ export function downloadBar({ text, label, small, run }) {
     },
   });
   return el('div', 'homebar', [text ? el('span', 'note', text) : null, btn, note]);
+}
+
+export function acquireBar({ text, label, small, acquire, done }) {
+  return downloadBar({
+    text,
+    label,
+    small,
+    run: async (onProgress) => {
+      try {
+        await done(await acquire(onProgress));
+      } catch (e) {
+        onProgress(errText(e));
+      }
+    },
+  });
+}
+
+export function mountSpinePlayer(cell, inputs, fail) {
+  const box = el('div', 'spine-player-box');
+  cell.appendChild(box);
+  try {
+    const { player } = spineWeb.buildPlayable(box, inputs, {
+      showControls: true,
+      backgroundColor: '#00000000',
+      onReady: (pl) => spineWeb.startDefaultIdle(pl),
+      onError: (m) => fail('Spine失敗: ' + m),
+    });
+    return player || null;
+  } catch (e) {
+    fail('Spine失敗: ' + errText(e));
+    return null;
+  }
 }
 
 export function decodeFailNote(parent, stats) {

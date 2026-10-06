@@ -7,8 +7,8 @@ export const playerState = {
   rosterOpen: false,
   rosterKind: 'character',
   rosterOwn: 'all',
-  rosterGroup: '',
-  rosterRank: '',
+  rosterAffiliation: '',
+  rosterRarity: '',
   rosterXpos: 0,
   rosterSort: 'name',
   rosterSortAsc: true,
@@ -17,6 +17,15 @@ export const playerState = {
   cur: null,
   navId: null,
   imageAutoKey: null,
+  selGen: 0,
+
+  setNav(folderKey) {
+    this.navId = folderKey == null ? null : String(folderKey);
+    return ++this.selGen;
+  },
+  isStale(gen) {
+    return this.selGen !== gen;
+  },
 
   viewKey() {
     return this.cur ? String(this.cur.folderKey || '') : '';

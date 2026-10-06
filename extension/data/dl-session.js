@@ -2,10 +2,11 @@ import { FAIL_CAP, MISS_STREAK_CAP } from './acquire/limits.js';
 import { fileStore } from '../core/fsdir.js';
 import { networkClient } from './network.js';
 import { assetStore } from './asset-store.js';
+import { noteFailure } from '../core/failures.js';
 
 const { fetchBytes } = networkClient;
 
-async function saveUrl(session, targetDir, { url, subpath, label }) {
+async function saveUrl(session, targetDir, { url, subpath }) {
   const counters = session.counters;
   if (!targetDir) return { status: 'fail' };
   if (!session.overwrite && (await fileStore.exists(targetDir, subpath))) {
@@ -31,6 +32,7 @@ async function saveUrl(session, targetDir, { url, subpath, label }) {
     counters.got++;
     return { status: 'got', path: subpath };
   } catch (e) {
+    noteFailure('一括取得', 'URL保存の1件', e);
     return { status: 'fail' };
   }
 }

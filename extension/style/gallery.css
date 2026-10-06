@@ -68,7 +68,8 @@
 
 .imgfs-img {
   max-width: 96vw;
-  max-height: 90vh;
+  flex: 1 1 auto;
+  min-height: 0;
   object-fit: contain;
   border-radius: 6px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
@@ -89,6 +90,39 @@
   max-width: 96vw;
   text-align: center;
   pointer-events: none;
+}
+
+.imgfs-extra {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 96vw;
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: 4px 4px 0;
+  cursor: default;
+}
+.imgfs-extra:empty {
+  display: none;
+}
+.imgfs-extra .homelines {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 16px;
+}
+.imgfs-extra .homeline {
+  border-top: none;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.imgfs-extra .homeline:hover {
+  background: #241f38;
+}
+.imgfs-extra .homeline-play {
+  flex: 0 0 auto;
+  color: #b9a4ff;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 @media (max-width: 1000px) {

@@ -7,6 +7,7 @@ import { audioBlobUrl, cachedAudioUrl, revokeUrlMap } from '../../core/audio-url
 import { scenarioSettings } from './scenario-settings.js';
 import { createTts } from './tts.js';
 import { createStoryBgm } from './story-bgm.js';
+import { noteFailure } from '../../core/failures.js';
 
 function create(deps) {
   const els = deps.els || {};
@@ -55,7 +56,9 @@ function create(deps) {
       let clips = [];
       try {
         clips = await unityDecode.extractAudioResource(b);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ストーリー音声', 'SE抽出', e);
+      }
       return clips.length ? clips[0] : null;
     });
   const voiceJobs = new Map();
@@ -69,7 +72,9 @@ function create(deps) {
         let clips = [];
         try {
           clips = await unityDecode.extractVoiceClips(b);
-        } catch (e) {}
+        } catch (e) {
+          noteFailure('ストーリー音声', 'ボイス抽出', e);
+        }
         for (const c of clips) if (!st.voiceUrls.has(c.name)) st.voiceUrls.set(c.name, audioBlobUrl(c.data, c.mime));
         return true;
       })();
@@ -78,12 +83,14 @@ function create(deps) {
         .then((ok) => {
           if (ok) st.extractedSids.add(sid);
         })
-        .catch(() => {})
+        .catch((e) => noteFailure('ストーリー音声', 'ボイス抽出ジョブ', e))
         .finally(() => voiceJobs.delete(sid));
     }
     try {
       await job;
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ストーリー音声', 'ボイス抽出待機', e);
+    }
   }
   const clearVoiceSrc = (a) => {
     if (!a.getAttribute('src')) return;
@@ -126,7 +133,9 @@ function create(deps) {
       const rel = ((await ensureIndexes()).assets.sceneAssetIndex || {})[key];
       const p = rel ? await assetStore.locate(DIRS.shared, rel) : null;
       path = p ? DIRS.shared + '/' + p : null;
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ストーリー音声', '共有SE解決', e);
+    }
     st.seMap[key] = path;
     return path;
   }
@@ -156,13 +165,10 @@ function create(deps) {
     bgm.dispose();
   }
   return {
-    chVol,
-    applyLiveVolume,
     playVoice,
     playSe,
     playBgm: (fr) => bgm.play(fr),
     stopBgm: () => bgm.stop(),
-    fadeOutBgm: (sec) => bgm.fadeOut(sec),
     refreshBgm: () => bgm.refresh(),
     speakCurrent: (gen, audible) => tts.speak(gen, audible),
     cancelTts: () => tts.cancel(),

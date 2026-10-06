@@ -33,7 +33,10 @@ async function openById(id) {
     const scan = pendingScan() || beginScan();
     if (scan) await scan;
   }
-  if (known() && (await openCharacter(sid))) return true;
+  if (known()) {
+    await openCharacter(sid);
+    return true;
+  }
   try {
     const item = await collectionRepository.buildRosterItemFor(sid, { dl: playerState.dl, distSet: playerState.binlistScenes });
     if (item) {

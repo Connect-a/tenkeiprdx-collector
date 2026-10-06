@@ -6,17 +6,23 @@ import { showUpgradeNotice } from './upgrade-notice.js';
 import { LOW_QUALITY_INDEX } from '../../core/messages.js';
 import { toast } from '../ui/notifier.js';
 import { ensureIndexes, indexReady } from '../../data/index-store.js';
+import { noteFailure } from '../../core/failures.js';
 
 async function warnLowQuality() {
   try {
     if (!(await indexReady())) return;
     const idx = await ensureIndexes();
     if (idx && idx.meta && idx.meta.altRelCount === 0) toast(LOW_QUALITY_INDEX, 'err');
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('起動補助', '低品質索引の警告', e);
+  }
 }
 
 window.addEventListener('unhandledrejection', (ev) => {
   console.error('[tp] 未処理のエラー', ev.reason);
+});
+window.addEventListener('error', (ev) => {
+  console.error('[tp] 未処理のエラー', ev.error || ev.message);
 });
 
 async function boot() {

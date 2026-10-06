@@ -12,6 +12,7 @@ import { KIND_BY_KEY, gachaFileList } from '../gacha.js';
 import { dlSession } from '../dl-session.js';
 import { localInventory } from '../inventory.js';
 import { fileStore } from '../../core/fsdir.js';
+import { noteFailure } from '../../core/failures.js';
 
 const everyN = (n) => (c) => (c.done % n === 0 ? `DL中 ${c.done}/${c.total}（新規${c.got}件・失敗${c.fail}件）` : null);
 const doneWithSkip = (c) => `完了 新規${c.got}件・既にあった分${c.skip}件${c.fail ? `・失敗${c.fail}件` : ''}${c.purged ? `・壊れた分を削除${c.purged}件` : ''}`;
@@ -112,7 +113,6 @@ async function runGachaDownload(progress, opts) {
     total: sess.counters.got + sess.counters.skip + ctx.total,
     purged: ctx.purged,
     stopped: stopped || !!ctx.stopped,
-    missingIds,
     missList,
     cdnDown,
   };
@@ -130,6 +130,7 @@ async function gachaStatus() {
     ];
     return { have: haveF.size + haveB.size, total: files.length + bgRels.length, unknown: 0 };
   } catch (e) {
+    noteFailure('素材一覧', 'ガチャ所持数', e);
     return { have: 0, total: 0, unknown: 0 };
   }
 }
@@ -205,6 +206,7 @@ async function battleFieldStatus() {
     const have = await assetStore.presentIds(DIRS.shared, list);
     return { have: have.size, total: list.length, unknown: 0 };
   } catch (e) {
+    noteFailure('素材一覧', '戦場素材所持数', e);
     return { have: 0, total: 0, unknown: 0 };
   }
 }
@@ -222,7 +224,7 @@ async function runBattleFieldDownload(progress, opts) {
   return { got: ctx.got, skip: ctx.skip, missing: ctx.missing, unresolved: 0, failed: ctx.fail, total: ctx.total, purged: ctx.purged, stopped: !!ctx.stopped };
 }
 
-async function castRepairPlan(ids, prefix) {
+async function castRepairPlan(ids) {
   const aidx = (await ensureIndexes()).assets.assetIndex || {};
   const jobs = [];
   const noAsset = [];
@@ -243,14 +245,12 @@ async function castRepairPlan(ids, prefix) {
   return { jobs, noAsset };
 }
 
-async function runCastRepair(ids, progress, opts) {
-  const prefix = opts && opts.prefix != null ? opts.prefix : null;
-  const { jobs, noAsset } = await castRepairPlan(ids, prefix);
+async function runCastRepair(ids, progress) {
+  const { jobs, noAsset } = await castRepairPlan(ids);
   const { ctx } = await runBulkDownload(jobs, {
-    dirKey: (opts && opts.dirName) || DIRS.shared,
+    dirKey: DIRS.shared,
     progress,
     toRel: (j) => j.rel,
-    placeOf: prefix == null ? null : (j) => PLACE.named(`${prefix}${j.id}/${j.cat}_`),
     tick: (c, phase) => (phase === 'dl' ? `取得中 ${c.done}/${c.total}` : null),
     done: doneWithSkip,
   });
@@ -258,11 +258,8 @@ async function runCastRepair(ids, progress, opts) {
 }
 
 export const acquireLists = {
-  runStaticsDownload,
   runGachaDownload,
   gachaStatus,
-  gachaBgRels,
-  gachaExtraRels,
   runOther2dDownload,
   runMonsterDownload,
   runOther3dDownload,

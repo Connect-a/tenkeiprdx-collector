@@ -1,5 +1,6 @@
 import { getById } from '../../core/dom.js';
 import { CFG } from '../../config.js';
+import { noteFailure } from '../../core/failures.js';
 
 function cmpSemver(a, b) {
   const pa = String(a)
@@ -19,7 +20,9 @@ export async function showVersionAndCheckUpdate() {
   let cur = '';
   try {
     cur = chrome.runtime.getManifest().version || '';
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('更新確認', '現在バージョン', e);
+  }
   if (getById('appVersion')) getById('appVersion').textContent = cur ? 'v' + cur : '';
   const badge = getById('updateBadge');
   if (!badge || !CFG.updateManifestUrl || !cur) return;
@@ -33,5 +36,7 @@ export async function showVersionAndCheckUpdate() {
       badge.title = `新しいバージョン v${latest} があります（現在 v${cur}）`;
       badge.style.display = '';
     }
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('更新確認', 'manifest', e);
+  }
 }

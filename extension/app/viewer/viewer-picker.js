@@ -96,7 +96,6 @@ export function createPicker(hostEl, deps) {
       items = (list0 || []).slice().sort((a, b) => (a.groupNo || 0) - (b.groupNo || 0) || (kanaKey(a.displayName) > kanaKey(b.displayName) ? 1 : -1));
       paint();
     },
-    itemOf: (id) => items.find((x) => String(x.id) === String(id)) || null,
     kind: () => kind,
     setMode(mode) {
       const is2d = mode === '2d';
@@ -109,6 +108,5 @@ export function createPicker(hostEl, deps) {
       return kind;
     },
     refreshMarks,
-    focusSearch: () => fb.input.focus(),
   };
 }

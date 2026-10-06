@@ -14,6 +14,7 @@ import { folderHandle } from '../runtime/state-refresh.js';
 import { nameFix, kanaKey, spinnerHtml } from '../ui/ui-format.js';
 import { navTo } from '../runtime/router-controller.js';
 import { characterComparer, rosterQuery } from '../runtime/roster-prefs.js';
+import { noteFailure } from '../../core/failures.js';
 
 const THUMB_CONC = 12;
 const EX_RE = /^EX/i;
@@ -58,7 +59,9 @@ async function exSceneItems() {
   try {
     const items = await collectionRepository.rosterItems('character', { dl: playerState.dl, distSet: playerState.binlistScenes || new Set() });
     for (const it of items) ownedBy.set(String(it.folderKey), !!it.owned);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('EX一覧', '所有状態', e);
+  }
   const out = [];
   for (const [folderKey, meta] of Object.entries(folderMeta)) {
     if (meta.rosterKind !== 'character') continue;
@@ -72,8 +75,8 @@ async function exSceneItems() {
         charName: meta.name || '',
         charTitle: meta.title || '',
         displayName: `${meta.name || ''}${meta.title || ''}`,
-        group: meta.group || '',
-        rank: meta.rank || '',
+        affiliation: meta.affiliation || '',
+        rarity: meta.rarity || '',
         bwh: meta.bwh || null,
         label: ep.label || '',
         title: ep.title || '',
@@ -87,8 +90,8 @@ async function exSceneItems() {
 }
 
 function matches(it, q, qk) {
-  if (playerState.rosterGroup && it.group !== playerState.rosterGroup) return false;
-  if (playerState.rosterRank && it.rank !== playerState.rosterRank) return false;
+  if (playerState.rosterAffiliation && it.affiliation !== playerState.rosterAffiliation) return false;
+  if (playerState.rosterRarity && it.rarity !== playerState.rosterRarity) return false;
   if (playerState.rosterOwn === 'owned' && !it.owned) return false;
   if (playerState.rosterOwn === 'unowned' && it.owned) return false;
   if (playerState.rosterXpos && !(it.xpos & playerState.rosterXpos)) return false;
@@ -165,7 +168,9 @@ async function paintThumb(box, it) {
   let rel = null;
   try {
     rel = (await ensureIndexes()).assets.sceneAssetIndex[it.thumb] || null;
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('EX一覧', 'サムネイル索引', e);
+  }
   if (!rel) return markEmpty(box, '取り先不明');
   let bytes = null;
   try {
@@ -175,7 +180,9 @@ async function paintThumb(box, it) {
   let cvs = null;
   try {
     cvs = unityMesh.decodeAllTextureCanvases(bytes);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('EX一覧', 'サムネイル復号', e);
+  }
   if (cvs && cvs[0]) {
     if (useCache) {
       const blob = await writeCached(it.episodeId, cvs[0]);

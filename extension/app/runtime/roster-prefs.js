@@ -1,7 +1,7 @@
 import { settings } from '../../core/settings.js';
 import { playerState } from './player-state.js';
 
-const ROSTER_PREF_KEYS = ['rosterOwn', 'rosterGroup', 'rosterRank', 'rosterSearch', 'rosterSort', 'rosterSortAsc', 'rosterXpos', 'exMode', 'exFavOnly'];
+const ROSTER_PREF_KEYS = ['rosterOwn', 'rosterAffiliation', 'rosterRarity', 'rosterSearch', 'rosterSort', 'rosterSortAsc', 'rosterXpos', 'exMode', 'exFavOnly'];
 
 export function loadRosterPrefs() {
   for (const k of ROSTER_PREF_KEYS) playerState[k] = settings.get(k);

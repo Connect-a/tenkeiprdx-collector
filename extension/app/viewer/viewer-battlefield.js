@@ -5,6 +5,8 @@ import { assetStore } from '../../data/asset-store.js';
 import { DIRS } from '../../core/dirs.js';
 import { hasFieldShader, makeFieldMaterial } from '../../engine/render/field-shader.js';
 import { unityAnim } from '../../unity/anim.js';
+import { gammaToLinear, linearToGamma } from '../../engine/render/color.js';
+import { noteFailure } from '../../core/failures.js';
 
 const CLS = {
   GAME_OBJECT: 1,
@@ -61,6 +63,7 @@ function decodeMapClip(raw) {
       },
     });
   } catch (e) {
+    noteFailure('バトルフィールド', 'AnimationClipの1件', e);
     return null;
   }
   if (!dec || !dec.duration) return null;
@@ -68,13 +71,7 @@ function decodeMapClip(raw) {
   return rot ? { duration: dec.duration, times: rot.times, values: rot.values } : null;
 }
 
-function readOne(sf, LE, obj) {
-  try {
-    return unitySf.readObject(sf, LE, obj);
-  } catch (e) {
-    return null;
-  }
-}
+const readOne = (sf, LE, obj) => unitySf.readObjectSafe(sf, LE, obj);
 
 function readGeometry(parsed, sf, LE, obj) {
   const m = unitySf.readObject(sf, LE, obj);
@@ -204,12 +201,13 @@ function skyboxInfo(T, rs, matByPid, cubeByPid, texByPid) {
   };
 }
 
+function rawColor(T, t) {
+  if (t) t.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
+  return t;
+}
+
 function skyboxCube(T, renderer, sky) {
-  const raw = (t) => {
-    if (t) t.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
-    return t;
-  };
-  if (sky.cube) return { tex: raw(cubeTexture(T, sky.cube, sky.scale)), rt: null };
+  if (sky.cube) return { tex: rawColor(T, cubeTexture(T, sky.cube, sky.scale)), rt: null };
   if (sky.tex && renderer) {
     const src = skyTexture(T, sky.tex, sky.scale);
     src.minFilter = T.LinearMipmapLinearFilter;
@@ -223,7 +221,7 @@ function skyboxCube(T, renderer, sky) {
       return { tex: null, rt: null };
     }
     src.dispose();
-    return { tex: raw(rt.texture), rt };
+    return { tex: rawColor(T, rt.texture), rt };
   }
   if (sky.mat) {
     const c = flatSkyColor(T, sky.mat, sky.exposure);
@@ -232,7 +230,7 @@ function skyboxCube(T, renderer, sky) {
     for (let i = 0; i < 6; i++) faces.push(canvasOf(px, 1, 1));
     const tex = new T.CubeTexture(faces);
     tex.needsUpdate = true;
-    return { tex: raw(tex), rt: null };
+    return { tex: rawColor(T, tex), rt: null };
   }
   return { tex: null, rt: null };
 }
@@ -259,8 +257,6 @@ function lightmapTexture(T, rec, bptc) {
 }
 
 const LIT_SHADER = /Baked Lit|^Universal Render Pipeline\/(Lit|Simple Lit)$/;
-const gammaToLinear = (c) => (c <= 0.04045 ? c / 12.92 : c < 1 ? Math.pow((c + 0.055) / 1.055, 2.4) : Math.pow(c, 2.2));
-const linearToSrgb = (c) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
 const FLAT_SH = (l0) => [l0.slice(), [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
 
 const AMB_SKY = [1 / 6, 0.2721655, 0, 0, 0, 0, -0.0260417, 0, -0.078125];
@@ -321,6 +317,7 @@ function lightProbesOf(ssf, ssfp) {
     try {
       lp = unitySf.readObject(ssf, ssfp.LE, o);
     } catch (e) {
+      noteFailure('バトルフィールド', 'ライトプローブの1件', e);
       continue;
     }
     const bc = lp.m_BakedCoefficients || [];
@@ -397,7 +394,7 @@ function sampleSH(sh, nx, ny, nz, out) {
     r += sh[4][k] * nx * ny + sh[5][k] * ny * nz + sh[7][k] * nx * nz;
     r += sh[6][k] * (3 * nz * nz - 1);
     r += sh[8][k] * (nx * nx - ny * ny);
-    out[k] = linearToSrgb(Math.max(0, r));
+    out[k] = linearToGamma(Math.max(0, r));
   }
   return out;
 }
@@ -426,18 +423,16 @@ function bakeAmbientColors(T, geo, sh) {
   const nrm = geo.attributes.normal;
   if (!nrm) return null;
   const col = new Float32Array(nrm.count * 3);
-  const tmp = [0, 0, 0];
+  const rgb = [0, 0, 0];
   for (let i = 0; i < nrm.count; i++) {
-    sampleSH(sh, nrm.getX(i), nrm.getY(i), nrm.getZ(i), tmp);
-    col[i * 3] = tmp[0];
-    col[i * 3 + 1] = tmp[1];
-    col[i * 3 + 2] = tmp[2];
+    sampleSH(sh, nrm.getX(i), nrm.getY(i), nrm.getZ(i), rgb);
+    col[i * 3] = rgb[0];
+    col[i * 3 + 1] = rgb[1];
+    col[i * 3 + 2] = rgb[2];
   }
   return new T.BufferAttribute(col, 3);
 }
 
-const TP_ENCODE_UNIFORM = 'uniform float uTpEncode;\n';
-const TP_TO_LINEAR = 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
 
 const TP_FOG = [
   'uniform vec4 uTpFogParams;',
@@ -559,8 +554,6 @@ function gammaPipeline(T, opts, o) {
     uniforms.uCharShadowStrength = { value: 0 };
     o.charShadowUniforms.push(uniforms);
   }
-  uniforms.uTpEncode = { value: 1 };
-  if (o.rtUniforms) o.rtUniforms.push(uniforms);
   const key = 'tp-field|' + Object.keys(defines).sort().join('+');
   return (m) => {
     m.defines = Object.assign(m.defines || {}, defines);
@@ -585,8 +578,6 @@ function gammaPipeline(T, opts, o) {
           vs;
       }
       shader.fragmentShader =
-        TP_ENCODE_UNIFORM +
-        TP_TO_LINEAR +
         (needNormal ? 'varying vec3 vTpNormal;\n' : '') +
         (needWorld ? 'varying vec3 vTpWorld;\n' : '') +
         (defines.TP_SH != null ? 'varying vec3 vTpSH;\n' : '') +
@@ -610,7 +601,7 @@ function gammaPipeline(T, opts, o) {
               TP_DIRECT +
               '\n\t#ifdef TP_EMISSION\n\t\t#ifdef TP_EMISSIONMAP\n\t\t\toutgoingLight += uEmission * texture2D( uEmissionMap, vMapUv ).rgb;\n\t\t#else\n\t\t\toutgoingLight += uEmission;\n\t\t#endif\n\t#endif\n' +
               TP_CHAR_SHADOW +
-              '\n\t#ifdef TP_FOG\n\t\toutgoingLight = tpMixFog( outgoingLight );\n\t#endif\n\toutgoingLight = mix( outgoingLight, tpToLinear( outgoingLight ), uTpEncode );',
+              '\n\t#ifdef TP_FOG\n\t\toutgoingLight = tpMixFog( outgoingLight );\n\t#endif',
           );
     };
   };
@@ -664,7 +655,6 @@ function threeMaterial(T, mat, texByPid, lightMap, dirLightMap, env) {
     specCube: env && env.specCube,
     fog: env && env.fog,
     fogUniforms: env && env.fogUniforms,
-    rtUniforms: env && env.rtUniforms,
     charShadow: env && env.charShadow,
     charShadowUniforms: env && env.charShadowUniforms,
   })(m);
@@ -771,7 +761,9 @@ function readFieldBundle(T, bytes, opt) {
         lightMaps.push(lightmapTexture(T, rawByPid.get(pid(entry.m_Lightmap)), bptc));
         dirLightMaps.push(lightmapTexture(T, rawByPid.get(pid(entry.m_DirLightmap)), bptc));
       }
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('バトルフィールド', 'ライトマップの1件', e);
+    }
   }
   const lightmapRef = (mr) => {
     const i = Number(mr.m_LightmapIndex);
@@ -788,6 +780,7 @@ function readFieldBundle(T, bytes, opt) {
     try {
       p = unitySf.parseSerializedFile(buf);
     } catch (e) {
+      noteFailure('バトルフィールド', '共有CABの1件', e);
       continue;
     }
     for (const o of p.objects) {
@@ -809,7 +802,9 @@ function readFieldBundle(T, bytes, opt) {
     if (o.classID !== CLS.RENDER_SETTINGS) continue;
     try {
       ambient = ambientOf(unitySf.readObject(sf, sfp.LE, o));
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('バトルフィールド', '環境光', e);
+    }
     break;
   }
 
@@ -841,10 +836,10 @@ function readFieldBundle(T, bytes, opt) {
     const k = `${file}:${pid(ref)}`;
     if (!geoCache.has(k)) {
       const inShared = file !== 0 && sharedFileIds.has(file) && ssf;
-      const obj = inShared ? ssById.get(pid(ref)) : file === 0 ? byId.get(pid(ref)) : null;
+      const meshObj = inShared ? ssById.get(pid(ref)) : file === 0 ? byId.get(pid(ref)) : null;
       let g = null;
       try {
-        g = obj && obj.classID === CLS.MESH ? readGeometry(parsed, inShared ? ssf : sf, inShared ? ssfp.LE : sfp.LE, obj) : null;
+        g = meshObj && meshObj.classID === CLS.MESH ? readGeometry(parsed, inShared ? ssf : sf, inShared ? ssfp.LE : sfp.LE, meshObj) : null;
       } catch (e) {
         g = null;
       }
@@ -859,7 +854,9 @@ function readFieldBundle(T, bytes, opt) {
     try {
       const mf = unitySf.readObject(sf, sfp.LE, o);
       if (mf.m_GameObject && pid(mf.m_Mesh) && pid(mf.m_Mesh) !== '0') filterByGo.set(pid(mf.m_GameObject), mf.m_Mesh);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('バトルフィールド', 'メッシュフィルタの1件', e);
+    }
   }
 
   const clipTracks = new Map();
@@ -870,6 +867,7 @@ function readFieldBundle(T, bytes, opt) {
       try {
         c = unitySf.readObject(ssf, ssfp.LE, o);
       } catch (e) {
+        noteFailure('バトルフィールド', 'AnimationClip読み込みの1件', e);
         continue;
       }
       const dec = decodeMapClip(c);
@@ -877,7 +875,9 @@ function readFieldBundle(T, bytes, opt) {
     } else if (o.classID === CLS.ANIM_CONTROLLER) {
       try {
         ctrlNameById.set(String(o.pathID), String(unitySf.readObject(ssf, ssfp.LE, o).m_Name || '').toLowerCase());
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('バトルフィールド', 'AnimatorControllerの1件', e);
+      }
     }
   }
   const animByGo = new Map();
@@ -888,6 +888,7 @@ function readFieldBundle(T, bytes, opt) {
       try {
         a = unitySf.readObject(sf, sfp.LE, o);
       } catch (e) {
+        noteFailure('バトルフィールド', 'Animatorの1件', e);
         continue;
       }
       if (a.m_Enabled === 0) continue;
@@ -903,7 +904,9 @@ function readFieldBundle(T, bytes, opt) {
       const t = unitySf.readObject(sf, sfp.LE, o);
       trById.set(String(o.pathID), t);
       if (pid(t.m_GameObject)) trByGo.set(pid(t.m_GameObject), t);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('バトルフィールド', 'Transformの1件', e);
+    }
   }
   const worldMatrix = (goPid) => {
     const chain = [];
@@ -938,7 +941,9 @@ function readFieldBundle(T, bytes, opt) {
       const g = unitySf.readObject(sf, sfp.LE, o);
       goName.set(String(o.pathID), String(g.m_Name || ''));
       goSelfActive.set(String(o.pathID), g.m_IsActive === undefined ? true : !!g.m_IsActive);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('バトルフィールド', 'GameObjectの1件', e);
+    }
   }
   const activeCache = new Map();
   const isActive = (goPid) => {
@@ -989,7 +994,6 @@ function readSceneEnv(T, src, opt) {
     shadowUniforms: [],
     fog: null,
     fogUniforms: [],
-    rtUniforms: [],
     charShadow: (opt && opt.charShadow) || null,
     charShadowUniforms: [],
   };
@@ -1001,8 +1005,7 @@ function readSceneEnv(T, src, opt) {
       const ref = rs.m_CustomReflection && pid(rs.m_CustomReflection) !== '0' ? rs.m_CustomReflection : rs.m_GeneratedSkyboxReflection;
       const rec = ref ? cubeByPid.get(pid(ref)) : null;
       if (rec) {
-        env.specCube = cubeTexture(T, rec, 1);
-        env.specCube.colorSpace = T.LinearSRGBColorSpace || 'srgb-linear';
+        env.specCube = rawColor(T, cubeTexture(T, rec, 1));
       } else {
         const made = skyboxCube(T, opt && opt.renderer, skyboxInfo(T, rs, matByPid, cubeByPid, texByPid));
         env.specCube = made.tex;
@@ -1083,7 +1086,6 @@ function makeMaterialFactory(T, src, env) {
           fogParams: env.fog ? env.fog.params : null,
           fogColor: env.fog ? env.fog.color : null,
           charShadow: env.charShadow,
-          rtUniforms: env.rtUniforms,
         });
       } catch (e) {
         m = null;
@@ -1148,6 +1150,7 @@ function buildFieldScene(T, src, mf) {
     try {
       mr = unitySf.readObject(sf, sfp.LE, o);
     } catch (e) {
+      noteFailure('バトルフィールド', 'MeshRendererの1件', e);
       continue;
     }
     if (mr.m_Enabled === 0 || !isActive(pid(mr.m_GameObject))) continue;
@@ -1379,9 +1382,9 @@ function readFieldSky(T, src) {
         exposure = sky.exposure;
       backgroundRotation = sky.rotation;
       if (skyCube) {
-        background = cubeTexture(T, skyCube, sky.scale);
+        background = rawColor(T, cubeTexture(T, skyCube, sky.scale));
       } else if (skyTex) {
-        background = skyTexture(T, skyTex, sky.scale);
+        background = rawColor(T, skyTexture(T, skyTex, sky.scale));
       } else if (skyMat) {
         background = flatSkyColor(T, skyMat, exposure);
       } else {
@@ -1429,7 +1432,6 @@ export async function loadBattleField(T, rel, opt) {
     fieldMats: mf.fieldMats,
     shadowUniforms: env.shadowUniforms,
     fogUniforms: env.fogUniforms,
-    rtUniforms: env.rtUniforms,
     charShadowUniforms: env.charShadowUniforms,
     ambient: src.ambient,
     bloom: src.bloom,

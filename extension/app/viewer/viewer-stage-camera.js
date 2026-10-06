@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
 
-export function createCameraRig(camera, renderer, wrap, deps) {
+export function createStageCameraRig(camera, renderer, wrap, deps) {
   const { anchor, state, core, fieldGroup, grid, fog } = deps;
   const CAM = () => state.scene.camera;
   const focus = new THREE.Vector3(0, 1, 0);
@@ -113,7 +113,6 @@ export function createCameraRig(camera, renderer, wrap, deps) {
   }
 
   return {
-    focus,
     apply: applyCam,
     setAnchor,
     shift: shiftCamera,

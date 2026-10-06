@@ -1,5 +1,4 @@
-// 自動生成: _scripts/bake-field-shaders.mjs（実ゲームWebGLビルドのGLSLをそのまま焼き込み）
-// 手で編集しない。再生成は node _scripts/bake-field-shaders.mjs
+// 自動生成（実ゲームWebGLビルドのGLSLをそのまま焼き込み）。手で編集しない。
 // キー末尾の |sh |lm |lmdir は GI 別バリアント（実行時に Renderer のライトマップ有無で選ぶ）。
 export const FIELD_SHADERS = {
   'EXNOA/UnlitSky': {

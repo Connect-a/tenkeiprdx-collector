@@ -529,3 +529,32 @@
   margin-right: auto;
   flex-shrink: 0;
 }
+
+.dinfo.has-still {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.dinfo-still {
+  flex: 0 0 auto;
+  cursor: zoom-in;
+  padding: 6px;
+  margin: -6px;
+  border-radius: 10px;
+}
+.dinfo-still:hover {
+  background: #201e2a;
+}
+.dinfo-still canvas {
+  height: 110px;
+  width: auto;
+  display: block;
+  border-radius: 6px;
+  border: 1px solid #2a2836;
+  pointer-events: none;
+}
+.dinfo-rows {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+}

@@ -4,6 +4,7 @@ import { ensureIndexes } from './index-store.js';
 import { unityMesh } from '../unity/mesh.js';
 import { unityDecode } from '../unity/decode.js';
 import { DIRS } from '../core/dirs.js';
+import { noteFailure } from '../core/failures.js';
 const EMPTY_MAT = { materials: [], textures: [] };
 const MAT_OPT = { keepCompressed: unityMesh.KEEP_DXT };
 
@@ -23,7 +24,9 @@ async function buildWeapons(read, list) {
       const model = unityMesh.parseModelBundle(mb);
       if ((w.deps || []).length) await mergeMeshDeps(model, read, w.deps);
       out.push({ id: w.id, model, materials: matB ? unityMesh.parseMaterialBundle(matB, MAT_OPT) : EMPTY_MAT, slot: w.slot || 'wp_2', scale: w.scale || 1 });
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('キャラ資産', '武器モデルの1件', e);
+    }
   }
   return out;
 }
@@ -35,7 +38,9 @@ async function mergeMeshDeps(model, read, deps) {
     try {
       const bytes = await read(rel);
       if (bytes) dep = unityMesh.parseModelBundle(bytes);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('キャラ資産', '武器依存の1件', e);
+    }
     if (!dep) continue;
     for (const mesh of dep.meshes || []) if (!has(model.meshes, mesh.pathID)) model.meshes.push(mesh);
     for (const mat of dep.materials || []) if (!has(model.materials, mat.pathID)) model.materials.push(mat);
@@ -55,16 +60,50 @@ async function loadModelBundle(read, modelRel, meshDeps, opts = {}) {
     if (opts.always || missing || !(model.clips || []).length) await mergeMeshDeps(model, depRead, meshDeps);
     return model;
   } catch (e) {
+    noteFailure('キャラ資産', 'モデル構築', e);
     return null;
   }
 }
 
-async function loadMaterialBundle(read, matRel) {
+function missingTexPathIDs(mb) {
+  const have = new Set((mb.textures || []).map((t) => t.pathID));
+  const missing = new Set();
+  for (const m of mb.materials || []) for (const pid of Object.values(m.texByName || {})) if (pid && !have.has(pid)) missing.add(pid);
+  return missing;
+}
+
+async function fillMissingTextures(mb, read, matRel, siblingRels) {
+  const missing = missingTexPathIDs(mb);
+  if (!missing.size) return mb;
+  for (const rel of siblingRels) {
+    if (!rel || rel === matRel) continue;
+    let extra = null;
+    try {
+      const bytes = await read(rel);
+      if (!bytes) continue;
+      extra = unityMesh.parseMaterialBundle(bytes, MAT_OPT);
+    } catch (e) {
+      noteFailure('キャラ資産', '材質の補完', e);
+      continue;
+    }
+    for (const t of extra.textures || []) {
+      if (!missing.has(t.pathID)) continue;
+      mb.textures.push(t);
+      missing.delete(t.pathID);
+    }
+    if (!missing.size) break;
+  }
+  return mb;
+}
+
+async function loadMaterialBundle(read, matRel, siblingRels) {
   const b = matRel ? await read(matRel) : null;
   if (!b) return EMPTY_MAT;
   try {
-    return unityMesh.parseMaterialBundle(b, MAT_OPT);
+    const mb = unityMesh.parseMaterialBundle(b, MAT_OPT);
+    return siblingRels && siblingRels.length ? await fillMissingTextures(mb, read, matRel, siblingRels) : mb;
   } catch (e) {
+    noteFailure('キャラ資産', '材質の構築', e);
     return EMPTY_MAT;
   }
 }
@@ -89,6 +128,7 @@ async function loadMouthAtlas(bytes) {
     }
     return b ? unityMesh.parseMouthAtlas(b) : null;
   } catch (e) {
+    noteFailure('キャラ資産', '口パク atlas', e);
     return null;
   }
 }
@@ -116,7 +156,8 @@ async function load3d(cur, opts) {
   };
 }
 
-const UI_KEYS = ['height', 'weaponAttach', 'costume', 'auraPicker', 'motionVoice', 'auraBytes', 'auraTexMap', 'hidePartsUI'];
+const UI_KEYS = ['height', 'weaponAttach', 'costume', 'auraPicker', 'motionVoice', 'auraBytes', 'auraTexMap', 'hidePartsUI', 'mainLight'];
+const BATTLE_MAIN_LIGHT = { dir: [0, 1, 0], color: [0.9, 0.9, 0.9] };
 function build3dOptions(loaded, master, ui) {
   const l = loaded || {},
     m = master || {},
@@ -133,8 +174,9 @@ async function extractClips(handle, path) {
   try {
     return await unityDecode.extractVoiceClips(b);
   } catch (e) {
+    noteFailure('キャラ資産', 'ボイスクリップ', e);
     return [];
   }
 }
 
-export const charAssets = { load3d, build3dOptions, extractClips, buildWeapons, mergeMeshDeps, loadModelBundle, loadMaterialBundle, loadMouthAtlas };
+export const charAssets = { load3d, build3dOptions, BATTLE_MAIN_LIGHT, extractClips, buildWeapons, loadModelBundle, loadMaterialBundle, loadMouthAtlas };

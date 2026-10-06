@@ -14,6 +14,7 @@ import { scenarioSettings } from './scenario-settings.js';
 import { sceneModel } from './scene-model.js';
 import { audioController } from './audio-controller.js';
 import { sceneEffects } from './scene-effects.js';
+import { noteFailure } from '../../core/failures.js';
 const AUTO_VOICE_GAP_MS = 400;
 const AUTO_VOICE_LOAD_CAP_MS = 2500;
 const AUTO_TTS_MIN_GAP_MS = 500;
@@ -184,9 +185,7 @@ function create(opts) {
         ST.idx++;
         renderFrame();
       } else if (o.onEnd) {
-        try {
-          o.onEnd();
-        } catch (e) {}
+        o.onEnd();
       }
     };
     if (isBeat) ST.autoTimer = setTimeout(advance, fr.auto);
@@ -305,12 +304,12 @@ function create(opts) {
     if (o.onFrame) {
       try {
         o.onFrame(fr, ST.folderHandle, ST.ep);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ストーリーエンジン', 'フレーム通知', e);
+      }
     }
     if (ST.idx >= ST.frames.length - 1 && ST.pendingChoice && o.onChoice) {
-      try {
-        o.onChoice(ST.pendingChoice);
-      } catch (e) {}
+      o.onChoice(ST.pendingChoice);
     }
     scheduleAuto(gen, opts);
   }
@@ -319,10 +318,7 @@ function create(opts) {
     if (!sceneEntry) return { meta: null, carry: carryBgm };
     const b = await readBundle(sceneEntry.scene);
     if (!b) return { meta: null, carry: carryBgm };
-    let dec = null;
-    try {
-      dec = unityDecode.decodeSceneBin(b);
-    } catch (e) {}
+    const dec = unityDecode.decodeSceneBin(b);
     if (!dec) return { meta: null, carry: carryBgm };
     const fs = sceneModel.sceneFrames(dec, carryBgm);
     for (const fr of fs) {
@@ -381,7 +377,9 @@ function create(opts) {
       if (!ST.emotionAtlas && scenarioUi) {
         try {
           ST.emotionAtlas = await scenarioUi.loadStage('emotion');
-        } catch (e) {}
+        } catch (e) {
+          noteFailure('ストーリーエンジン', 'emotion UI', e);
+        }
       }
       audio.stopAllAudio();
       fx.clearVfx();
@@ -434,7 +432,9 @@ function create(opts) {
         if (o.onIntroTitle) {
           try {
             o.onIntroTitle(ep);
-          } catch (e) {}
+          } catch (e) {
+            noteFailure('ストーリーエンジン', '導入タイトル通知', e);
+          }
         }
         await new Promise((res) => {
           ST.introResolve = res;
@@ -472,10 +472,7 @@ function create(opts) {
       if (ST.intro) return;
       if (reveal.revealing) return reveal.complete();
       if (ST.idx >= ST.frames.length - 1) {
-        if (o.onEnd)
-          try {
-            o.onEnd();
-          } catch (e) {}
+        if (o.onEnd) o.onEnd();
         return;
       }
       return this.go(1);
@@ -503,12 +500,6 @@ function create(opts) {
         await renderFrame();
       }
     },
-    isRevealing() {
-      return reveal.revealing;
-    },
-    completeReveal() {
-      reveal.complete();
-    },
     replayVoice() {
       const fr = ST.frames[ST.idx];
       if (!fr) return;
@@ -525,9 +516,6 @@ function create(opts) {
         if (f.text || f.speaker) out.push({ idx: i, speaker: subUser(f.speaker) || '', text: subUser(f.text) || '' });
       }
       return out;
-    },
-    autoWait() {
-      return autoWaitImpl();
     },
     pauseAudio() {
       audio.stopAllAudio();
@@ -575,16 +563,6 @@ function create(opts) {
     },
     get index() {
       return ST.idx;
-    },
-    firstStill() {
-      for (let i = 0; i < ST.frames.length; i++) if (ST.frames[i].still) return i;
-      return 0;
-    },
-    indexOfText(q) {
-      return frameIndexOfText(q);
-    },
-    atEnd() {
-      return ST.idx >= ST.frames.length - 1;
     },
     dispose() {
       reveal.stop();

@@ -6,6 +6,7 @@ import { DIRS } from '../core/dirs.js';
 import { pool } from '../core/async.js';
 import { networkClient } from './network.js';
 import { ensureIndexes } from './index-store.js';
+import { noteFailure } from '../core/failures.js';
 
 const LIST_CONC = 16;
 
@@ -16,6 +17,7 @@ async function altRelMap() {
   try {
     return (await ensureIndexes()).assets.altRel || {};
   } catch (e) {
+    noteFailure('資産保存', '代替索引', e);
     return {};
   }
 }
@@ -138,7 +140,6 @@ export const AREA = {
 const readIn = (area, rel) => readAsset(area.dir, rel, area.place);
 const hasIn = (area, rel) => hasAsset(area.dir, rel, area.place);
 const locateIn = (area, rel, opts) => locate(area.dir, rel, area.place, opts);
-const removeIn = (area, rel) => removeAsset(area.dir, rel, area.place);
 const specIn = (area, rel) => ({ rel, place: area.place });
 
-export const assetStore = { dirsFor, locate, readAsset, hasAsset, presentIds, acquireAsset, removeAsset, idOf, readIn, hasIn, locateIn, removeIn, specIn };
+export const assetStore = { dirsFor, locate, readAsset, hasAsset, presentIds, acquireAsset, removeAsset, idOf, readIn, hasIn, locateIn, specIn };

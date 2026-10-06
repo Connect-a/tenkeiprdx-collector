@@ -105,7 +105,7 @@ export async function runDownload(folderKey, triggerBtn) {
 }
 
 export async function showDownloadPrompt(item) {
-  playerState.navId = String(item.folderKey);
+  playerState.setNav(item.folderKey);
   closeRoster();
   getById('empty').style.display = 'none';
   getById('detail').style.display = '';

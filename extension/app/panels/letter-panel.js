@@ -3,6 +3,7 @@ import { settings } from '../../core/settings.js';
 import { showNotice } from '../ui/notice-modal.js';
 import { flashText } from '../ui/notifier.js';
 import { openUpgradeNotice } from '../runtime/upgrade-notice.js';
+import { noteFailure } from '../../core/failures.js';
 const LETTER_MAX = 1000;
 
 const KNOWN_ISSUES_TITLE = '残っている課題・わかっている不具合';
@@ -42,23 +43,6 @@ export function createLetterPanel(deps) {
       const b = getById(id);
       if (b) b.style.display = show;
     }
-  }
-
-  function openReport(text) {
-    const body = getById('letterBody');
-    if (!body) return false;
-    const dt = body.closest('details');
-    if (dt) dt.open = true;
-    const cur = (body.value || '').trim();
-    const add = String(text || '').trim();
-    const next = cur && add && !cur.includes(add) ? `${cur}\n${add}` : add || cur;
-    body.value = next.slice(0, LETTER_MAX);
-    updateCount();
-    try {
-      body.scrollIntoView({ block: 'center' });
-    } catch (e) {}
-    body.focus();
-    return true;
   }
 
   function splitBunsetsu(text) {
@@ -253,7 +237,9 @@ export function createLetterPanel(deps) {
         if (Array.isArray(d.scenes) && onDistUpdated) {
           try {
             await onDistUpdated();
-          } catch (e) {}
+          } catch (e) {
+            noteFailure('手紙', '受信後の反映', e);
+          }
         }
       } catch (e) {
         toast('照会エラー: ' + (e && e.message ? e.message : e), 'err');
@@ -264,7 +250,6 @@ export function createLetterPanel(deps) {
   }
 
   return {
-    openReport,
     bind() {
       settings.subscribe((n) => {
         if (n === 'letterEmail') refreshEmail();

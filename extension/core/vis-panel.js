@@ -27,13 +27,13 @@ function setRadios(root, a) {
   root.querySelectorAll('.stillradios input[value="' + a + '"]').forEach((r) => (r.checked = true));
 }
 
-export function syncPartsBtn(wrap) {
+function syncPartsBtn(wrap) {
   const parts = wrap.querySelector('.stillparts');
   const btn = wrap.querySelector('.stillgrp-row .btn');
   if (parts && btn) btn.classList.toggle('active', parts.style.display === 'none');
 }
 
-export function applyVisFilter(panel, q) {
+function applyVisFilter(panel, q) {
   const on = !!q;
   panel.querySelectorAll('.stillgrp').forEach((wrap) => {
     const parts = wrap.querySelector('.stillparts');

@@ -1,3 +1,5 @@
+import { noteFailure } from '../core/failures.js';
+
 const COMMON = {
   0: 'AABB',
   5: 'AnimationClip',
@@ -263,7 +265,7 @@ function parseSerializedFile(sf) {
       externals.push({ guid, pathName });
     }
   } catch (e) {}
-  return { version, unityVersion, LE, objects, externals };
+  return { version, LE, objects, externals };
 }
 
 function makeReader(sf, LE, startAbs) {
@@ -478,4 +480,13 @@ function readObject(sf, LE, obj) {
   return out;
 }
 
-export const unitySf = { parseSerializedFile, readObject };
+const readObjectSafe = (sf, LE, obj) => {
+  try {
+    return readObject(sf, LE, obj);
+  } catch (e) {
+    noteFailure('SerializedFile', 'オブジェクトの1件', e);
+    return null;
+  }
+};
+
+export const unitySf = { parseSerializedFile, readObject, readObjectSafe };

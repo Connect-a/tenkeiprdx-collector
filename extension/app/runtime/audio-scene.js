@@ -30,7 +30,6 @@ export const audioScene = {
     subs.add(fn);
     return () => subs.delete(fn);
   },
-  state: () => ({ ...scene }),
   homeAudible: () => scene.homeWants && (scene.bgmPriority || !scene.storyPlaying),
   storyAudible: () => scene.storyPlaying && !homeWins(),
   bgmPriority: () => scene.bgmPriority,

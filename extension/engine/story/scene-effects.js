@@ -1,6 +1,8 @@
-import { sceneVfx } from '../render/scene-vfx.js';
+import { createVfxPlayer } from '../render/vfx/index.js';
 import { vfxAssets } from './vfx-assets.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
+import { GAME_WIDTH, GAME_HEIGHT } from '../../core/game-screen.js';
+import { noteFailure } from '../../core/failures.js';
 
 const VFX_DEFAULT_MS = {
   11: 1000,
@@ -37,7 +39,7 @@ function create(deps) {
   }
   function shake(el, strengthRef, dur) {
     if (!el) return;
-    const scale = (el.clientWidth || 1136) / 1136;
+    const scale = (el.clientWidth || GAME_WIDTH) / GAME_WIDTH;
     el.classList.remove('fxShake');
     void el.offsetWidth;
     el.style.setProperty('--tps', (strengthRef * scale).toFixed(2) + 'px');
@@ -50,8 +52,8 @@ function create(deps) {
     const cv = els.lineLayer;
     if (!cv) return;
     if (lineRaf) cancelAnimationFrame(lineRaf);
-    const W = (cv.width = 1136),
-      H = (cv.height = 640);
+    const W = (cv.width = GAME_WIDTH),
+      H = (cv.height = GAME_HEIGHT);
     const ctx = cv.getContext('2d');
     const cx = W / 2,
       cy = H / 2,
@@ -95,8 +97,8 @@ function create(deps) {
     const cv = els.eyeLayer;
     if (!cv) return;
     if (eyeRaf) cancelAnimationFrame(eyeRaf);
-    const W = (cv.width = 1136),
-      H = (cv.height = 640);
+    const W = (cv.width = GAME_WIDTH),
+      H = (cv.height = GAME_HEIGHT);
     const ctx = cv.getContext('2d');
     const cx = W / 2,
       cy = H / 2,
@@ -138,36 +140,38 @@ function create(deps) {
       cv.style.opacity = '0';
     }
   }
-  let vfxOverlay = null;
+  let vfxPlayer = null;
   function playVfx(code, dur, speed) {
     if (!els.vfxLayer) return;
-    if (!vfxOverlay) vfxOverlay = sceneVfx.createOverlay(els.vfxLayer);
+    if (!vfxPlayer) vfxPlayer = createVfxPlayer(els.vfxLayer);
     const d = Number.isFinite(dur) && dur > 0 ? dur : VFX_DEFAULT_MS[code] || 700;
     vfxAssets
       .loadVfxByCode(code)
       .then((r) => {
-        if (r && r.bytes && vfxOverlay) vfxOverlay.play(r.bytes, r.texByMatPid, Math.max(120, d), { speed: Number(speed) > 0 ? Number(speed) : 1 });
+        if (r && r.bytes && vfxPlayer) vfxPlayer.play({ bytes: r.bytes, texByMatPid: r.texByMatPid }, Math.max(120, d), { speed: Number(speed) > 0 ? Number(speed) : 1 });
       })
-      .catch(() => {});
+      .catch((e) => noteFailure('シーン演出', '一時VFX', e));
   }
-  let ambientOverlay = null,
+  let ambientPlayer = null,
     ambientKey = null;
   async function applyAmbient(key) {
     key = key || null;
     if (key === ambientKey) return;
     ambientKey = key;
-    if (ambientOverlay) ambientOverlay.stop();
+    if (ambientPlayer) ambientPlayer.stop();
     if (!key) return;
     let res = null;
     try {
       res = await vfxAssets.loadVfxByKey(key);
-    } catch (e) {}
-    if (!res || !res.bytes || ambientKey !== key) return;
-    if (!ambientOverlay) {
-      if (!els.ambientLayer) return;
-      ambientOverlay = sceneVfx.createOverlay(els.ambientLayer);
+    } catch (e) {
+      noteFailure('シーン演出', '常駐VFX', e);
     }
-    ambientOverlay.play(res.bytes, res.texByMatPid, Infinity, { loop: true });
+    if (!res || !res.bytes || ambientKey !== key) return;
+    if (!ambientPlayer) {
+      if (!els.ambientLayer) return;
+      ambientPlayer = createVfxPlayer(els.ambientLayer);
+    }
+    ambientPlayer.play({ bytes: res.bytes, texByMatPid: res.texByMatPid }, Infinity, { loop: true });
   }
   async function applyInsert(ins) {
     const insertEl = els.insertEl;
@@ -183,7 +187,9 @@ function create(deps) {
       try {
         const b = await readBundle(path);
         cv = b && MESH_MOD.decodeLargestTextureCanvas(b);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('シーン演出', '挿入CG', e);
+      }
     }
     if (!cv) {
       insertEl.style.display = 'none';
@@ -195,8 +201,8 @@ function create(deps) {
     insertEl.style.display = '';
   }
   function clearVfx() {
-    if (vfxOverlay) vfxOverlay.stop();
-    if (ambientOverlay) ambientOverlay.stop();
+    if (vfxPlayer) vfxPlayer.stop();
+    if (ambientPlayer) ambientPlayer.stop();
     ambientKey = null;
     if (els.insertEl) els.insertEl.style.display = 'none';
   }
@@ -272,13 +278,13 @@ function create(deps) {
     },
     dispose: () => {
       try {
-        if (vfxOverlay && vfxOverlay.dispose) vfxOverlay.dispose();
+        if (vfxPlayer && vfxPlayer.dispose) vfxPlayer.dispose();
       } catch (e) {}
       try {
-        if (ambientOverlay && ambientOverlay.dispose) ambientOverlay.dispose();
+        if (ambientPlayer && ambientPlayer.dispose) ambientPlayer.dispose();
       } catch (e) {}
-      vfxOverlay = null;
-      ambientOverlay = null;
+      vfxPlayer = null;
+      ambientPlayer = null;
     },
   };
 }

@@ -7,6 +7,9 @@ import { playDokidokiIntro, DOKIDOKI_EPISODE_ID } from '../../engine/story/dokid
 import { ensureIndexes } from '../../data/index-store.js';
 import { folderHandle } from '../runtime/state-refresh.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
+import { GAME_WIDTH, GAME_HEIGHT } from '../../core/game-screen.js';
+import { errText } from '../../core/messages.js';
+import { noteFailure } from '../../core/failures.js';
 
 let storyHud = null;
 let storyEngine = null;
@@ -186,9 +189,7 @@ export function createStoryPanel(deps) {
   async function initPlayer() {
     const host = getById('stage');
     if (!host) return null;
-    try {
-      await loadStoryMods();
-    } catch (e) {}
+    await loadStoryMods();
     if (!storyHud || !storyEngine) {
       host.textContent = '再生モジュール未ロード';
       return null;
@@ -208,7 +209,7 @@ export function createStoryPanel(deps) {
       bgmEnabled: audioScene.storyAudible,
       ttsMode: () => (voiceMode() === 'voice+tts' || voiceMode() === 'tts' ? 'on' : 'off'),
       masterVol,
-      stageOpts: { scaleMul: 1.0, refW: 1136, refH: 640 },
+      stageOpts: { scaleMul: 1.0, refW: GAME_WIDTH, refH: GAME_HEIGHT },
       onIntroTitle: (ep) => {
         hud.setReady(true);
         hud.showTitle(nameFix(ep.label || ''), nameFix(ep.title || ''));
@@ -275,7 +276,16 @@ export function createStoryPanel(deps) {
       ctr = getById('controls');
     if (host) host.style.display = '';
     if (ctr) ctr.style.display = '';
-    const p = await ensurePlayer();
+    let p = null;
+    try {
+      p = await ensurePlayer();
+    } catch (e) {
+      noteFailure('ストーリー再生', '再生モジュールの読み込み', e);
+      if (ctr) ctr.style.display = 'none';
+      showProg(false);
+      notify('ストーリー再生を開始できませんでした。' + errText(e), 'err');
+      return stopOwning();
+    }
     if (!p) return stopOwning();
     curEp = ep;
     selectEpisodeRow(ep);
@@ -332,6 +342,7 @@ export function createStoryPanel(deps) {
     try {
       n = await p.open(src.handle, src.meta, src.ep, { seekText, noIntro: isDokidoki, initBgm: isDokidoki ? 'bgm_2014' : null });
     } catch (e) {
+      noteFailure('ストーリー再生', '話の展開', e);
       console.error('[tp] ストーリー描画に失敗', e);
     }
     if (!n) {
@@ -418,6 +429,5 @@ export function createStoryPanel(deps) {
     setMoveMode,
     resetView,
     setBackImgHidden,
-    backImgHidden: () => settings.get('stillBackImgHidden'),
   };
 }

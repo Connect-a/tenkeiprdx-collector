@@ -321,8 +321,7 @@ function decodeClipObj(clipObj) {
   }
   events.sort((a, b) => a.time - b.time);
 
-  const genericBinds = [...new Set(gb.map((b) => Number(b.typeID) + ':' + Number(b.customType || 0) + ':' + Number(b.attribute)))];
-  return { name, duration, startTime, stopTime, sampleRate, buildTracks, events, genericBinds };
+  return { name, duration, startTime, stopTime, buildTracks, events };
 }
 
 export const unityAnim = { parseAvatar, decodeClipObj };

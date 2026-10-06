@@ -28,9 +28,7 @@ export function showNotice(lines, { blocking, title, actions } = {}) {
         on: {
           click: () => {
             dlg.close();
-            try {
-              a.on();
-            } catch (e) {}
+            a.on();
           },
         },
       }),

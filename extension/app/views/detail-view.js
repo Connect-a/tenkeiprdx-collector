@@ -16,8 +16,10 @@ import { runDownload } from './download-ui.js';
 import { resetLineSearch } from './line-search.js';
 import { renderVoiceGallery } from './voice-gallery.js';
 import { applyKindTabs, resetVisualPanel, switchTab } from './shell-ui.js';
+import { toast } from '../ui/notifier.js';
 import { navTo } from '../runtime/router-controller.js';
 import { migrateR18Episodes } from '../../data/acquire/r18-migrate.js';
+import { noteFailure } from '../../core/failures.js';
 
 function renderEpisodes(m) {
   const box = getById('eplist');
@@ -61,6 +63,7 @@ function renderEpisodes(m) {
 }
 
 export async function openCharacter(folderKey) {
+  const gen = playerState.setNav(folderKey);
   closeRoster();
   const storyPanel = getPanel('story');
   if (storyPanel) storyPanel.reset();
@@ -72,17 +75,25 @@ export async function openCharacter(folderKey) {
   if (imagePanel && imagePanel.resetForCharacter) imagePanel.resetForCharacter();
   const handle = folderHandle(folderKey);
   if (!handle) return;
-  playerState.navId = String(folderKey);
 
   try {
     const { folderMeta } = await collectionRepository.folderModel();
     await migrateR18Episodes(folderKey, (folderMeta[String(folderKey)] || {}).episodes);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('キャラ詳細', 'R18エピソード移行', e);
+  }
 
   let m = null;
   try {
     m = await assetAcquirer.charMeta(folderKey);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('キャラ詳細', 'メタ読み込み', e);
+    getById('empty').style.display = '';
+    getById('detail').style.display = 'none';
+    toast('キャラ詳細の読み込みに失敗しました', 'err');
+    return;
+  }
+  if (playerState.isStale(gen)) return;
   if (!m) m = { name: folderKey, episodes: [] };
 
   playerState.cur = { folderKey: String(folderKey), handle, meta: m, voiceUrls: new Map() };
@@ -103,6 +114,7 @@ export async function openCharacter(folderKey) {
   getById('reDl').addEventListener('click', () => runDownload(String(folderKey), getById('reDl')));
 
   await appendDetailInfo(folderKey, m.rosterKind);
+  if (playerState.isStale(gen)) return;
   resetLineSearch();
   renderVoiceGallery();
   applyKindTabs(m.rosterKind);
@@ -196,11 +208,11 @@ function renderRoutingWarning(m) {
     },
   });
   const castIds = routing.unresolvedCast || [];
-  if (castIds.length) detail.appendChild(castRepairRow(castIds, m));
+  if (castIds.length) detail.appendChild(castRepairRow(castIds));
   head.appendChild(el('div', 'routewarn', [headEl, detail]));
 }
 
-function castRepairRow(ids, m) {
+function castRepairRow(ids) {
   const note = el('span', 'note dim');
   const btn = el('button', {
     class: 'btn xs primary',
@@ -232,7 +244,9 @@ async function loadEpisodesDeferred(folderKey) {
   let full = null;
   try {
     full = await assetAcquirer.charMetaFull(folderKey);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('キャラ詳細', '遅延エピソード読み込み', e);
+  }
   if (playerState.viewKey() !== key) return;
   if (!full) {
     if (box) box.innerHTML = '<div class="emptyrow">エピソードの読み込みに失敗しました</div>';

@@ -39,12 +39,8 @@ export function buildOnboard({ fsGranted, hasIndex }) {
   const stepStatus = (done, active) => (done ? 'done' : active ? 'active' : 'todo');
   const supported = !!(fileStore && fileStore.supported);
   const hasHandle = supported && fileStore.dirName();
-  const step1label = !supported
-    ? 'この環境では保存先フォルダを使えません（File System Access API 無効）。Chrome/Edge、または Brave はフラグ有効化が必要です'
-    : hasHandle
-      ? `保存先フォルダ「${fileStore.dirName()}」を許可`
-      : '保存先フォルダを選択';
-  const step1btn = !supported ? '' : `<button class="btn primary" id="obFolder">${hasHandle ? 'このフォルダを許可' : 'フォルダを選ぶ'}</button>`;
+  const step1label = supported && hasHandle ? `保存先フォルダ「${fileStore.dirName()}」を許可` : '保存先フォルダを選択';
+  const step1btn = `<button class="btn primary" id="obFolder">${supported && hasHandle ? 'このフォルダを許可' : 'フォルダを選ぶ'}</button>`;
   box.innerHTML = `<h2 class="obh">はじめに（2ステップ）</h2>
     ${step({ status: stepStatus(fsGranted, !fsGranted), num: '①', label: step1label, btn: step1btn })}
     ${step({ status: stepStatus(hasIndex, fsGranted && !hasIndex), num: '②', label: 'サイドバーの「ダウンロード」から索引を作る', btn: '' })}

@@ -5,6 +5,7 @@ import { slotGroup } from './slot-group.js';
 import { createStageCamera } from './stage-camera.js';
 import { createCastScene } from './stage-cast.js';
 import { createStillScene } from './stage-still.js';
+import { GAME_WIDTH } from '../../core/game-screen.js';
 
 const MOSAIC_RE = /mosaic/i;
 const MOSAIC_REF_BLOCK = 10;
@@ -35,7 +36,7 @@ function create(canvas, opts) {
   const mosaicOn = cfg.mosaicOn || (() => false);
   const onStill = cfg.onStill || (() => {});
   const refSize = () => {
-    const w = cfg.refW || 1136;
+    const w = cfg.refW || GAME_WIDTH;
     return { w, h: cfg.refH || (w * 9) / 16 };
   };
   const layout = {

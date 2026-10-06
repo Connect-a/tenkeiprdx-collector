@@ -5,7 +5,7 @@ import { DIRS } from '../../core/dirs.js';
 import { errText } from '../../core/messages.js';
 import { createZoomOverlay } from '../ui/zoom-overlay.js';
 
-import { hideRosterControls, groupHeading, downloadBar, errorRow } from '../ui/panel-shell.js';
+import { hideRosterControls, groupHeading, acquireBar, errorRow } from '../ui/panel-shell.js';
 import { el } from '../../core/dom.js';
 import { createRevealer } from '../../core/visibility.js';
 
@@ -45,17 +45,13 @@ export function createItemPanel(deps) {
   });
 
   const sharedDlBar = (needShared) =>
-    downloadBar({
+    acquireBar({
       text: `アイコン未取得 ${needShared}件（共有リソースのダウンロードで表示できるようになります）`,
       label: '共有リソースをダウンロード',
-      run: async (onProgress) => {
-        try {
-          const r = await assetAcquirer.runSharedResourceDownload(onProgress);
-          toast(`共有リソースを取得しました（新規${r.got}件・既にあった分${r.skip}件／全${r.total}件）`, 'ok');
-          await render();
-        } catch (e) {
-          onProgress(errText(e));
-        }
+      acquire: (onProgress) => assetAcquirer.runSharedResourceDownload(onProgress),
+      done: async (r) => {
+        toast(`共有リソースを取得しました（新規${r.got}件・既にあった分${r.skip}件／全${r.total}件）`, 'ok');
+        await render();
       },
     });
 
@@ -83,7 +79,6 @@ export function createItemPanel(deps) {
     _src = src;
     const n = _items.length;
     const shown = _items.filter((it) => src.get(it)).length;
-    const noIcon = _items.filter((it) => !it.rel).length;
     const needShared = _items.filter((it) => it.rel && !src.get(it)).length;
     getById('rostercount').textContent = `${shown} / ${n}`;
 

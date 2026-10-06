@@ -2,6 +2,7 @@ import { R18_ALT_EPISODES, R18_ALT_OWNER } from './r18-alt.js';
 import { b64ToBytes, num } from '../core/bytes.js';
 import { toRel, APP_DIR, APP_PREFIX, bundleName, relKey } from '../core/assetpath/paths.js';
 import { catOf } from '../core/assetpath/placement.js';
+import { noteFailure } from '../core/failures.js';
 
 const OTHER_EPISODE_SUBTYPE = 'その他エピソード';
 const str = (x) => (typeof x === 'string' && x.trim() ? x : undefined);
@@ -54,7 +55,7 @@ const ITEM_TABLES = {
 
 const MAIN_EVENT_TYPES = new Set([1, 24, 25]);
 const SPECIAL_SUBTYPE = { 0: 'エクストラエピソード', 1: 'イベントエピソード', 2: 'スペシャルエピソード' };
-const DEFERRED_TABLES = [33, 20, 145, 36, 168, 17];
+const DEFERRED_TABLES = [33, 20, 145, 36, 168, 17, 27];
 
 const bgmKey = (b) => String(b).replace(/_(loop|intro)$/, '');
 const byOrder = (a, b) => (a.order || 0) - (b.order || 0);
@@ -126,8 +127,8 @@ const TABLE_HANDLERS = {
       title: str(p[4]),
       intro: str(p[14]),
       race: str(p[15]),
-      groupId: int(p[10]),
-      rankId: int(p[9]),
+      affiliation: int(p[10]),
+      rarity: int(p[9]),
       bwh: bwh.every((x) => typeof x === 'number') ? bwh : undefined,
       likes: str(p[20]),
       dislikes: str(p[21]),
@@ -217,15 +218,18 @@ const TABLE_HANDLERS = {
   41(p, acc) {
     noteModelName(acc, p[2], p[3], p[1]);
     const mid = String(num(p[3]));
-    if (!mid || mid === 'null' || acc.battleByModel[mid]) return;
+    if (!mid || mid === 'null') return;
     const cfg = parseJson(p[4]) || {};
-    acc.battleByModel[mid] = { name: str(p[1]) || mid, variation: str(cfg.Variation) || 'Default', scale: Number(cfg.Scale) || 1, attachments: attachNums(cfg), weapons: parseWeapons(p[5]) };
+    const look = { name: str(p[1]) || mid, variation: str(cfg.Variation) || 'Default', scale: Number(cfg.Scale) || 1, attachments: attachNums(cfg), weapons: parseWeapons(p[5]) };
+    noteAssetLook(acc, p[2], mid, look);
+    if (!acc.battleByModel[mid]) acc.battleByModel[mid] = look;
   },
   49(p, acc) {
     const cfg = parseJson(p[4]) || {};
     noteModelName(acc, p[2], p[3], p[1]);
     noteModelName(acc, null, p[0], p[1]);
     const look = { variation: str(cfg.Variation) || 'Default', scale: Number(cfg.Scale) || 1, attachments: attachNums(cfg) };
+    noteAssetLook(acc, p[2], String(num(p[3])), { name: str(p[1]) || '', ...look, weapons: parseWeapons(p[5]) });
     const name = str(p[1]) || String(num(p[0]));
     acc.monsterMaster.push({
       id: String(num(p[2])),
@@ -249,6 +253,12 @@ const TABLE_HANDLERS = {
     acc.monsterSpecies.push({ species: String(num(p[0])), model: String(num(p[3])), ...look, name, desc: str(p[16]) || '' });
   },
 };
+
+function noteAssetLook(acc, own, modelId, look) {
+  const o = idStr(own);
+  if (!o || o === 'null' || acc.lookByAsset[o]) return;
+  acc.lookByAsset[o] = { model: modelId, ...look };
+}
 
 function noteModelName(acc, own, base, name) {
   const nm = str(name);
@@ -300,6 +310,7 @@ function collectRecords(recs) {
     locMap: {},
     monsterSpecies: [],
     battleByModel: {},
+    lookByAsset: {},
     monsterMaster: [],
     nameByModel: {},
     nameByBaseModel: {},
@@ -353,6 +364,22 @@ function attachCharacterEpisodes(acc, binIdsOf) {
   for (const [id, c] of Object.entries(acc.characters)) {
     c.id = Number(id);
     if (c.episodes) c.episodes.sort(byOrder);
+  }
+}
+
+function attachCharacterMainStill(acc, homeIndex) {
+  const sceneToChar = {};
+  for (const p of acc.deferred[33] || []) if (Array.isArray(p)) sceneToChar[String(num(p[1]))] = String(num(p[3]));
+  for (const s of (homeIndex && homeIndex.sceneIllust) || []) {
+    for (const l of s.lines || []) {
+      const m = String((l && l.voiceId) || '').match(/^c_(\d+)_/);
+      if (!m) continue;
+      const cid = sceneToChar[m[1]];
+      if (cid && acc.characters[cid] && !acc.characters[cid].mainStill) {
+        acc.characters[cid].mainStill = { still: s.still, name: s.name, stillAdult: s.stillAdult || null };
+      }
+      break;
+    }
   }
 }
 
@@ -545,6 +572,11 @@ function buildSharedImageNames(acc) {
     .sort();
 }
 
+const nl = (x) => {
+  const s = str(x);
+  return s ? s.replace(/\r\n?/g, '\n') : null;
+};
+
 function buildSkillMaster(acc) {
   const referenced = new Set();
   for (const list of Object.values(acc.charSkills || {})) for (const s of list) referenced.add(s.skillId);
@@ -553,9 +585,48 @@ function buildSkillMaster(acc) {
     const sid = p && p[0] != null ? String(int(p[0])) : null;
     if (!sid || !referenced.has(sid) || skillMaster[sid]) continue;
     const effects = Array.isArray(p[14]) ? p[14].map((x) => str(x)).filter(Boolean) : [];
-    skillMaster[sid] = { name: str(p[1]) || '', desc: str(p[2]) || '', effects };
+    skillMaster[sid] = {
+      name: str(p[1]) || '',
+      desc: nl(p[2]) || '',
+      effects,
+      meta: {
+        type: int(p[3]),
+        category: int(p[4]),
+        rarity: int(p[5]),
+        tpCost: int(p[6]),
+        tpCostPerLevel: typeof p[7] === 'number' ? p[7] : null,
+        maxLevel: int(p[8]),
+        targetRangeId: int(p[9]),
+        eligibleTargets: int(p[10]),
+        attribute: int(p[11]),
+        effectRangeId: int(p[12]),
+        effectsFlags: int(p[13]),
+        assetId: str(p[15]) || null,
+        unionCondDesc: nl(p[17]),
+        unionEffectDesc: nl(p[18]),
+        originalDesc: nl(p[21]),
+        effectTypeTags: Array.isArray(p[22]) ? p[22].map((x) => int(x)).filter((v) => v != null) : [],
+      },
+    };
   }
   return skillMaster;
+}
+
+function buildSkillRanges(acc) {
+  const out = {};
+  for (const p of acc.deferred[27] || []) {
+    const id = p && p[0] != null ? String(int(p[0])) : null;
+    if (!id || out[id]) continue;
+    const js = str(p[1]);
+    if (!js) continue;
+    try {
+      const o = JSON.parse(js);
+      if (o && Array.isArray(o.Cells)) out[id] = o.Cells;
+    } catch (e) {
+      noteFailure('索引の構築', 'スキル射程', e);
+    }
+  }
+  return out;
 }
 
 function masterIndexes(recs) {
@@ -571,6 +642,7 @@ function masterIndexes(recs) {
   const other = buildOtherIndex(acc, binIdsOf);
   if (other) eventIndex.other = other;
   const homeIndex = buildHomeIndex(acc);
+  attachCharacterMainStill(acc, homeIndex);
 
   const questThumbsByEvent = {};
   for (const [k, set] of Object.entries(acc.questThumbSets)) questThumbsByEvent[k] = [...set];
@@ -583,6 +655,7 @@ function masterIndexes(recs) {
   attachWeaponVariants(acc);
 
   const skillMaster = buildSkillMaster(acc);
+  const skillRanges = buildSkillRanges(acc);
   const effectUse = {};
   for (const list of Object.values(acc.charSkills || {})) {
     const seen = new Set();
@@ -599,12 +672,14 @@ function masterIndexes(recs) {
     characters: acc.characters,
     charSkills: acc.charSkills,
     skillMaster,
+    skillRanges,
     sharedEffects,
     questIndex,
     eventIndex,
     homeIndex,
     monsterSpecies: acc.monsterSpecies,
     battleByModel: acc.battleByModel,
+    lookByAsset: acc.lookByAsset,
     monsterMaster: acc.monsterMaster,
     nameByModel: acc.nameByModel,
     nameByBaseModel: acc.nameByBaseModel,
@@ -673,9 +748,15 @@ const SHARED_KEEP = [
 ];
 
 const CAT_PREFIX = /^([a-z0-9()]+_assets_[a-z0-9()]+)\//;
-const HERO_MARK = [/^3dmodels_assets_3dmodels\/(\d{8})_/, /^spines_assets_spines\/(\d{8})_/, /^charactericons_assets_charactericons\/(\d{8})_/];
+const HERO_MARK = [
+  /^3dmodels_assets_3dmodels\/(\d{8})_/,
+  /^spines_assets_spines\/(\d{8})_/,
+  /^charactericons_assets_charactericons\/(\d{8})_/,
+  /^monstericons_assets_monstericons\/(\d{8})_/,
+  /^battlecharactersicons_assets_battlecharactersicons\/(\d{8})_/,
+];
 const ICON_CAT = /^(charactericons|charactericonslight|battlecharactersicons|monstericons)_assets_[a-z0-9]+\/(\d+)_[0-9a-f]{32}\.bundle$/;
-const VFX_DL_RE = /^(vfx_assets_vfx\/|vfxmaterials_assets_vfxmaterials\/|vfxtextureassets_assets_assets\/|vfxmaterialassets_assets_)/;
+const VFX_DL_RE = /^(vfx_assets_vfx\/|vfxse_assets_vfxse\/|vfxmaterials_assets_vfxmaterials\/|vfxtextureassets_assets_assets\/|vfxmaterialassets_assets_)/;
 const NATIVE_VFX_RE = /^vfxassets_assets_assets\//;
 const MISSION_UI_RE = /^uispritesassets_assets_missionsprites_[0-9a-f]{16,}\.bundle$/;
 const UI_SPRITE_RE = /^uispritesassets_assets_[a-z0-9]+sprites_[0-9a-f]{16,}\.bundle$/;
@@ -915,7 +996,6 @@ function catalogIndexes(internalIds) {
       .filter((rel) => GACHA_ANY_RE.test(rel) && !GACHA_BG_RE.test(rel) && !VFX_DL_RE.test(rel) && !NATIVE_VFX_RE.test(rel) && !SHARED_KEEP.some((fn) => fn(rel.replace(APP_PREFIX, ''))))
       .sort(),
     vfxByName: buildVfxNameMap(rels, /^vfx_assets_vfx\//),
-    vfxseByName: buildVfxNameMap(rels, /^vfxse_assets_vfxse\//),
     builtinRels: [...rels].filter((rel) => APP_PREFIX.test(rel)).sort(),
     otherModelIds: buildOtherModelIds(rels),
     globalAssets: buildGlobalAssets(rels),
@@ -980,12 +1060,16 @@ function catalogTables(cat) {
   return { ent, bc, bk, bKeyOff, readKey };
 }
 
+const VFX_REL_RE = /^vfx_assets_vfx\//;
+const VFXSE_REL_RE = /^vfxse_assets_vfxse\//;
+
 function catalogDeps(catalogs) {
   const deps = {},
     folder = {},
     matByModel = {},
-    matVar = {};
-  if (!b64ToBytes) return { deps, folder, matByModel, matVar };
+    matVar = {},
+    vfxSe = {};
+  if (!b64ToBytes) return { deps, folder, matByModel, matVar, vfxSe };
   const relOf = (s) => {
     const m = mapPath(s);
     return m ? toRel(m) : null;
@@ -993,7 +1077,7 @@ function catalogDeps(catalogs) {
   const modelRe = /^3dmodels_assets_3dmodels\/(\d+)_/;
   const folderRe = /^Assets\/3DModels\/([^/]+)\//i;
   const matAddrRe = /^Assets\/3DModels\/[^/]+\/(\d+)\//i;
-  const matRelRe = /^materialsbundles_assets_assets\/3dmodels\//i;
+  const matRelRe = /^(?:materialsbundles_assets_assets|3dmodels_assets_assets)\/3dmodels\//i;
   for (const cat of catalogs || []) {
     if (!cat || !cat.m_InternalIds || !cat.m_EntryDataString || !cat.m_BucketDataString) continue;
     let t = null;
@@ -1024,6 +1108,9 @@ function catalogDeps(catalogs) {
       if (e.depKey < 0 || !bk[e.depKey]) continue;
       const self = ids[e.iid];
       const dl = bk[e.depKey].map((x) => ent[x] && ids[ent[x].iid]).filter((s) => typeof s === 'string' && s.endsWith('.bundle'));
+      const depRels = dl.map(relOf).filter(Boolean);
+      const seRels = depRels.filter((r) => VFXSE_REL_RE.test(r));
+      if (seRels.length) for (const r of depRels) if (VFX_REL_RE.test(r)) vfxSe[r] = [...new Set([...(vfxSe[r] || []), ...seRels])].sort();
       const am = typeof self === 'string' && self.match(matAddrRe);
       if (am) {
         const mats = dl.map(relOf).filter((r) => r && matRelRe.test(r));
@@ -1051,7 +1138,7 @@ function catalogDeps(catalogs) {
       if (extra.length) deps[modelId] = [...new Set([...(deps[modelId] || []), ...extra])];
     }
   }
-  return { deps, folder, matByModel, matVar };
+  return { deps, folder, matByModel, matVar, vfxSe };
 }
 function other2dRels(master, assets) {
   const ai = assets.assetIndex || {};
@@ -1180,18 +1267,27 @@ function charSkillEffects(master, assets, charId) {
   const sm = master.skillMaster || {};
   const shared = new Set(master.sharedEffects || []);
   const vfxByName = assets.vfxByName || {};
-  const vfxseByName = assets.vfxseByName || {};
+  const vfxSeByVfx = assets.vfxSeByVfx || {};
+  const ranges = master.skillRanges || {};
+  const metaOf = (sk) => (sk.meta ? { ...sk.meta, targetCells: ranges[String(sk.meta.targetRangeId)] || null, effectCells: ranges[String(sk.meta.effectRangeId)] || null } : null);
   const seen = new Set();
   const unique = [];
   const sharedOut = [];
+  const linkOf = (eff, slot) => {
+    const vfxRel = vfxByName[eff.toLowerCase()] || null;
+    return { effect: eff, slot, vfxRel, seRels: (vfxRel && vfxSeByVfx[vfxRel]) || [] };
+  };
   for (const s of skills) {
     const sk = sm[s.skillId];
     if (!sk) continue;
-    for (const eff of sk.effects) {
+    const chain = sk.effects.length > 1 ? sk.effects.map(linkOf).filter((l) => l.vfxRel) : null;
+    for (let i = 0; i < sk.effects.length; i++) {
+      const eff = sk.effects[i];
       if (seen.has(eff)) continue;
       seen.add(eff);
-      const low = eff.toLowerCase();
-      const entry = { effect: eff, skillId: s.skillId, skillName: sk.name, vfxRel: vfxByName[low] || null, seRel: vfxseByName[low] || null };
+      const link = linkOf(eff, i);
+      const entry = { effect: eff, slot: i, skillId: s.skillId, skillName: sk.name, skillDesc: sk.desc, skillMeta: metaOf(sk), vfxRel: link.vfxRel, seRels: link.seRels };
+      if (i === 0 && chain && chain.length > 1) entry.chain = chain;
       (shared.has(eff) ? sharedOut : unique).push(entry);
     }
   }
@@ -1205,11 +1301,11 @@ function skillFxSplit(master, assets) {
     const e = charSkillEffects(master, assets, charId);
     for (const x of e.unique) {
       if (x.vfxRel) uniqueRels.add(x.vfxRel);
-      if (x.seRel) uniqueRels.add(x.seRel);
+      for (const r of x.seRels) uniqueRels.add(r);
     }
     for (const x of e.shared) {
       if (x.vfxRel) sharedRels.add(x.vfxRel);
-      if (x.seRel) sharedRels.add(x.seRel);
+      for (const r of x.seRels) sharedRels.add(r);
     }
   }
   for (const rel of sharedRels) uniqueRels.delete(rel);
@@ -1220,6 +1316,7 @@ function compose({ recs, catalogIds, catalogObjs }) {
   const master = masterIndexes(recs || []);
   const assets = catalogIndexes(catalogIds || []);
   const cd = catalogDeps(catalogObjs || []);
+  assets.vfxSeByVfx = cd.vfxSe;
   const depRels = new Set(Object.values(cd.deps || {}).flat());
   if (depRels.size && assets.battleFieldRels) assets.battleFieldRels = assets.battleFieldRels.filter((rel) => !depRels.has(rel));
   for (const [id, mats] of Object.entries(cd.matByModel || {})) {

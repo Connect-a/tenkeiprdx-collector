@@ -15,6 +15,7 @@ import { fileStore } from '../../core/fsdir.js';
 import { assetStore } from '../../data/asset-store.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { unityDecode } from '../../unity/decode.js';
+import { noteFailure } from '../../core/failures.js';
 const mapLimit = (items, limit, worker) => pool(Array.isArray(items) ? items : [], limit, worker);
 
 const walkBundlesSafe = async (handle) => {
@@ -120,7 +121,9 @@ async function storySceneBgNames(cur) {
         if (!f) continue;
         const tl = JSON.parse(await f.text());
         for (const ln of (tl && tl.lines) || []) if (ln && ln.bg) names.add(String(ln.bg));
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('画像ギャラリー', '台本背景の1件', e);
+      }
     }
   }
   return names;
@@ -135,7 +138,9 @@ async function sharedStoryImagePaths(cur, known) {
     const idx = await ensureIndexes();
     sceneAssets = idx.assets.sceneAssetIndex || {};
     generic = new Set(idx.master.sharedImageNames || []);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('画像ギャラリー', '共有画像索引', e);
+  }
   const out = [];
   for (const name of [...names].sort()) {
     if (generic.has(name)) continue;
@@ -314,7 +319,9 @@ async function renderSpinePreview(cur, hostEl) {
                 pl.skeleton.updateWorldTransform();
                 pl.skeleton.getBounds(o2, s2, []);
                 if (s2.x > 0 && s2.y > 0) asp = s2.x / s2.y;
-              } catch (e) {}
+              } catch (e) {
+                noteFailure('画像ギャラリー', 'Spine比率推定', e);
+              }
             }
             if (asp > 0) box.style.aspectRatio = asp.toFixed(4);
           }
@@ -379,7 +386,9 @@ async function renderImageGallery(cur, hostEl, opt) {
     paths = paths.slice(0, maxBundles);
     try {
       paths.push(...(await sharedStoryImagePaths(cur, known)));
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('画像ギャラリー', '共有画像候補', e);
+    }
   }
   paths = paths.slice(0, maxBundles + 40);
   if (!paths.length) {
@@ -551,8 +560,8 @@ async function renderImageGallery(cur, hostEl, opt) {
   );
   commit();
 
-  if (myGen !== currentRenderGen()) return { ok: false, superseded: true };
   for (const s of slots) if (s.isConnected) s.remove();
+  if (myGen !== currentRenderGen()) return { ok: false, superseded: true };
 
   if (!summary.rendered) {
     hostEl.innerHTML = '';
@@ -614,9 +623,7 @@ async function saveDecodedResources(cur, opt) {
   const outPath = (rel) => `${baseDir}/${rel}`;
   const writeOut = (rel, bytes) => fileStore.writeUnder(destHandle, outPath(rel), bytes);
   if (fileStore.removeDirUnder) {
-    try {
-      await fileStore.removeDirUnder(destHandle, baseDir);
-    } catch (e) {}
+    await fileStore.removeDirUnder(destHandle, baseDir);
   }
   const out = {
     ok: true,
@@ -671,7 +678,9 @@ async function saveDecodedResources(cur, opt) {
         let img = null;
         try {
           img = await canvasToImageBytes(await texCodec.decodeEncodedToCanvas(e.bytes, mime, flipY));
-        } catch (er) {}
+        } catch (er) {
+          noteFailure('画像ギャラリー', '埋め込み画像の1件', er);
+        }
         if (img) await writeOut(`images/${bn}__embedded_${i}.${img.ext}`, img.bytes);
         else await writeOut(`images/${bn}__embedded_${i}.${e.type === 'jpg' ? 'jpg' : e.type}`, flipY ? (await texCodec.flipEncodedImageBytesY(e.bytes, mime)).bytes : e.bytes);
         out.imageSaved += 1;

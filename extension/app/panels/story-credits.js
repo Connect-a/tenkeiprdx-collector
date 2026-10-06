@@ -9,6 +9,7 @@ import { assetStore } from '../../data/asset-store.js';
 import { unityMesh } from '../../unity/mesh.js';
 import { scenarioSettings } from '../../engine/story/scenario-settings.js';
 import { audioScene } from '../runtime/audio-scene.js';
+import { noteFailure } from '../../core/failures.js';
 
 export function createCreditsRunner({ getEpisode, getPlayer, masterVol }) {
   let running = false;
@@ -23,7 +24,9 @@ export function createCreditsRunner({ getEpisode, getPlayer, masterVol }) {
       const sceneRel = (idx.assets.sharedIndex || []).find((r) => /^scenes_scenes_endcredits_/.test(r));
       if (!sceneRel || !(await assetStore.hasAsset(DIRS.shared, sceneRel))) return out;
       bytes = await assetStore.readAsset(DIRS.shared, sceneRel);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('エンドクレジット', '画像素材の解決', e);
+    }
     if (!bytes) return out;
     let texs = [];
     try {
@@ -49,7 +52,9 @@ export function createCreditsRunner({ getEpisode, getPlayer, masterVol }) {
     let bgmRel = null;
     try {
       bgmRel = ((await ensureIndexes()).assets.sceneAssetIndex || {})['bgm_2059'] || null;
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('エンドクレジット', 'BGMの解決', e);
+    }
     const sprites = await resolveSprites();
     const player = getPlayer();
     if (player) {

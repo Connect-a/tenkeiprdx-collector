@@ -2,6 +2,7 @@ import { SK } from '../core/storage-keys.js';
 import { routeFor, routeUrl } from '../core/assetpath/route.js';
 import { resolveOrigin, fallbackBases } from './origin.js';
 import { bgSleep, bgTimeout } from '../core/bgtimer.js';
+import { noteFailure } from '../core/failures.js';
 const sleep = bgSleep;
 
 const assetRoot = async () => (await resolveOrigin()).assets;
@@ -19,7 +20,9 @@ const notifyOffline = (on) => {
   for (const fn of [...offlineSubs]) {
     try {
       fn(on);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('通信', 'オフライン通知の1件', e);
+    }
   }
 };
 
@@ -178,9 +181,6 @@ async function apiFetchBytes(url, method) {
 }
 
 let distOff = false;
-const resetDistGate = () => {
-  distOff = false;
-};
 async function distFetchBytes(url) {
   if (distOff) return null;
   try {
@@ -193,6 +193,7 @@ async function distFetchBytes(url) {
     if (/json/i.test(res.headers.get('content-type') || '')) return null;
     return new Uint8Array(await res.arrayBuffer());
   } catch (e) {
+    noteFailure('通信', '分散取得', e);
     return null;
   }
 }
@@ -202,4 +203,4 @@ const subscribeOffline = (fn) => {
   return () => offlineSubs.delete(fn);
 };
 
-export const networkClient = { fetchAsset, assetRoot, assetRootAuto, fetchBytes, fetchBytesRaw, apiFetchBytes, distFetchBytes, resetDistGate, fallbackStats, isOffline, subscribeOffline };
+export const networkClient = { fetchAsset, assetRoot, assetRootAuto, fetchBytes, fetchBytesRaw, apiFetchBytes, distFetchBytes, fallbackStats, subscribeOffline };

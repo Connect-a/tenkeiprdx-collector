@@ -6,6 +6,7 @@ import { runBulkDownload } from './acquire-bulk.js';
 import { resolveOrigin } from '../origin.js';
 import { networkClient } from '../network.js';
 import { AA_BUNDLES } from '../credits-assets.js';
+import { noteFailure } from '../../core/failures.js';
 
 async function grabCreditsAaBundles(dir, c, prog) {
   let origin = null;
@@ -107,7 +108,9 @@ async function sharedResourcesPresent() {
     let stage = {};
     try {
       stage = ((await ensureIndexes()).assets.globalAssets || {}).stage || {};
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('共有素材', 'stage必須一覧', e);
+    }
     for (const rel of [stage.bgCommon, stage.scenarioUi]) {
       if (rel && !(await assetStore.hasAsset(DIRS.shared, rel))) return false;
     }
@@ -128,6 +131,7 @@ async function sharedStatus() {
     } catch (e) {}
     return { have: have.size + extraHave, total: list.length + AA_BUNDLES.length, unknown: 0 };
   } catch (e) {
+    noteFailure('共有素材', '所持数', e);
     return { have: 0, total: 0, unknown: 0 };
   }
 }

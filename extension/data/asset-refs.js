@@ -6,6 +6,18 @@ function resolveVariationMaterial(matVar, modelId, variation, materials) {
   return mapped.find((r) => materials.includes(r)) || mapped[0];
 }
 
+function variationsOf(matVar, modelId, materials) {
+  const prefix = String(modelId) + '_';
+  const out = [];
+  for (const key of Object.keys(matVar || {})) {
+    if (!key.startsWith(prefix)) continue;
+    const rels = (matVar[key] || []).filter((rel) => materials.includes(rel));
+    if (!rels.length) continue;
+    out.push({ label: key.slice(prefix.length), material: rels[0], rels });
+  }
+  return out.sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+}
+
 function imagesForCard(idx, meta, folderKey) {
   const assets = (idx && idx.assets) || {};
   const master = (idx && idx.master) || {};
@@ -66,4 +78,4 @@ function bgmParts(sceneAssets, name) {
   return plain ? { loop: plain, intro: null, plain, split: false } : null;
 }
 
-export const assetRefs = { imagesForCard, visualAssetsForCard, bgmParts, resolveVariationMaterial };
+export const assetRefs = { imagesForCard, visualAssetsForCard, bgmParts, resolveVariationMaterial, variationsOf };

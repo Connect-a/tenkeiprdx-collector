@@ -36,4 +36,4 @@ function setVolume(el, v) {
   if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
 }
 
-export const audioOut = { clampVol, setVolume };
+export const audioOut = { setVolume };
