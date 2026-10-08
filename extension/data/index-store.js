@@ -11,6 +11,7 @@ import { latin1 } from '../core/bytes.js';
 import { buildIndexes as BUILD_MOD } from './build-indexes.js';
 import { parseOrigin, saveOrigin, recoverOrigin, resolveOrigin } from './origin.js';
 import { CFG } from '../config.js';
+import { noteFailure } from '../core/failures.js';
 
 const { assetRoot, fetchBytesRaw, apiFetchBytes } = networkClient;
 
@@ -118,13 +119,17 @@ async function fetchMasterRecords(prog) {
     const murl = mbytes && extractMasterUrl(mbytes);
     const mbin = murl && (await fetchBytesRaw(murl));
     if (masterUsable(mbin, folder)) return mbin;
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('索引の構築', 'API master 取得', e);
+  }
   if (CFG.masterDataFallbackUrl) {
     prog('マスターデータを配信元から取得中…');
     try {
       const mbin = await fetchBytesRaw(CFG.masterDataFallbackUrl);
       if (masterUsable(mbin, folder)) return mbin;
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('索引の構築', 'fallback master 取得', e);
+    }
   }
   if (folder && folder.length) {
     prog('配信元から取得できないため、保存済みのマスターデータを使います');
@@ -179,6 +184,7 @@ async function fetchCatalogs(base, prog) {
     }
   } catch (e) {
     diag.buildErr = String((e && e.message) || e);
+    noteFailure('索引の構築', 'カタログ名の取得', e);
   }
   const ids = [];
   const objects = [];
@@ -218,7 +224,9 @@ async function fetchCatalogs(base, prog) {
     try {
       const h = await fetch(url, { method: 'HEAD' });
       if (h.ok) tag = h.headers.get('etag') || h.headers.get('last-modified') || h.headers.get('content-length');
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('索引の構築', 'カタログ鮮度確認', e);
+    }
     if (tag && etags[key] === tag) {
       const cached = await readDiskCatalog(diskName);
       if (cached != null) return { txt: cached, fresh: false };
@@ -231,7 +239,9 @@ async function fetchCatalogs(base, prog) {
         if (tag) nextEtags[key] = tag;
         return { txt, fresh: true };
       }
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('索引の構築', 'カタログ読み込み', e);
+    }
     const cached = await readDiskCatalog(diskName);
     return cached != null ? { txt: cached, fresh: false } : null;
   };
@@ -271,7 +281,9 @@ async function fetchCatalogs(base, prog) {
       const j = JSON.parse(r.txt);
       objects.push(j);
       for (const x of j.m_InternalIds || []) ids.push(x);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('索引の構築', 'カタログJSONの1件', e);
+    }
   }
   if (objects.length) await writeDiskCatalog('_names.json', JSON.stringify(names));
   diag.namesUsed = names;
@@ -356,7 +368,9 @@ async function tryFolderMasterBuild(progress) {
   try {
     const fm = await readFolderMaster();
     if (fm) return commitIndexes(await buildIndexes(progress, fm, true));
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('索引の構築', '保存済み master 構築', e);
+  }
   return null;
 }
 

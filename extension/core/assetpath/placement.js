@@ -17,6 +17,7 @@ export const setNameAlias = (map) => {
   NAME_ALIAS = map || {};
 };
 const fileFor = (rel, platform) => `${safeName(bundleName(String(rel)))}.${platform}.bundle`;
+export const isFileFor = (rel, fileName) => bundleName(String(fileName)) === safeName(bundleName(String(rel)));
 
 const ownerSeg = (rel) => {
   const s = String(rel);
@@ -46,19 +47,19 @@ export const EPISODE_FILE = {
   sceneName: (sceneId) => `scene_${sceneId}.bin`,
   timelineName: (sceneId) => `scene_${sceneId}.json`,
   detailsName: 'getDetails.bin',
-  scene: (episodeId, sceneId) => `${CHAR_DIR.episodeRoot(episodeId)}/scene_${sceneId}.bin`,
-  timeline: (episodeId, sceneId) => `${CHAR_DIR.episodeRoot(episodeId)}/scene_${sceneId}.json`,
-  details: (episodeId) => `${CHAR_DIR.episodeRoot(episodeId)}/getDetails.bin`,
+  scene: (episodeId, sceneId) => `${CHAR_DIR.episodeRoot(episodeId)}/${EPISODE_FILE.sceneName(sceneId)}`,
+  timeline: (episodeId, sceneId) => `${CHAR_DIR.episodeRoot(episodeId)}/${EPISODE_FILE.timelineName(sceneId)}`,
+  details: (episodeId) => `${CHAR_DIR.episodeRoot(episodeId)}/${EPISODE_FILE.detailsName}`,
 };
 
 export const SHARED_FILE = {
   master: 'masterdata.bin',
   user: 'user.bin',
   catalogDir: 'catalogs',
-  catalog: (name) => 'catalogs/' + name,
+  catalog: (name) => SHARED_FILE.catalogDir + '/' + name,
   vfxCatalog: 'catalogs/vfx_catalog.json',
   staticsDir: 'statics',
-  statics: (name) => 'statics/' + name,
+  statics: (name) => SHARED_FILE.staticsDir + '/' + name,
   gachaMissing: 'statics/_gacha_missing.json',
 };
 
@@ -80,7 +81,6 @@ export const PLACE = {
   weapon: (name) => () => ({ dir: CHAR_DIR.weapon + '/', name }),
   voiceGallery: () => () => ({ dir: CHAR_DIR.voiceGallery, name: 'voice_gallery' }),
   owned: (item) => (rel) => `${item.ownerId || item.id}/${item.cat}_${ownerSeg(rel)}`,
-  named: (prefix) => () => prefix,
   fixed: (dir, name) => () => ({ dir, name }),
 };
 

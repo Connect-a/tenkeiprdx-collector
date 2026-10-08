@@ -224,7 +224,6 @@ export function createBgmEngine({ onEnded, onPhaseChange, onPlayingChange } = {}
   return {
     decode,
     setTrack,
-    hasIntro,
     play,
     pause,
     stop,

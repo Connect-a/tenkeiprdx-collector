@@ -25,7 +25,7 @@ const resetZoom = () => {
 const ensureFullscreen = () => {
   if (_zoomOverlay) return _zoomOverlay;
   const img = el('img', 'imgfs-img');
-  const ov = el('div', 'imgfs', [img, el('div', 'imgfs-cap')]);
+  const ov = el('div', 'imgfs', [img, el('div', 'imgfs-cap'), el('div', 'imgfs-extra')]);
   const close = () => {
     ov.classList.remove('show');
     img.removeAttribute('src');
@@ -103,20 +103,23 @@ const ensureFullscreen = () => {
   _zoomImg = img;
   return ov;
 };
-const openFullscreen = (src, caption) => {
+const openFullscreen = (src, caption, extra) => {
   if (!src) return;
   const ov = ensureFullscreen();
   _zoomImg.src = src;
   ov.querySelector('.imgfs-cap').textContent = caption || '';
+  const ex = ov.querySelector('.imgfs-extra');
+  ex.innerHTML = '';
+  if (extra) ex.appendChild(extra);
   resetZoom();
   ov.classList.add('show');
 };
-const makeZoomable = (node, srcGetter, caption) => {
+const makeZoomable = (node, srcGetter, caption, extraGetter) => {
   node.classList.add('zoomable');
   node.title = 'クリックで全画面';
   node.addEventListener('click', () => {
     try {
-      openFullscreen(srcGetter(), caption);
+      openFullscreen(srcGetter(), caption, extraGetter ? extraGetter() : null);
     } catch (e) {}
   });
 };
@@ -142,4 +145,4 @@ const createImageCard = (item) =>
     el('div', 'imgmeta', item.width && item.height ? `${item.width}x${item.height} / offset ${item.offset}${item.type ? ' / ' + item.type : ''}` : 'no-rgba-preview'),
   ]);
 
-export const imageZoom = { createImageCard };
+export const imageZoom = { createImageCard, makeZoomable };

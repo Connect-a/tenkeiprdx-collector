@@ -1,3 +1,4 @@
+import { makeQuadProgram, makeQuadTexture, makeFramebuffer } from './gl-quad.js';
 const VERT = `
 attribute vec2 aPos;
 attribute vec2 aUV;
@@ -37,66 +38,25 @@ export function createMosaicPass(gl) {
     uBlocks = null,
     broken = false;
 
-  function compile(type, src) {
-    const sh = gl.createShader(type);
-    gl.shaderSource(sh, src);
-    gl.compileShader(sh);
-    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-      gl.deleteShader(sh);
-      return null;
-    }
-    return sh;
-  }
 
   function makeProgram() {
     if (prog || broken) return !!prog;
-    const vs = compile(gl.VERTEX_SHADER, VERT),
-      fs = compile(gl.FRAGMENT_SHADER, FRAG);
-    if (!vs || !fs) {
+    const built = makeQuadProgram(gl, VERT, FRAG, ['uScene', 'uMask', 'uBlocks']);
+    if (!built) {
       broken = true;
       return false;
     }
-    const p = gl.createProgram();
-    gl.attachShader(p, vs);
-    gl.attachShader(p, fs);
-    gl.linkProgram(p);
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      gl.deleteProgram(p);
-      broken = true;
-      return false;
-    }
-    prog = p;
-    aPos = gl.getAttribLocation(p, 'aPos');
-    aUV = gl.getAttribLocation(p, 'aUV');
-    uScene = gl.getUniformLocation(p, 'uScene');
-    uMask = gl.getUniformLocation(p, 'uMask');
-    uBlocks = gl.getUniformLocation(p, 'uBlocks');
-    quad = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
-    const v = new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, -1, 1, 0, 1, 1, -1, 1, 0, 1, 1, 1, 1]);
-    gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
+    prog = built.prog;
+    quad = built.quad;
+    aPos = built.aPos;
+    aUV = built.aUV;
+    uScene = built.uniforms.uScene;
+    uMask = built.uniforms.uMask;
+    uBlocks = built.uniforms.uBlocks;
     return true;
   }
 
-  function mkTex(w, h) {
-    const t = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return t;
-  }
 
-  function mkFB(tex) {
-    const fb = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    return fb;
-  }
 
   function ensure(w, h) {
     if (broken) return false;
@@ -105,10 +65,10 @@ export function createMosaicPass(gl) {
     dispose(true);
     W = w;
     H = h;
-    sceneTex = mkTex(w, h);
-    sceneFB = mkFB(sceneTex);
-    maskTex = mkTex(w, h);
-    maskFB = mkFB(maskTex);
+    sceneTex = makeQuadTexture(gl, w, h);
+    sceneFB = makeFramebuffer(gl, sceneTex);
+    maskTex = makeQuadTexture(gl, w, h);
+    maskFB = makeFramebuffer(gl, maskTex);
     const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     if (!ok) {

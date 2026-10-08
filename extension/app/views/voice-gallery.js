@@ -6,6 +6,19 @@ import { playerState } from '../runtime/player-state.js';
 import { nameFix } from '../ui/ui-format.js';
 import { cachedAudioUrl } from '../../core/audio-url.js';
 import { voiceOut } from '../panels/voice-out.js';
+import { stillVoiceLinesFor } from './detail-info.js';
+import { noteFailure } from '../../core/failures.js';
+
+async function appendStillVoiceSection(grid) {
+  try {
+    const box = await stillVoiceLinesFor(playerState.cur.folderKey);
+    if (!box) return;
+    grid.appendChild(el('div', 'voicegrid-head', 'シーンイラスト（クリックボイス）'));
+    grid.appendChild(box);
+  } catch (e) {
+    noteFailure('ボイスギャラリー', '静止画クリックボイス欄', e);
+  }
+}
 
 const VOICE_SITUATION = {
   1: '自己紹介',
@@ -49,6 +62,7 @@ export async function renderVoiceGallery() {
   const bundle = playerState.cur.meta && characterMeta.voiceGalleryBundle(playerState.cur.meta.voiceGallery);
   if (!bundle) {
     note.textContent = 'このキャラのキャラボイスは未取得です。';
+    await appendStillVoiceSection(grid);
     return;
   }
 
@@ -66,7 +80,9 @@ export async function renderVoiceGallery() {
     try {
       const d = await collectionRepository.characterDetail(playerState.cur.folderKey);
       if (d && d.voiceMessages) vmsg = d.voiceMessages;
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ボイスギャラリー', '台詞文言詳細', e);
+    }
     if (!Object.keys(vmsg).length) vmsg = (meta.profile && meta.profile.voiceMessages) || {};
   }
 
@@ -88,4 +104,5 @@ export async function renderVoiceGallery() {
     });
     grid.appendChild(card);
   }
+  await appendStillVoiceSection(grid);
 }

@@ -1,6 +1,8 @@
-import { MOTION_ORDER, MOTION_VOICE, clipLike, idleClip } from '../../engine/render/motion-names.js';
+import { MOTION_ORDER, clipLike, idleClip } from '../../engine/render/motion/motion-names.js';
+import { motionVoiceNo } from '../../engine/render/motion/motion-voice.js';
 import { voiceClipFor } from './viewer-source.js';
 import { cachedAudioUrl, revokeUrlMap } from '../../core/audio-url.js';
+import { noteFailure } from '../../core/failures.js';
 
 const RUN_SPEED = 3;
 const LIFT_SPEED = 2;
@@ -65,7 +67,7 @@ export function createDriver(deps) {
   const lastMotion = new Map();
   let voiceEl = null;
   async function playMotionVoice(id, motion) {
-    const no = MOTION_VOICE[motion];
+    const no = motionVoiceNo(motion);
     if (!no) return;
     try {
       const url = await cachedAudioUrl(voiceUrls, id + ':' + motion, () => voiceClipFor(core.entryOf(id), no));
@@ -73,7 +75,9 @@ export function createDriver(deps) {
       if (!voiceEl) voiceEl = new Audio();
       voiceEl.src = url;
       voiceEl.play().catch(() => {});
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ステージ操作', 'モーション連動ボイス', e);
+    }
   }
 
   function strike(c, inst) {
@@ -100,7 +104,7 @@ export function createDriver(deps) {
         clip: hurt,
         wait: HIT_DELAY,
         until: (target.clipDuration && target.clipDuration(hurt)) || 0.8,
-        rotY: Math.atan2(-dx, -dz) - (target.defaultRotY || 0),
+        rotY: Math.atan2(-dx, -dz),
       });
     }
   }
@@ -228,7 +232,7 @@ export function createDriver(deps) {
     const step = (RUN_SPEED * dt) / len;
     const nx = (c.x || 0) - wx * step;
     const nz = (c.z || 0) + wz * step;
-    const want = Math.atan2(wx, wz) - (inst.defaultRotY || 0);
+    const want = Math.atan2(wx, wz);
     let cur = c.rotY || 0;
     let diff = want - cur;
     while (diff > Math.PI) diff -= Math.PI * 2;

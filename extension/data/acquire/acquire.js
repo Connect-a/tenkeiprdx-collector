@@ -18,6 +18,7 @@ import { fileNameOf } from '../../core/assetpath/paths.js';
 import { PLACE, CHAR_DIR, EPISODE_FILE, sceneHave } from '../../core/assetpath/placement.js';
 import { assetStore, AREA } from '../asset-store.js';
 import { manualChoiceGroups } from '../manual-choice-groups.js';
+import { noteFailure } from '../../core/failures.js';
 const { assetRoot } = networkClient;
 const { ownedLevels, unlockedPaidSet, clearedNodeSet, openEpisodeSet, userLoaded } = userStateService;
 
@@ -91,7 +92,9 @@ async function binlistSceneSet({ force } = {}) {
         _binlistScenes = new Set(binlistScenes.map(String));
         return _binlistScenes;
       }
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('キャラ取得', 'プロフィール', e);
+    }
   }
   const set = new Set();
   try {
@@ -248,7 +251,9 @@ async function decodeEpisodeScenes(ctx, ep, epMeta, sceneBytes, voice) {
     try {
       const next = unityDecode.sceneNext(decoded);
       if (next && !seen.has(next)) queue.push(next);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('キャラ取得', '次シーン探索', e);
+    }
 
     epMeta.have = 'partial';
     epMeta.lineCount += timeline.count;
@@ -265,7 +270,9 @@ async function decodeEpisodeScenes(ctx, ep, epMeta, sceneBytes, voice) {
         if (typeof cm[7] === 'string' && cm[7]) used.still.add(cm[7]);
         if (cm[23] != null && cm[23] !== '' && (Number(cm[24]) || 0) !== 1) used.insert.add(String(cm[23]));
       }
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('キャラ取得', '台本素材参照', e);
+    }
     for (const id of timeline.castIds || []) ctx.castIds.add(id);
     if (ctx.download) {
       try {
@@ -315,11 +322,11 @@ function queueSceneVoice(ctx, ep, epMeta, sc, timeline, advHash) {
   });
 }
 
-function queueAssetGrab(ctx, { rel, label, sharedFirst, episodeDir, sharedPlace, onGot, onFail }) {
+function queueAssetGrab(ctx, { rel, label, sharedFirst, episodeDir, onGot, onFail }) {
   ctx.jobs.push(async () => {
     if (ctx.sess.aborted) return;
     const shared = !!(sharedFirst && ctx.sharedDir);
-    const p = shared ? await ctx.grabAsset(ctx.sharedDir, rel, sharedPlace || null, label) : await ctx.grabOwn(rel, episodeDir, label);
+    const p = shared ? await ctx.grabAsset(ctx.sharedDir, rel, null, label) : await ctx.grabOwn(rel, episodeDir, label);
     if (p) onGot(shared ? `${DIRS.shared}/${p}` : p);
     else if (onFail) onFail();
   });
@@ -421,7 +428,6 @@ function queueEpisodeAssets(ctx, ep, epMeta, used, routing) {
       routing.unresolved.push('se:' + name);
       continue;
     }
-    const fn = fileNameOf(rel);
     queueAssetGrab(ctx, {
       rel,
       label: `se ${name}`,
@@ -518,7 +524,11 @@ function queueSkillFx(ctx, meta) {
       if (ctx.sess.aborted) return;
       const vfx = await ctx.grabOwn(e.vfxRel, PLACE.visual('skillfx'), `skillfx ${e.effect}`);
       if (!vfx) return;
-      const se = e.seRel ? await ctx.grabOwn(e.seRel, PLACE.visual('skillfx/se'), `skillse ${e.effect}`) : null;
+      const se = [];
+      for (const rel of e.seRels) {
+        const p = await ctx.grabOwn(rel, PLACE.visual('skillfx/se'), `skillse ${e.effect}`);
+        if (p) se.push(p);
+      }
       out.push({ effect: e.effect, skillId: e.skillId, skillName: e.skillName, vfx, se });
     });
   }

@@ -5,6 +5,7 @@ import { localInventory } from './inventory.js';
 import { resolveOrigin } from './origin.js';
 import { assetStore } from './asset-store.js';
 import { ensureIndexes } from './index-store.js';
+import { noteFailure } from '../core/failures.js';
 
 export function otherBgmList(x) {
   const hi = x.master.homeIndex || { homeBgm: [] };
@@ -130,6 +131,7 @@ export async function homeAssetStatus(dataIn) {
         ).length;
     return { have: r.have, total: r.total, unknown };
   } catch (e) {
+    noteFailure('ホーム素材', '所持数', e);
     return { have: 0, total: 0, unknown: 0 };
   }
 }

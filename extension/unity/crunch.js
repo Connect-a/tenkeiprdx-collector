@@ -1,4 +1,5 @@
 import { texCodec } from './texcodec.js';
+import { noteFailure } from '../core/failures.js';
 let unityModule = null;
 let unityInitTried = false;
 
@@ -160,7 +161,9 @@ function decodeLevel0RGBA(bytes) {
   if (supportsUnityCrunched()) {
     try {
       d = decodeUnityLevel0(bytes);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('Unity Crunch', 'Unity crunched復号', e);
+    }
   }
   if (!d) d = decodeLevel0(bytes);
   const rgba = toRGBA(d.width, d.height, d.format, d.dxtBytes);
@@ -184,7 +187,6 @@ function findInBuffer(buf, maxCandidates) {
 export const unityCrunch = {
   canDecodeCrunched: () => !!classicCrnModule() || supportsUnityCrunched(),
   supportsUnityCrunched,
-  probe,
   decodeLevel0RGBA,
   findInBuffer,
 };

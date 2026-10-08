@@ -19,8 +19,10 @@ const RING_BASIS = {
 const PICK = 0xffe066;
 const SCREEN_SIZE = 0.16;
 
+const rawHex = (hex) => new THREE.Color().setRGB(((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255);
+
 function mat(color) {
-  return new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+  return new THREE.MeshBasicMaterial({ color: rawHex(color), transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
 }
 
 function arrow(axis, dir) {
@@ -91,7 +93,7 @@ export function createGizmo(scene) {
   const setColor = (name) => {
     for (const o of pickables) {
       const base = COLORS[o.userData.handle];
-      o.material.color.setHex(o.userData.handle === name ? PICK : base);
+      o.material.color.copy(rawHex(o.userData.handle === name ? PICK : base));
     }
   };
 

@@ -10,11 +10,13 @@ import { assetStore } from '../../data/asset-store.js';
 import { DIRS } from '../../core/dirs.js';
 import { createStageCore } from './viewer-stage-core.js';
 import { el } from '../../core/dom.js';
+import { GAME_WIDTH, GAME_HEIGHT } from '../../core/game-screen.js';
+import { noteFailure } from '../../core/failures.js';
 
 const SP = () => spineWeb.lib();
 const GL = () => SP() && SP().webgl;
-const REF_W = 1136;
-const REF_H = 640;
+const REF_W = GAME_WIDTH;
+const REF_H = GAME_HEIGHT;
 const BASE_SCALE = 0.33;
 
 async function readBg(dir, rel) {
@@ -309,7 +311,9 @@ export function createStage(hostEl, deps) {
       let inputs = null;
       try {
         inputs = await spineInputsFor(entry);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ステージ表示', 'Spine入力の1件', e);
+      }
       if (!inputs) {
         core.note(`#${key} のSpineが見つかりません。ダウンロードを確認してください。`);
         return null;
@@ -317,6 +321,7 @@ export function createStage(hostEl, deps) {
       try {
         return buildSkeleton(ctx, inputs);
       } catch (e) {
+        noteFailure('ステージ表示', 'Spine組み立ての1件', e);
         core.note(`#${key} のSpineを組み立てられませんでした。`);
         return null;
       }

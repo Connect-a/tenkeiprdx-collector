@@ -3,6 +3,7 @@ import { R18_ALT_EPISODES, R18_ALT_OWNER } from '../r18-alt.js';
 import { CHAR_DIR } from '../../core/assetpath/placement.js';
 import { folderModel } from '../folder-model.js';
 import { characterMeta } from '../character-meta.js';
+import { noteFailure } from '../../core/failures.js';
 
 const attempted = new Set();
 
@@ -64,6 +65,7 @@ export async function migrateR18Episodes(folderKey, episodes) {
   try {
     ({ folderMeta } = await folderModel());
   } catch (e) {
+    noteFailure('R18移行', 'フォルダ情報', e);
     return null;
   }
   const srcDir = await folderDir(R18_ALT_OWNER, folderMeta, false);

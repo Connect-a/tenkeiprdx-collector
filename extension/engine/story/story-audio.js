@@ -2,6 +2,7 @@ import { assetStore } from '../../data/asset-store.js';
 import { DIRS } from '../../core/dirs.js';
 import { unityDecode } from '../../unity/decode.js';
 import { firstClipUrl } from '../../core/audio-url.js';
+import { noteFailure } from '../../core/failures.js';
 
 export async function readSharedBgmUrl(rel) {
   if (!rel) return null;
@@ -9,7 +10,9 @@ export async function readSharedBgmUrl(rel) {
     const bytes = await assetStore.readAsset(DIRS.shared, rel);
     if (!bytes) return null;
     return firstClipUrl(await unityDecode.extractAudioResource(bytes));
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('共有音声', '音声取得', e);
+  }
   return null;
 }
 

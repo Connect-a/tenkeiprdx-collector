@@ -5,13 +5,6 @@
   overflow: hidden;
 }
 
-.vw-buggy {
-  color: #ff6b7a;
-  font-size: 12px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
 .vw-tabs {
   display: flex;
   gap: 4px;

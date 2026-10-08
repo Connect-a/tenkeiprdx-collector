@@ -152,3 +152,31 @@
   margin-top: 4px;
   word-break: break-all;
 }
+
+.voicegrid-head {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #2a2836;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbb8ff;
+}
+.voicegrid .mainstill-voices {
+  grid-column: 1 / -1;
+}
+.mainstill-voices .homeline {
+  cursor: pointer;
+  border-top: none;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.mainstill-voices .homeline:hover {
+  background: #241f38;
+}
+.mainstill-voices .homeline-play {
+  flex: 0 0 auto;
+  color: #b9a4ff;
+  font-size: 11px;
+  line-height: 1.6;
+}

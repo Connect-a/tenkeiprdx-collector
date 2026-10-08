@@ -1,7 +1,7 @@
 import { latin1, num } from '../core/bytes.js';
-import { fsb5 } from './fsb5.js';
-import { fsb5Vorbis } from './fsb5-vorbis.js';
-import { vorbisSetup } from './vorbis-setup.js';
+import { fsb5 } from './audio/fsb5.js';
+import { fsb5Vorbis } from './audio/fsb5-vorbis.js';
+import { vorbisSetup } from './audio/vorbis-setup.js';
 import { unitySf } from './unity-sf.js';
 import * as MessagePack from '../vendor/msgpack.esm.js';
 
@@ -231,6 +231,27 @@ async function extractAudioResource(bundleBytes) {
   return resourceClips(data.subarray(resNode.off, resNode.off + resNode.sz));
 }
 
+async function extractAudioClips(bundleBytes) {
+  const { data, nodes } = parseUnityFS(bundleBytes);
+  const cabNode = nodes.find((n) => !/\.res(ource|S)$/.test(n.path));
+  const resNode = nodes.find((n) => n.path.endsWith('.resource'));
+  if (!cabNode || !resNode) return [];
+  const sf = data.subarray(cabNode.off, cabNode.off + cabNode.sz);
+  const res = data.subarray(resNode.off, resNode.off + resNode.sz);
+  const meta = unitySf.parseSerializedFile(sf);
+  const out = [];
+  for (const o of meta.objects) {
+    if (o.classID !== 83) continue;
+    const a = unitySf.readObject(sf, meta.LE, o);
+    const r = a && a.m_Resource;
+    if (!r) continue;
+    const off = num(r.m_Offset);
+    const [clip] = await resourceClips(res.subarray(off, off + num(r.m_Size)));
+    if (clip) out.push({ cab: cabNode.path.toLowerCase(), pathID: String(o.pathID), name: a.m_Name || '', data: clip.data, mime: clip.mime });
+  }
+  return out;
+}
+
 let innerCodecTagged = null,
   innerCodecPlain = null;
 function innerCodec(extTag) {
@@ -280,9 +301,7 @@ function decodeCSharpLz4(bytes, opts) {
       full.set(p, o);
       o += p.length;
     }
-    try {
-      for (const v of MessagePack.decodeMulti(full, { extensionCodec: inner, useBigInt64: true })) vals.push(v);
-    } catch (e) {}
+    for (const v of MessagePack.decodeMulti(full, { extensionCodec: inner, useBigInt64: true })) vals.push(v);
     return true;
   };
   if (multiRoot) {
@@ -469,6 +488,7 @@ export const unityDecode = {
   extractTextAssets,
   extractVoiceClips,
   extractAudioResource,
+  extractAudioClips,
   decodeSceneBin,
   decodeUserBytes,
   decodeSceneCommands,

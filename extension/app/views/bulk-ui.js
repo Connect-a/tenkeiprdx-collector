@@ -12,6 +12,7 @@ import { failureGroups } from '../../core/failure-report.js';
 import { isSingleDlActive as getSingleDlActive } from './download-ui.js';
 import { rescanAll } from '../runtime/state-refresh.js';
 import { networkClient } from '../../data/network.js';
+import { noteFailure } from '../../core/failures.js';
 
 const DL_INTERVALS = [5, 30, 60, 180];
 const bulkOpts = { overwrite: false, dlIntervalSec: 180 };
@@ -64,10 +65,7 @@ function seg(id, val, onPick) {
 
 async function collectBulkCandidates() {
   const rosterKind = playerState.rosterKind;
-  let items = [];
-  try {
-    items = await collectionRepository.rosterItems(rosterKind, { dl: playerState.dl, distSet: playerState.binlistScenes || new Set() });
-  } catch (e) {}
+  const items = await collectionRepository.rosterItems(rosterKind, { dl: playerState.dl, distSet: playerState.binlistScenes || new Set() });
   const list = items.map((it) => ({
     id: it.folderKey,
     name: it.displayName,
@@ -114,11 +112,16 @@ export async function openBulk() {
     persistBulkOpts();
   });
   getById('bulkModal').style.display = '';
-  await refreshBulkTarget();
-  await renderBulkCard();
+  try {
+    await refreshBulkTarget();
+    await renderBulkCard();
+  } catch (e) {
+    noteFailure('一括ダウンロード', '候補構築', e);
+    toast('一括ダウンロードの候補を取得できませんでした', 'err');
+  }
   rescanAll()
     .then(() => refreshBulkTarget())
-    .catch(() => {});
+    .catch((e) => noteFailure('一括ダウンロード', '再スキャン', e));
 }
 export function closeBulk() {
   getById('bulkModal').style.display = 'none';
@@ -150,6 +153,10 @@ export async function startBulk() {
       return;
     }
     r = _startCancelled ? { ok: false, reason: 'stopped' } : await bulkDownloader.start(list, { overwrite: bulkOpts.overwrite, dlIntervalSec: bulkOpts.dlIntervalSec || 180 });
+  } catch (e) {
+    noteFailure('一括ダウンロード', '開始', e);
+    toast('一括ダウンロードを開始できませんでした', 'err');
+    return;
   } finally {
     setStartingUi(false);
     await renderBulkCard();
@@ -172,10 +179,14 @@ async function missingSummaries(force) {
     ms = null;
   try {
     mv = await assetAcquirer.cdnMissingSummary();
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('一括ダウンロード', '欠損ボイス集計', e);
+  }
   try {
     ms = await assetAcquirer.missingScenesSummary();
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('一括ダウンロード', '欠損台本集計', e);
+  }
   _summaryCache = { mv, ms };
   _summaryAt = Date.now();
   return _summaryCache;

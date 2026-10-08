@@ -2,6 +2,7 @@ import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { getById, el, append } from '../../core/dom.js';
 import { toast } from '../ui/notifier.js';
 import { errText } from '../../core/messages.js';
+import { noteFailure } from '../../core/failures.js';
 
 export function sharedDlToast(o) {
   if (o.ok) toast(`共有リソースを取得しました（新規${o.result.got}件・既にあった分${o.result.skip}件／全${o.result.total}件）`, 'ok');
@@ -24,7 +25,9 @@ export async function refreshSharedNotice() {
   let present = true;
   try {
     present = await assetAcquirer.sharedResourcesPresent();
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('共有リソース通知', '不足判定', e);
+  }
   if (present) {
     box.style.display = 'none';
     box.innerHTML = '';

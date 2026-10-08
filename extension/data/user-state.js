@@ -3,27 +3,20 @@ import { unityDecode } from '../unity/decode.js';
 import { DIRS } from '../core/dirs.js';
 import { fileStore } from '../core/fsdir.js';
 import { num } from '../core/bytes.js';
+import { noteFailure } from '../core/failures.js';
 const { decodeUserBytes } = unityDecode;
-
-const errText = (e) => (e && e.message ? e.message : String(e));
 
 let _userState = null;
 async function parseUserState() {
   if (_userState) return _userState;
-  const state = { levels: new Map(), paidUnlocked: new Set(), clearedNodes: new Set(), openEpisodes: new Set(), loaded: false, error: null };
+  const state = { levels: new Map(), paidUnlocked: new Set(), clearedNodes: new Set(), openEpisodes: new Set(), loaded: false };
   let bytes = null;
-  let tried = '';
   try {
     const d = await fileStore.getDir(DIRS.master, { create: false });
     const f = d && (await fileStore.readUnder(d, SHARED_FILE.user));
     if (f) bytes = new Uint8Array(await f.arrayBuffer());
-  } catch (e) {
-    tried = errText(e);
-  }
-  if (!bytes) {
-    state.error = { reason: 'missing', message: 'user.bin が見つかりません', detail: tried };
-    return state;
-  }
+  } catch (e) {}
+  if (!bytes) return state;
   try {
     (function walk(x, depth) {
       if (depth > 4 || !Array.isArray(x)) return;
@@ -37,13 +30,10 @@ async function parseUserState() {
       for (const e of x) walk(e, depth + 1);
     })(decodeUserBytes(bytes), 0);
   } catch (e) {
-    state.error = { reason: 'parse', message: errText(e), detail: `bytes=${bytes.length}` };
+    noteFailure('解放状態', 'user.bin の復号', e);
     return state;
   }
-  if (!state.levels.size) {
-    state.error = { reason: 'empty', message: '所持キャラの情報が取り出せませんでした', detail: `bytes=${bytes.length}` };
-    return state;
-  }
+  if (!state.levels.size) return state;
   state.loaded = true;
   _userState = state;
   return state;

@@ -89,7 +89,7 @@ export function createStageCore(hostEl, deps) {
       if (!c || !it) return;
       if (impl.needsRebuild && impl.needsRebuild(c, it)) {
         api.removeChar(key);
-        api.addChar(key).catch(() => {});
+        api.addChar(key);
         return;
       }
       impl.apply(c, it);

@@ -1,3 +1,4 @@
+import { noteFailure } from '../../core/failures.js';
 import { fileStore } from '../../core/fsdir.js';
 import { getById, el } from '../../core/dom.js';
 import { playerState } from '../runtime/player-state.js';
@@ -25,7 +26,9 @@ async function buildLineIndex() {
       let tl = null;
       try {
         tl = JSON.parse(await f.text());
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('台詞検索', 'タイムラインの1件', e);
+      }
       if (!tl || !Array.isArray(tl.lines)) continue;
       for (const ln of tl.lines) merged.push(ln);
     }

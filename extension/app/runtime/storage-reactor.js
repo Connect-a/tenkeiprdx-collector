@@ -8,6 +8,7 @@ import { refreshLists } from './state-refresh.js';
 import { playerState } from './player-state.js';
 import { updateCdnReset } from '../views/shell-ui.js';
 import { invalidateIndex } from '../../data/index-store.js';
+import { noteFailure } from '../../core/failures.js';
 
 let bulkRefreshTimer = null;
 let bound = false;
@@ -57,7 +58,7 @@ function onChanged(ch, area) {
           else arr.push(entry);
           return updateCard(fk);
         })
-        .catch(() => {});
+        .catch((e) => noteFailure('ストレージ反映', '完了フォルダの1件', e));
     }
     const finished = ov && bulkDownloader.isActive(ov.phase) && (!nv || !bulkDownloader.isActive(nv.phase));
     if (finished) {
@@ -83,9 +84,7 @@ function onChanged(ch, area) {
     const changed = ch.originManual ? ch.originManual.oldValue !== ch.originManual.newValue : !manualPinned && autoChanged;
     if (ch.originManual) manualPinned = !!ch.originManual.newValue;
     if (changed) {
-      try {
-        invalidateIndex();
-      } catch (e) {}
+      invalidateIndex();
       refreshListsSafe(['binlist', 'index', 'dl']);
     }
   }

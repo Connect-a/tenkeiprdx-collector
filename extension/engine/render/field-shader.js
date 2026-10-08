@@ -83,8 +83,6 @@ const CHAR_SHADOW_FN =
   '  return mix(1.0, texture(tpCharShadowMap, c.xyz), tpCharShadowStrength);\n' +
   '}\n';
 
-const TO_LINEAR_FN = 'uniform float uTpEncode;\n' + 'vec3 tpToLinear(vec3 c){vec3 hi=pow((max(c,vec3(0.0))+0.055)/1.055,vec3(2.4));vec3 lo=c/12.92;return mix(hi,lo,step(c,vec3(0.04045)));}\n';
-
 const wrapCache = new Map();
 
 function wrapOutput(frag, fog, charShadow) {
@@ -99,11 +97,9 @@ function wrapOutput(frag, fog, charShadow) {
     '\n' +
     (fog ? FOG_FN : '') +
     (charShadow ? CHAR_SHADOW_FN : '') +
-    TO_LINEAR_FN +
     'void main(){tpUnityMain();' +
     (charShadow ? 'SV_Target0.rgb=SV_Target0.rgb*tpCharShadow();' : '') +
     (fog ? 'SV_Target0.rgb=tpMixFog(SV_Target0.rgb);' : '') +
-    'SV_Target0.rgb=mix(SV_Target0.rgb, tpToLinear(SV_Target0.rgb), uTpEncode);' +
     '}\n';
   byKey.set(key, out);
   return out;
@@ -188,8 +184,6 @@ export function makeFieldMaterial(T, shaderName, mat, deps) {
     uniforms.tpCharShadowMatrix = { value: new T.Matrix4() };
     uniforms.tpCharShadowStrength = { value: 0 };
   }
-  uniforms.uTpEncode = { value: 1 };
-  if (deps.rtUniforms) deps.rtUniforms.push(uniforms);
   const lm = uniforms.unity_Lightmap && uniforms.unity_Lightmap.value;
   const m = new T.RawShaderMaterial({
     glslVersion: T.GLSL3,

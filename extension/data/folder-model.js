@@ -4,8 +4,8 @@ import { AFFILIATION_NAMES, RARITY_NAMES } from './master-labels.js';
 import { CHARACTER_CV } from './character-cv.js';
 
 const CV_UNKNOWN = '【不明】';
-const groupName = (d) => AFFILIATION_NAMES[d && d.groupId] || '';
-const rankName = (d) => RARITY_NAMES[d && d.rankId] || '';
+const affiliationName = (d) => AFFILIATION_NAMES[d && d.affiliation] || '';
+const rarityName = (d) => RARITY_NAMES[d && d.rarity] || '';
 
 const episodeRef = (e) => ({ episodeId: e.episodeId, order: e.order, label: e.label, title: e.title, xpos: e.xpos || 0, thumb: e.thumb || null, sceneBinIds: e.sceneBinIds, linkTo: e.linkTo });
 
@@ -19,8 +19,8 @@ function buildFolderMeta(x) {
       rosterKind: 'character',
       name: c.name,
       title: c.title,
-      group: groupName(c),
-      rank: rankName(c),
+      affiliation: affiliationName(c),
+      rarity: rarityName(c),
       bwh: c.bwh,
       attachmentColors: c.attachmentColors,
       episodes: c.episodes.map(episodeRef),
@@ -68,5 +68,5 @@ export async function characterDetail(charId) {
   if (!c) return null;
   const { episodes, ...d } = c;
   const cv = CHARACTER_CV[String(c.name || '').replace(/\(.*\)$/, '')] || CV_UNKNOWN;
-  return { group: groupName(c), rank: rankName(c), cv, ...d };
+  return { ...d, affiliation: affiliationName(c), rarity: rarityName(c), cv };
 }

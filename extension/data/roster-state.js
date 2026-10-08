@@ -1,5 +1,4 @@
 const allOpen = (it) => !!it && it.counts.total > 0 && it.counts.open >= it.counts.total;
-const allHave = (it) => !!it && it.counts.total > 0 && it.counts.have >= it.counts.total;
 const distFull = (it) => !!it && it.counts.total > 0 && it.counts.dist >= it.counts.total;
 const distOnly = (it) => distFull(it) && it.rosterKind === 'character' && !it.owned;
 const storyFull = (it) => allOpen(it) || distFull(it);
@@ -15,4 +14,4 @@ const byQuestId = (keyOf) => (a, b) => {
   return x[0] - y[0] || x[1] - y[1];
 };
 
-export const rosterState = { allOpen, allHave, distOnly, distFull, storyFull, availableCount, byQuestId };
+export const rosterState = { allOpen, distOnly, distFull, storyFull, availableCount, byQuestId };

@@ -1,4 +1,5 @@
 import { el, append } from '../../core/dom.js';
+import { noteFailure } from '../../core/failures.js';
 
 export function createZoomOverlay({ id, title, lines, load, emptyText }) {
   let items = [];
@@ -69,7 +70,9 @@ export function createZoomOverlay({ id, title, lines, load, emptyText }) {
     let canvas = null;
     try {
       canvas = await load(item);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ズーム表示', '画像の読み込み', e);
+    }
     if (mine !== gen) return;
     s.pic.innerHTML = '';
     if (canvas) {

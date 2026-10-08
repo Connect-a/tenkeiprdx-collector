@@ -2,8 +2,9 @@ import { scenarioUi } from './scenario-ui.js';
 import { settingsWindow } from './settings-window.js';
 import { scenarioSettings } from './scenario-settings.js';
 import { mk } from '../../core/dom.js';
-const REF_W = 1136,
-  REF_H = 640;
+import { GAME_WIDTH, GAME_HEIGHT } from '../../core/game-screen.js';
+const REF_W = GAME_WIDTH,
+  REF_H = GAME_HEIGHT;
 
 function create(host, opts) {
   const onEpisodeEnd = (opts && opts.onEpisodeEnd) || null;
@@ -405,7 +406,6 @@ function create(host, opts) {
       if (askDone) askDone(false);
     },
     setAuto,
-    setSkip,
     stopAuto() {
       setAuto(false);
     },

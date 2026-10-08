@@ -64,4 +64,4 @@ function prepareAtlas(input, tokenFor) {
   return { text: out.join('\n'), pages: used, textures };
 }
 
-export const spineAtlas = { splitAtlasPages, atlasPageNames, textureForPage, textureListOf, prepareAtlas };
+export const spineAtlas = { atlasPageNames, textureForPage, textureListOf, prepareAtlas };

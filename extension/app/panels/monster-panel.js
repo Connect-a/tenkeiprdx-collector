@@ -1,13 +1,13 @@
+import { noteFailure } from '../../core/failures.js';
 import { assetStore, AREA } from '../../data/asset-store.js';
 import { AFFILIATION_NAMES, MONSTER_RACE_NAMES, MONSTER_TYPE_NAMES, RARITY_NAMES } from '../../data/master-labels.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { unityMesh as MESH_MOD } from '../../unity/mesh.js';
 import { loadModel3d, disposeModel3d } from '../../engine/render/lazy.js';
 import { makeRebuildLimiter } from '../../engine/render/gl-manager.js';
-import { spineWeb } from '../../engine/story/spine-web.js';
 import { charAssets } from '../../data/char-assets.js';
 import { errText } from '../../core/messages.js';
-import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, downloadBar, noteRow, decodeFailNote } from '../ui/panel-shell.js';
+import { hideRosterControls, splitLayout, clearView, entryCard, viewHeader, acquireBar, mountSpinePlayer, noteRow, decodeFailNote } from '../ui/panel-shell.js';
 import { el } from '../../core/dom.js';
 import { rosterQuery, setRosterQuery } from '../runtime/roster-prefs.js';
 import { kanaKey } from '../ui/ui-format.js';
@@ -53,17 +53,13 @@ export function createMonsterPanel(deps) {
   }
 
   function dlBar(status) {
-    return downloadBar({
+    return acquireBar({
       text: `未取得 ${status.missing.length}バンドル（全部そろっているのは ${status.ready}/${status.monsters}体）`,
       label: 'モンスター資産をダウンロード',
-      run: async (onProgress) => {
-        try {
-          const r = await assetAcquirer.runMonsterDownload(onProgress);
-          toast(`モンスター資産を取得しました（新規${r.got}件${r.failed ? `・失敗${r.failed}件` : ''}）`, r.failed ? 'err' : 'ok');
-          await render();
-        } catch (er) {
-          onProgress(errText(er));
-        }
+      acquire: (onProgress) => assetAcquirer.runMonsterDownload(onProgress),
+      done: async (r) => {
+        toast(`モンスター資産を取得しました（新規${r.got}件${r.failed ? `・失敗${r.failed}件` : ''}）`, r.failed ? 'err' : 'ok');
+        await render();
       },
     });
   }
@@ -77,7 +73,9 @@ export function createMonsterPanel(deps) {
         let cvs = [];
         try {
           cvs = MESH_MOD.decodeAllTextureCanvases(bytes, null, stats);
-        } catch (er) {}
+        } catch (er) {
+          noteFailure('モンスター', 'アイコン画像の1件', er);
+        }
         for (const cv of cvs) {
           cv.className = 'monstericon';
           host.appendChild(cv);
@@ -101,35 +99,26 @@ export function createMonsterPanel(deps) {
       let inputs = null;
       try {
         inputs = MESH_MOD.extractSpineInputs(await v.read(a.rel));
-      } catch (er) {}
+      } catch (er) {
+        noteFailure('モンスター', 'Spine入力の1件', er);
+      }
       if (!alive()) return;
       if (!inputs) {
         noteRow(cell, '立ち絵を取り出せませんでした。');
         continue;
       }
-      const box = el('div', 'spine-player-box');
-      cell.appendChild(box);
-      try {
-        const { player } = spineWeb.buildPlayable(box, inputs, {
-          showControls: true,
-          backgroundColor: '#00000000',
-          onReady: (pl) => spineWeb.startDefaultIdle(pl),
-          onError: (m) => noteRow(cell, 'Spine失敗: ' + m),
-        });
-        if (player) _spine.push(player);
-      } catch (er) {
-        noteRow(cell, 'Spine失敗: ' + errText(er));
-      }
+      const player = mountSpinePlayer(cell, inputs, (m) => noteRow(cell, m));
+      if (player) _spine.push(player);
     }
   }
 
   const loadModel = (variant, v) => charAssets.loadModelBundle(v.read, variant.model, variant.meshDeps, { always: true });
-  const loadMaterials = (variant, v) => charAssets.loadMaterialBundle(v.read, variant.material);
+  const loadMaterials = (variant, v) => charAssets.loadMaterialBundle(v.read, variant.material, variant.materials);
 
   function modelVariants(e) {
     const list = [];
-    if (e.model) list.push({ label: '通常', model: e.model, material: e.material, meshDeps: e.meshDeps || [] });
-    for (const alt of e.altModels || []) list.push({ label: `別モデル #${alt.id}`, model: alt.model, material: alt.material, meshDeps: alt.meshDeps });
+    if (e.model) list.push({ label: '通常', model: e.model, material: e.material, materials: e.materials || [], meshDeps: e.meshDeps || [] });
+    for (const alt of e.altModels || []) list.push({ label: `別モデル #${alt.id}`, model: alt.model, material: alt.material, materials: alt.materials || [], meshDeps: alt.meshDeps });
     return list;
   }
 
@@ -137,6 +126,7 @@ export function createMonsterPanel(deps) {
     const variants = modelVariants(e);
     if (!variants.length) return noteRow(host, 'このモンスターには3Dモデルがありません。');
     const weapons = await charAssets.buildWeapons(v.read, e.weapons);
+    const mouthAtlas = await charAssets.loadMouthAtlas(null);
     if (!alive()) return;
 
     const canvasHost = el('div');
@@ -146,7 +136,7 @@ export function createMonsterPanel(deps) {
       _model3d = disposeModel3d(_model3d);
       canvasHost.innerHTML = '';
       if (!model) return noteRow(canvasHost, '3Dモデルが未取得か、読み込めませんでした。');
-      const opts = charAssets.build3dOptions({ weapons }, e, { height: 380, hidePartsUI: true });
+      const opts = charAssets.build3dOptions({ weapons, mouthAtlas }, e, { height: 380, hidePartsUI: true });
       opts.onContextLost = () => (_glRebuildOk() ? (paint(variant), true) : false);
       const r = (await loadModel3d()).render(canvasHost, model, matBundle, opts);
       _model3d = r && r.dispose ? r : null;
@@ -168,7 +158,7 @@ export function createMonsterPanel(deps) {
   const GRID_ROWS = [
     ['レアリティ', (e) => RARITY_NAMES[e.rarity]],
     ['タイプ', (e) => MONSTER_TYPE_NAMES[e.type]],
-    ['グループ', (e) => AFFILIATION_NAMES[e.affiliation]],
+    ['所属', (e) => AFFILIATION_NAMES[e.affiliation]],
     ['種族', (e) => MONSTER_RACE_NAMES[e.race]],
     ['コスト', (e) => (e.cost ? String(e.cost) : '')],
     ['最大レベル', (e) => (e.maxLevel ? String(e.maxLevel) : '')],
@@ -275,10 +265,7 @@ export function createMonsterPanel(deps) {
       noteRow(grid, 'モンスターを読み込めませんでした。' + errText(er));
       return;
     }
-    let status = null;
-    try {
-      status = await collectionRepository.monsterStatus(_list);
-    } catch (er) {}
+    let status = await collectionRepository.monsterStatus(_list);
     _have = (status && status.have) || new Set();
     _ready = status ? status.ready : 0;
 

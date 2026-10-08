@@ -1,6 +1,7 @@
 import { unityDecode } from '../../unity/decode.js';
 import { sleep } from '../../core/async.js';
 import { createBgmEngine } from '../../core/bgm-engine.js';
+import { noteFailure } from '../../core/failures.js';
 
 export function createStoryBgm({ readBundle, enabled, volume, getEp }) {
   const engine = createBgmEngine();
@@ -17,17 +18,23 @@ export function createStoryBgm({ readBundle, enabled, volume, getEp }) {
     let b = null;
     try {
       b = await readBundle(path);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ストーリーBGM', 'バンドル取得', e);
+    }
     let clips = [];
     if (b) {
       try {
         clips = await unityDecode.extractAudioResource(b);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ストーリーBGM', '音声抽出', e);
+      }
     }
     if (clips.length) {
       try {
         buf = await engine.decode(clips[0].data);
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ストーリーBGM', '音声デコード', e);
+      }
     }
     bufs.set(key, buf);
     return buf;
@@ -123,7 +130,6 @@ export function createStoryBgm({ readBundle, enabled, volume, getEp }) {
   return {
     play,
     stop,
-    fadeOut,
     refresh,
     pause: () => engine.pause(),
     setVolume: (v) => engine.setVolume(v),

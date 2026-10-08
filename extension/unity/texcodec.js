@@ -1,3 +1,5 @@
+import { noteFailure } from '../core/failures.js';
+
 const decodeEncodedToCanvas = async (bytes, mime, flipY) => {
   const bmp = await createImageBitmap(new Blob([bytes], { type: mime }));
   const c = document.createElement('canvas');
@@ -21,6 +23,7 @@ const flipEncodedImageBytesY = async (bytes, mime) => {
     const outBytes = new Uint8Array(await outBlob.arrayBuffer());
     return { bytes: outBytes, width: c.width, height: c.height, flipped: true };
   } catch (e) {
+    noteFailure('テクスチャ復号', '画像のY反転', e);
     return { bytes, width: null, height: null, flipped: false, error: e && e.message ? e.message : String(e) };
   }
 };
@@ -482,7 +485,9 @@ function decodeDdsCanvas(bytes) {
   try {
     if (fourCC === 'DXT5') rgba = decodeDxt5Rgba(data, width, height);
     else if (fourCC === 'DXT1') rgba = decodeDXT1(data, width, height);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('テクスチャ復号', 'DDS DXT復号', e);
+  }
   if (!rgba || !width || !height) return null;
   return renderRgbaToCanvas(flipRgbaY(rgba, width, height), width, height);
 }

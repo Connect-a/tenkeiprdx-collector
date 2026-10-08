@@ -86,7 +86,7 @@ function bindRosterFilters() {
     lineSearchTimer = setTimeout(runLineSearch, 200);
   });
   eachIn('rosterType', '.rf[data-roster-type]', (b) => b.addEventListener('click', () => navTo(b.dataset.rosterType)));
-  for (const id of ['rosterGroup', 'rosterRank']) {
+  for (const id of ['rosterAffiliation', 'rosterRarity']) {
     on(id, 'change', () => {
       playerState[id] = getById(id).value;
       settings.set(id, playerState[id]);

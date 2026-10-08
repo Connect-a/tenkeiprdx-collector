@@ -1,8 +1,9 @@
-import { vfxMaterials } from '../render/vfx-materials.js';
+import { vfxMaterialDeps } from '../render/vfx/vfx-material-deps.js';
 import { assetStore } from '../../data/asset-store.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { DIRS } from '../../core/dirs.js';
 import { bundleName } from '../../core/assetpath/paths.js';
+import { noteFailure } from '../../core/failures.js';
 
 const VFX_NAME_BY_CODE = {
   11: 'd_slash_01',
@@ -16,16 +17,18 @@ const VFX_NAME_BY_CODE = {
 };
 let _byName = null;
 async function vfxIndex() {
-  if (_byName) return _byName;
+  if (_byName && _byName.size) return _byName;
   const byName = new Map();
   try {
     for (const rel of (await ensureIndexes()).assets.vfxAllRels || []) {
       const n = bundleName(rel).toLowerCase();
       if (!byName.has(n)) byName.set(n, rel);
     }
-  } catch (e) {}
-  _byName = byName;
-  return _byName;
+  } catch (e) {
+    noteFailure('VFX素材', '索引構築', e);
+  }
+  if (byName.size) _byName = byName;
+  return byName;
 }
 
 const fetchRel = (rel) => assetStore.readAsset(DIRS.shared, rel);
@@ -38,8 +41,8 @@ async function loadByName(name) {
   const byName = await vfxIndex();
   const rel = byName.get(norm) || [...byName.keys()].filter((n) => n.startsWith(norm + '_')).map((n) => byName.get(n))[0];
   const bytes = rel ? await fetchRel(rel) : null;
-  const out = bytes ? { bytes, texByMatPid: await vfxMaterials.forPrefab(norm, rel) } : null;
-  _cache.set(norm, out);
+  const out = bytes ? { bytes, texByMatPid: await vfxMaterialDeps.forPrefab(norm, rel, bytes) } : null;
+  if (out) _cache.set(norm, out);
   return out;
 }
 
@@ -49,5 +52,4 @@ const loadVfxByKey = (key) => loadByName(key);
 export const vfxAssets = {
   loadVfxByCode,
   loadVfxByKey,
-  VFX_NAME_BY_CODE,
 };

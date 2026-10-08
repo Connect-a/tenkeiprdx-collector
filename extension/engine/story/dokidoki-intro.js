@@ -1,5 +1,6 @@
 import { readSharedBgmUrl, fadeAudio } from './story-audio.js';
 import { scenarioUi } from './scenario-ui.js';
+import { noteFailure } from '../../core/failures.js';
 
 export const DOKIDOKI_EPISODE_ID = 2300101;
 const BGM_FADE_IN = 0.5;
@@ -12,6 +13,7 @@ async function readSharedCanvas(rel) {
     const sp = pack.get('bg_eventstill_2093') || Object.values(pack.sprites || {})[0];
     return sp && sp.canvas ? sp.canvas : null;
   } catch (e) {
+    noteFailure('ドキドキ導入', '背景取得', e);
     return null;
   }
 }

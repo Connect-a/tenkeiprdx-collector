@@ -1,6 +1,8 @@
-import { DIRS } from '../core/dirs.js';
+import { DIRS, FOLDER_PARENTS } from '../core/dirs.js';
+import { fileStore } from '../core/fsdir.js';
+import { noteFailure } from '../core/failures.js';
 import { assetStore, AREA } from './asset-store.js';
-import { subFor } from '../core/assetpath/placement.js';
+import { subFor, CHAR_DIR, isFileFor } from '../core/assetpath/placement.js';
 import { bundleName } from '../core/assetpath/paths.js';
 import { staticsList } from './statics.js';
 import { TITLE_AA_CACHE, LOGO_AA_CACHE, TITLE_SPRITE_NAMES, LOGO_SPRITE_NAMES } from './credits-assets.js';
@@ -11,6 +13,7 @@ import { ensureIndexes } from './index-store.js';
 import { assetRefs } from './asset-refs.js';
 
 const resolveVariationMaterial = assetRefs.resolveVariationMaterial;
+const variationsOf = assetRefs.variationsOf;
 
 function weaponOwners(x) {
   const out = new Map();
@@ -38,22 +41,24 @@ function unlistedMonsters(x) {
   const ai = x.assets.assetIndex || {};
   const known = new Set((x.master.monsterMaster || []).map((e) => e.id));
   const battle = x.master.battleByModel || {};
+  const lookByAsset = x.master.lookByAsset || {};
   const nameSelf = x.master.nameByModel || {};
   const nameBase = x.master.nameByBaseModel || {};
   const out = [];
   for (const [id, a] of Object.entries(ai)) {
     if (String(id)[0] !== '2' || known.has(id) || (a.model || []).length) continue;
     if (!((a.spine || []).length || (a.spinelight || []).length || (a.monstericon || []).length || (a.battleicon || []).length)) continue;
+    const look = lookByAsset[String(id)] || {};
     const b = battle[id] || {};
     out.push({
       id: String(id),
       speciesId: String(id),
-      baseModel: String(id),
+      baseModel: look.model || String(id),
       name: nameSelf[id] || nameBase[id] || '',
-      variation: b.variation || 'Default',
-      scale: b.scale || 1,
-      attachments: b.attachments,
-      weapons: b.weapons,
+      variation: look.variation || b.variation || 'Default',
+      scale: look.scale || b.scale || 1,
+      attachments: look.attachments != null ? look.attachments : b.attachments,
+      weapons: look.weapons || b.weapons,
       likes: '',
       dislikes: '',
       desc: '',
@@ -149,7 +154,6 @@ export async function otherList() {
     const materials = a.materials || [];
     const wcfg = (battle[modelId] && battle[modelId].weapons) || (chars[modelId] && chars[modelId].weapons) || null;
     const weapons = wcfg ? resolveWeapons(wcfg) : [];
-    const humanoid = weapons.length > 0 || category === 'boss' || category === 'ally';
     return {
       id: dispId,
       modelId,
@@ -163,10 +167,11 @@ export async function otherList() {
       model: (a.model || [])[0] || null,
       material: resolveVariationMaterial(matVar, modelId, variation || 'Default', materials),
       materials,
+      materialVariants: variationsOf(matVar, modelId, materials),
       icon: (a.monstericon || [])[0] || null,
       battleIcon: (a.battleicon || [])[0] || null,
       weapons,
-      mouth: humanoid ? mouthRel : null,
+      mouth: mouthRel,
       meshDeps: modelDeps[modelId] || [],
     };
   };
@@ -195,6 +200,102 @@ export async function otherList() {
     else out.push(entry({ dispId: id, modelId: id, category: 'misc' }));
   }
   return out;
+}
+
+const charFolderHandle = async (id) => {
+  try {
+    const hit = (await fileStore.listFolderDirs()).find((d) => d.parent === FOLDER_PARENTS.character && String(d.folderKey) === String(id));
+    return hit ? hit.handle : null;
+  } catch (e) {
+    noteFailure('キャラ資産', 'キャラフォルダの一覧', e);
+    return null;
+  }
+};
+
+export async function fbxSlotAssets(slot) {
+  const modelId = String((slot && slot.modelId) || '');
+  if (!modelId) return null;
+  const x = await ensureIndexes();
+  const ai = x.assets.assetIndex || {};
+  const matVar = x.meta.matVariation || {};
+  const modelDeps = x.meta.modelDeps || {};
+  const chars = x.master.characters || {};
+  const battle = x.master.battleByModel || {};
+  const parse = (s) => {
+    if (!s) return null;
+    try {
+      return JSON.parse(s);
+    } catch (e) {
+      return null;
+    }
+  };
+  const cfg = parse(slot.modelCfg) || {};
+  const wcfg = parse(slot.weaponCfg);
+  const a = ai[modelId] || {};
+  const model = (a.model || [])[0] || null;
+  if (!model) return null;
+  const materials = a.materials || [];
+  const base = battle[modelId] || chars[modelId] || {};
+  const variation = cfg.Variation || base.variation || 'Default';
+  const attachNums = Array.isArray(cfg.Attachments) ? cfg.Attachments.map((n) => Number(n)).filter((n) => n > 0) : null;
+  const weapons = [];
+  for (const w of Array.isArray(wcfg) ? wcfg : []) {
+    const wid = String(w.WeaponId || '');
+    const wa = ai[wid] || {};
+    const wmodel = (wa.model || [])[0] || null;
+    if (!wmodel) continue;
+    const ac = w.AssetConfiguration || {};
+    const wmat = resolveVariationMaterial(matVar, wid, ac.Variation || 'Default', wa.materials || []);
+    weapons.push({ id: wid, model: wmodel, materials: wmat, deps: (modelDeps[wid] || []).filter((r) => r !== wmodel && r !== wmat), slot: w.Slot || 'wp_2', scale: Number(ac.Scale) || 1 });
+  }
+  const modelBase = {
+    modelId,
+    variation,
+    scale: Number(cfg.Scale) || Number(base.scale) || 1,
+    attachments: attachNums && attachNums.length ? attachNums : base.attachments,
+    attachmentColors: (chars[modelId] || {}).attachmentColors,
+  };
+  if (await assetStore.hasIn(AREA.other, model))
+    return {
+      ...modelBase,
+      source: 'other',
+      read: (rel) => assetStore.readIn(AREA.other, rel),
+      model,
+      material: resolveVariationMaterial(matVar, modelId, variation, materials),
+      materials,
+      meshDeps: modelDeps[modelId] || [],
+      weapons,
+    };
+  const handle = await charFolderHandle(modelId);
+  if (!handle) return null;
+  const models = await fileStore.listUnder(handle, CHAR_DIR.visual('model'));
+  if (!models.length) return null;
+  const mats = await fileStore.listUnder(handle, CHAR_DIR.visual('materials'));
+  const wfiles = await fileStore.listUnder(handle, CHAR_DIR.weapon);
+  const matRel = resolveVariationMaterial(matVar, modelId, variation, materials);
+  const matPick = matRel ? mats.find((n) => isFileFor(matRel, n)) || null : null;
+  const charWeapons = [];
+  for (const w of weapons) {
+    const mf = wfiles.find((f) => f.startsWith(w.id + '_model.'));
+    if (!mf) continue;
+    const tf = wfiles.find((f) => f.startsWith(w.id + '_mat.'));
+    charWeapons.push({
+      ...w,
+      model: CHAR_DIR.weapon + '/' + mf,
+      materials: tf ? CHAR_DIR.weapon + '/' + tf : null,
+      deps: wfiles.filter((f) => f.startsWith(w.id + '_dep')).map((f) => CHAR_DIR.weapon + '/' + f),
+    });
+  }
+  return {
+    ...modelBase,
+    source: 'char',
+    read: (sub) => fileStore.readBytesUnder(handle, sub),
+    model: CHAR_DIR.visual('model') + '/' + models[0],
+    material: matPick ? CHAR_DIR.visual('materials') + '/' + matPick : null,
+    materials: [],
+    meshDeps: [],
+    weapons: charWeapons,
+  };
 }
 
 const MONSTER_ICON_CATS = ['monstericon', 'battleicon', 'icon', 'iconlight', 'spine', 'spinelight'];
@@ -259,8 +360,15 @@ export async function monsterList() {
       push('model', altModel, altId);
       for (const rel of altMaterials) push('materials', rel, altId);
       for (const rel of modelDeps[altId] || []) push('meshdep', rel, altId);
+      for (const cat of MONSTER_ICON_CATS) for (const rel of (ai[altId] || {})[cat] || []) push(cat, rel, altId);
       const battle = x.master.battleByModel[altId] || {};
-      altModels.push({ id: altId, model: altModel, materials: altMaterials, material: resolveMat(altId, battle.variation, altMaterials), meshDeps: modelDeps[altId] || [] });
+      altModels.push({
+        id: altId,
+        model: altModel,
+        materials: altMaterials,
+        material: resolveMat(altId, battle.variation, altMaterials),
+        meshDeps: modelDeps[altId] || [],
+      });
     }
 
     const item = em.awakenItemId ? itemById[em.awakenItemId] : null;

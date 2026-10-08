@@ -6,9 +6,9 @@ import { charAssets } from '../../data/char-assets.js';
 import { DIRS } from '../../core/dirs.js';
 import { assetAcquirer } from '../../data/acquire/acquire-assemble.js';
 import { errText } from '../../core/messages.js';
-import { splitLayout, clearView, entryCard, viewHeader, downloadBar, noteRow } from '../ui/panel-shell.js';
-import { bundleName } from '../../core/assetpath/paths.js';
+import { splitLayout, clearView, entryCard, viewHeader, acquireBar, noteRow } from '../ui/panel-shell.js';
 import { el } from '../../core/dom.js';
+import { noteFailure } from '../../core/failures.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { buildIndexes } from '../../data/build-indexes.js';
 import { createSkillFxView } from '../views/skillfx-view.js';
@@ -40,6 +40,7 @@ export function createOtherPanel(deps) {
     try {
       idx = await ensureIndexes();
     } catch (e) {
+      noteFailure('その他3D', '共通スキル索引', e);
       console.warn('[tp] 索引を読めませんでした', e);
     }
     for (const id of Object.keys((idx && idx.master.charSkills) || {})) {
@@ -76,7 +77,7 @@ export function createOtherPanel(deps) {
       return;
     }
     try {
-      await _skillFx.render([e], body, { dir: DIRS.shared });
+      await _skillFx.render([e], body, { dir: DIRS.shared, loadFbx });
     } catch (er) {
       noteRow(body, 'エフェクトを表示できませんでした。' + errText(er));
     }
@@ -87,21 +88,15 @@ export function createOtherPanel(deps) {
   }
 
   async function render(grid) {
-    let list = [];
-    try {
-      list = await collectionRepository.otherList();
-    } catch (e) {}
-    let status = null;
-    try {
-      status = await collectionRepository.other3dStatus(list);
-    } catch (e) {}
+    let list = await collectionRepository.otherList();
+    let status = await collectionRepository.other3dStatus(list);
     _have = (status && status.have) || new Set();
     await loadSharedFx();
     const sig = list.length + ':' + (status ? status.ready + '/' + status.total : '') + ':' + _fx.length + '/' + _fxHave.size + ':' + list.map((e) => e.id).join(',');
     if (_listSig === sig && grid.querySelector('.otherlayout')) return;
     _listSig = sig;
     _model3d = disposeModel3d(_model3d);
-    _skillFx.dispose();
+    _skillFx.reset();
     grid.innerHTML = '';
     if (!list.length) {
       grid.appendChild(el('div', 'emptyrow', 'その他の3Dデータがありません。「索引を作り直す」を実行してからやり直してください。'));
@@ -155,19 +150,15 @@ export function createOtherPanel(deps) {
   }
 
   function dlBar(status) {
-    return downloadBar({
+    return acquireBar({
       text: `3Dデータ未取得 ${status.missing.length}件（表示できるのは ${status.ready}/${status.models}体）`,
       label: 'その他3Dをダウンロード',
-      run: async (onProgress) => {
-        try {
-          const r = await assetAcquirer.runOther3dDownload(onProgress);
-          toast(`その他3Dを取得しました（新規${r.got}件・失敗${r.failed}件／全${r.total}件）`, r.failed ? 'err' : 'ok');
-          _listSig = '';
-          const grid = getById('rosterGrid');
-          if (grid) await render(grid);
-        } catch (e) {
-          onProgress(errText(e));
-        }
+      acquire: (onProgress) => assetAcquirer.runOther3dDownload(onProgress),
+      done: async (r) => {
+        toast(`その他3Dを取得しました（新規${r.got}件・失敗${r.failed}件／全${r.total}件）`, r.failed ? 'err' : 'ok');
+        _listSig = '';
+        const grid = getById('rosterGrid');
+        if (grid) await render(grid);
       },
     });
   }
@@ -183,7 +174,7 @@ export function createOtherPanel(deps) {
   async function openModel(e) {
     const host = getById('otherView');
     if (!host) return;
-    _skillFx.dispose();
+    _skillFx.reset();
     host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     if (!collectionRepository.other3dReady(e, _have)) {
       host.innerHTML = '<div class="note" style="padding:8px">この3Dデータはまだダウンロードされていません。上の「その他3Dをダウンロード」から取得してください。</div>';
@@ -198,13 +189,13 @@ export function createOtherPanel(deps) {
         host.innerHTML = '<div class="note" style="padding:8px">3Dモデルのデータを読み込めませんでした。「その他3Dをダウンロード」でやり直してください。</div>';
         return;
       }
-      let matBundle = await charAssets.loadMaterialBundle(grab, matRel);
+      let matBundle = await charAssets.loadMaterialBundle(grab, matRel, e.materials);
       const weapons = await charAssets.buildWeapons(grab, e.weapons);
       const mouthAtlas = e.mouth ? await grabMouth(e.mouth) : null;
       host.innerHTML = '';
       const catLabel = (CATEGORY.find((c) => c.key === e.category) || {}).label || '';
       host.appendChild(viewHeader(`${e.name || '#' + e.id}　#${e.id}　[${catLabel}]`, _ordered, e, openModel));
-      const variants = (e.materials || []).filter((rel) => _have.has(assetStore.idOf(rel)));
+      const variants = (e.materialVariants || []).filter((mv) => _have.has(assetStore.idOf(mv.material)));
       if (variants.length > 1) {
         const sel = el(
           'select',
@@ -212,12 +203,12 @@ export function createOtherPanel(deps) {
             class: 'rgsel',
             on: {
               change: async () => {
-                matBundle = await charAssets.loadMaterialBundle(grab, sel.value);
+                matBundle = await charAssets.loadMaterialBundle(grab, sel.value, e.materials);
                 paint();
               },
             },
           },
-          variants.map((rel) => el('option', { value: rel, text: bundleName(rel) })),
+          variants.map((mv) => el('option', { value: mv.material, text: mv.label })),
         );
         if (matRel) sel.value = matRel;
         host.appendChild(el('div', 'enemyvarrow', [el('span', 'note dim', `見た目（${variants.length}種）`), sel]));
@@ -247,22 +238,47 @@ export function createOtherPanel(deps) {
     return assetStore.readIn(AREA.other, rel);
   }
 
+  async function loadFbx(slot) {
+    const s = await collectionRepository.fbxSlotAssets(slot);
+    if (!s) return null;
+    const model = await charAssets.loadModelBundle(s.read, s.model, s.meshDeps);
+    if (!model) return null;
+    const matBundle = await charAssets.loadMaterialBundle(s.read, s.material, s.materials);
+    const weapons = s.weapons.length ? await charAssets.buildWeapons(s.read, s.weapons) : null;
+    const renderer = await loadModel3d();
+    const opts = charAssets.build3dOptions({ mouthAtlas: null, weapons: weapons && weapons.length ? weapons : null }, { attachments: s.attachments, attachmentColors: s.attachmentColors }, { mainLight: charAssets.BATTLE_MAIN_LIGHT });
+    const built = renderer.buildInstance(model, matBundle, opts);
+    if (!built || !built.ok) return null;
+    if (built.update)
+      try {
+        built.update(0);
+      } catch (e) {
+        noteFailure('スキル演出', 'VFX付属モデルの初期姿勢', e);
+      }
+    built.cfgScale = s.scale;
+    const rawSetClip = built.setClip;
+    if (rawSetClip) built.setClip = (nm) => rawSetClip.call(built, nm, true);
+    return built;
+  }
+
   async function grabMouth(rel) {
     if (!rel) return null;
-    if (_mouthCache.has(rel)) return _mouthCache.get(rel);
+    if (_mouthCache.get(rel)) return _mouthCache.get(rel);
     let atlas = null;
     try {
       const b = await grab(rel);
       if (b) atlas = MESH_MOD.parseMouthAtlas(b);
-    } catch (e) {}
-    _mouthCache.set(rel, atlas);
+    } catch (e) {
+      noteFailure('その他3D', '口アトラスの解析', e);
+    }
+    if (atlas) _mouthCache.set(rel, atlas);
     return atlas;
   }
 
   function reset() {
     clearView('otherView', 'カードを選ぶとここに3D表示');
     _model3d = disposeModel3d(_model3d);
-    _skillFx.dispose();
+    _skillFx.reset();
     _listSig = '';
   }
 

@@ -103,15 +103,11 @@ export async function init() {
   const letterPanel = createLetterPanel({
     ...ctx,
     onDistUpdated: async () => {
-      try {
-        playerState.binlistScenes = await assetAcquirer.binlistSceneSet({ force: true });
-      } catch (e) {}
+      playerState.binlistScenes = await assetAcquirer.binlistSceneSet({ force: true });
       if (playerState.rosterOpen) renderRoster();
     },
     onDistCleared: async () => {
-      try {
-        playerState.binlistScenes = await assetAcquirer.clearBinlistScenes();
-      } catch (e) {}
+      playerState.binlistScenes = await assetAcquirer.clearBinlistScenes();
       if (playerState.rosterOpen) renderRoster();
     },
   });

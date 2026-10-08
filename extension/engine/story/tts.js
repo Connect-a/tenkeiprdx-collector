@@ -1,3 +1,4 @@
+import { noteFailure } from '../../core/failures.js';
 const MIN_REAL_MS = 350;
 
 export function createTts({ getCurrentText, masterVol }) {
@@ -11,6 +12,7 @@ export function createTts({ getCurrentText, masterVol }) {
     try {
       return (s.getVoices() || []).find((v) => /ja(-|_)?JP/i.test(v.lang) || /japanese/i.test(v.name)) || null;
     } catch (e) {
+      noteFailure('読み上げ', '音声選択', e);
       return null;
     }
   };

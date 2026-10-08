@@ -24,5 +24,5 @@ export function createAudioPanel(deps) {
     applyMasterVolume();
   }
 
-  return { bind, initFromStorage, setMasterVolume: (v) => settings.set('masterVolume', v), onTabSwitched: voiceOut.stop };
+  return { bind, initFromStorage, onTabSwitched: voiceOut.stop };
 }

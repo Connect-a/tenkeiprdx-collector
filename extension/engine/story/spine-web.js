@@ -1,5 +1,6 @@
 import { observeVisibility } from '../../core/visibility.js';
 import { spineAtlas } from '../../unity/spine-atlas.js';
+import { noteFailure } from '../../core/failures.js';
 const TINY_PNG_BYTES = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
 const utf8 = new TextDecoder('utf-8');
 const DEFAULT_MIX = 0.12;
@@ -88,7 +89,9 @@ const startDefaultIdle = (player) => {
     const names = anims.map((a) => a.name);
     const pick = names.includes('idle_normal') ? 'idle_normal' : names.find((n) => /idle/i.test(n)) || names[0];
     if (pick) player.animationState.setAnimation(0, pick, true);
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('Spine再生', '既定アニメ', e);
+  }
 };
 
 const runtimeReady = () => {
@@ -152,7 +155,9 @@ const buildPlayable = (host, input, opts) => {
       if (o.onReady) {
         try {
           o.onReady(player);
-        } catch (e) {}
+        } catch (e) {
+          noteFailure('Spine再生', '準備完了処理', e);
+        }
       } else startDefaultIdle(player);
     },
     error: (player, err) => {
@@ -163,7 +168,9 @@ const buildPlayable = (host, input, opts) => {
       if (o.onError) {
         try {
           o.onError(msg, player);
-        } catch (e) {}
+        } catch (e) {
+          noteFailure('Spine再生', 'エラー通知', e);
+        }
       }
       try {
         player && player.dispose && player.dispose();
@@ -209,7 +216,7 @@ const buildPlayable = (host, input, opts) => {
     if (prevDispose) return prevDispose();
   };
   gateByVisibility(player, host);
-  return { player, isJson };
+  return { player };
 };
 
 const gateByVisibility = (player, host) => {
@@ -231,4 +238,4 @@ const gateByVisibility = (player, host) => {
   };
 };
 
-export const spineWeb = { lib, runtimeReady, buildPlayable, buildAtlas, buildSkeleton, startDefaultIdle, makeRawGLTexture, detectSkeletonIsJson, patchStaleDeformOnce };
+export const spineWeb = { lib, runtimeReady, buildPlayable, buildSkeleton, startDefaultIdle, makeRawGLTexture, patchStaleDeformOnce };

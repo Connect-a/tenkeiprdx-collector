@@ -1,6 +1,7 @@
 import { unityMesh } from '../../unity/mesh.js';
 import { ensureIndexes } from '../../data/index-store.js';
 import { scenarioUi } from './scenario-ui.js';
+import { noteFailure } from '../../core/failures.js';
 
 export function createStoryBg({ readBundle, getEp, getGen }) {
   const cache = new Map();
@@ -9,6 +10,7 @@ export function createStoryBg({ readBundle, getEp, getGen }) {
     try {
       return unityMesh.decodeLargestTextureCanvas(bytes);
     } catch (e) {
+      noteFailure('ストーリー背景', 'テクスチャデコード', e);
       return null;
     }
   };
@@ -24,7 +26,9 @@ export function createStoryBg({ readBundle, getEp, getGen }) {
       if (b) {
         try {
           cv = decodeCanvas(b);
-        } catch (e) {}
+        } catch (e) {
+          noteFailure('ストーリー背景', 'エピソード背景', e);
+        }
       }
     }
     if (!cv) {
@@ -35,7 +39,9 @@ export function createStoryBg({ readBundle, getEp, getGen }) {
           const sp = pack && (pack.get(bgId) || Object.values(pack.sprites || {})[0]);
           if (sp && sp.canvas) cv = sp.canvas;
         }
-      } catch (e) {}
+      } catch (e) {
+        noteFailure('ストーリー背景', '共有背景', e);
+      }
     }
     if (cv) cache.set(bgId, cv);
     return cv;

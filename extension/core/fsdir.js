@@ -1,6 +1,7 @@
 import { idbStore } from './idb.js';
 import { DIRS, FOLDER_PARENTS } from './dirs.js';
 import { pool } from './async.js';
+import { noteFailure } from './failures.js';
 const DIR_HANDLE_KEY = 'homeDir';
 const supported = typeof self !== 'undefined' && 'showDirectoryPicker' in self;
 let _handle = null;
@@ -169,6 +170,17 @@ async function saveStream(dirHandle, subpath, body) {
   return subpath;
 }
 async function purgeEmptyIn(dirHandle, subdirs) {
+  if (!dirHandle) return 0;
+  try {
+    let hasAny = false;
+    for await (const _e of dirHandle.entries()) {
+      hasAny = true;
+      break;
+    }
+    if (!hasAny) return 0;
+  } catch (e) {
+    return 0;
+  }
   let n = 0;
   for (const sub of subdirs || []) {
     try {
@@ -326,7 +338,9 @@ async function totalSize(dirHandle, onProgress) {
           if (e.kind === 'directory') next.push(e);
           else if (e.kind === 'file') handles.push(e);
         }
-      } catch (er) {}
+      } catch (er) {
+        noteFailure('ファイル保存', '容量集計のディレクトリ', er);
+      }
     });
     level = next;
   }
@@ -336,7 +350,9 @@ async function totalSize(dirHandle, onProgress) {
       acc.bytes += n;
       acc.files++;
       if (onProgress && acc.files % 500 === 0) onProgress(acc);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('ファイル保存', '容量集計のファイル', e);
+    }
   });
   return acc;
 }
@@ -404,7 +420,9 @@ async function walkBundles(dirHandle, prefix, out, depth) {
         if (/\.bundle$/i.test(name)) out.push(rel);
       } else if (entry.kind === 'directory') await walkBundles(entry, rel, out, depth + 1);
     }
-  } catch (e) {}
+  } catch (e) {
+    noteFailure('ファイル保存', 'bundle探索のサブツリー', e);
+  }
   return out;
 }
 export const fileStore = {

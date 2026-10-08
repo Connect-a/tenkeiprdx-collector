@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { model3dLib } from '../../engine/render/model3d-lib.js';
+import { model3dLib } from '../../engine/render/model/model3d-lib.js';
 import { updateFieldUniforms, seedFieldShadowSamplers } from '../../engine/render/field-shader.js';
 import { LAYER_FIELD_SHADOW } from './viewer-stage-shadow.js';
 
@@ -12,7 +12,6 @@ export function createFieldPass(renderer, scene, camera, deps) {
   let mats = [];
   let transparent = [];
   let fogUniforms = [];
-  let rtUniforms = [];
   let rt = null;
 
   function dropRT() {
@@ -37,7 +36,6 @@ export function createFieldPass(renderer, scene, camera, deps) {
     adopt(group, r) {
       mats = r.fieldMats || [];
       fogUniforms = r.fogUniforms || [];
-      rtUniforms = r.rtUniforms || [];
       postPass.setBloomOverride(r.bloom || null);
       transparent = [];
       group.traverse((o) => {
@@ -55,7 +53,6 @@ export function createFieldPass(renderer, scene, camera, deps) {
       mats = [];
       transparent = [];
       fogUniforms = [];
-      rtUniforms = [];
       postPass.setBloomOverride(null);
     },
     render(clock) {
@@ -72,13 +69,11 @@ export function createFieldPass(renderer, scene, camera, deps) {
         o.visible = false;
         hidden.push(o);
       }
-      for (const u of rtUniforms) u.uTpEncode.value = 0;
       renderer.setRenderTarget(rt);
       renderer.clear();
       renderer.render(scene, camera);
       renderer.setRenderTarget(null);
       for (const o of hidden) o.visible = true;
-      for (const u of rtUniforms) u.uTpEncode.value = 1;
       updateFieldUniforms(mats, THREE, { camera, time: clock, width: size.x, height: size.y, opaque: rt.texture, depth: rt.depthTexture, shadow: shadows.field, charShadow: shadows.char });
     },
     present() {

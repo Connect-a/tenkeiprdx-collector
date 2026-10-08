@@ -3,6 +3,7 @@ import { DL_CONC, FAIL_CAP, MISS_STREAK_CAP } from './limits.js';
 import { pool, safeProgress } from '../../core/async.js';
 import { assetStore } from '../asset-store.js';
 import { networkClient } from '../network.js';
+import { noteFailure } from '../../core/failures.js';
 const { assetRoot } = networkClient;
 
 async function ensureDlDir(dirKey) {
@@ -40,7 +41,9 @@ export async function runBulkDownload(items, opts) {
     prog(`確認中 0/${total}`, 0, ctx);
     try {
       present = await assetStore.presentIds(dirKey, specs);
-    } catch (e) {}
+    } catch (e) {
+      noteFailure('一括取得', '既存確認', e);
+    }
   }
   const grab = async (item) => {
     const rel = toRel(item);

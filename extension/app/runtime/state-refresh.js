@@ -92,9 +92,7 @@ export async function refreshLists(parts = ['fs', 'owned', 'binlist', 'dl'], opt
 
   if (parts.includes('owned')) {
     if (playerState.fsGranted) {
-      try {
-        playerState.owned = await userStateService.ownedLevels();
-      } catch (e) {}
+      playerState.owned = await userStateService.ownedLevels();
     } else {
       playerState.owned = new Map();
     }
